@@ -14,6 +14,7 @@ import { settings, ELEMENTS } from '../src/config/settings.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
+import { CombatSystem } from '../src/run/CombatSystem.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -138,6 +139,62 @@ import { EnemySystem } from '../src/run/EnemySystem.js';
   for (let n = 0; n < 300; n++) assert.ok(enemies.spawnAt(n * 0.1, 0, 0) >= 0);
   assert.equal(enemies.spawnAt(0, 0, 0), -1, 'enemies: hard cap holds');
   console.log('ok  enemy system');
+}
+
+/* ---- combat: the shape table drives targets calls ---- */
+{
+  const calls = [];
+  const fakeTargets = {
+    damageOnce: (id, p, r, amt) => (calls.push(['once', p.x.toFixed(1), amt]), 1),
+    damage: (p, r, amt) => (calls.push(['dmg', amt]), 1),
+    slow: (p, r, f, d) => calls.push(['slow', f])
+  };
+  const combat = new CombatSystem(fakeTargets);
+
+  // A travelling ice sweep: damage rides the front, slow rides behind it.
+  const ice = {
+    element: 'ice', phase: 'travel', age: 0.2,
+    position: { x: 3, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 8, u: 0.4
+  };
+  combat.tick(1 / 60, [ice]);
+  assert.ok(calls.some(([k]) => k === 'once'), 'combat: sweep deals damageOnce at the front');
+  assert.ok(calls.some(([k]) => k === 'slow'), 'combat: ice applies its slow');
+
+  // A holding beam ticks dps along the whole line, budgeted per tick.
+  // One second of ticks must sum to ≈ the configured dps (3 samples of
+  // (dps/3)·step each), so the anchor is the dps itself: 60.
+  calls.length = 0;
+  const beam = {
+    element: 'beam', phase: 'impact', age: 0.5, impactTime: 0.2,
+    position: { x: 8, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 8, u: 1
+  };
+  for (let t = 0; t < 60; t++) combat.tick(1 / 60, [beam]);
+  const total = calls.filter(([k]) => k === 'dmg').reduce((s, [, amt]) => s + amt, 0);
+  assert.ok(Math.abs(total - 60) < total * 0.35, `combat: beam dps budget ≈ dps (got ${total.toFixed(0)})`);
+
+  // A burst detonates exactly once per cast, however many fixed ticks observe
+  // the impact phase (60Hz logic under a variable render rate). Burn ticks may
+  // land beside it — only the full-damage call counts as the detonation.
+  let detonations = 0;
+  const countTargets = {
+    damageOnce: () => 1,
+    damage: (p, r, amt) => (amt === settings.combat.meteor.damage && detonations++, 1),
+    slow: () => {}
+  };
+  const burstCombat = new CombatSystem(countTargets);
+  const meteor = {
+    element: 'meteor', phase: 'impact', age: 1.0,
+    position: { x: 2, z: 2 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 10, u: 1, impactTime: 0
+  };
+  for (let t = 0; t < 10; t++) {
+    meteor.impactTime += 1 / 60;
+    burstCombat.tick(1 / 60, [meteor]);
+  }
+  assert.equal(detonations, 1, 'combat: burst detonates exactly once per cast');
+  console.log('ok  combat shapes');
 }
 
 console.log('\nevery game-logic check passed');

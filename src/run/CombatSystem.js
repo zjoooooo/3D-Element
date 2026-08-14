@@ -1,0 +1,131 @@
+// src/run/CombatSystem.js
+import { settings } from '../config/settings.js';
+
+/**
+ * Reads live ability state each tick and turns it into targets calls (spec §3).
+ *
+ * Abilities stay pure VFX — their public state (origin, direction, front
+ * position, phase) already says where the danger is, and this table says what
+ * that danger does. One WeakMap hands every cast a stable id so sweeps can
+ * hit each enemy exactly once per cast.
+ *
+ * Beam's line damage is sampled at three points along the segment
+ * (start / middle / front) rather than a true capsule test.
+ * ponytail: 3-point sampling reads identically at beam width; a segment
+ * distance query replaces it if a wide-line ability ever misses visibly.
+ */
+const LINE_SAMPLES = 3;
+
+export class CombatSystem {
+  constructor(targets) {
+    this.targets = targets;
+    this._castIds = new WeakMap();
+    this._nextCast = 1;
+    // Both keyed by numeric castId, so plain Map/Set — a WeakMap rejects
+    // primitives. Entries are dropped via release() when a cast finishes.
+    this._tickBudget = new Map(); // per-cast dot accumulator
+    this._detonated = new Set(); // castIds whose burst already went off
+    this._p = { x: 0, z: 0 }; // scratch point, reused — no allocs per tick
+  }
+
+  _castKey(ability) {
+    let id = this._castIds.get(ability);
+    if (id === undefined || ability.u < 0.001) {
+      // A pooled ability object reused for a new cast gets a fresh id the
+      // moment its front is back at the start.
+      id = this._nextCast++;
+      this._castIds.set(ability, id);
+    }
+    return id;
+  }
+
+  /** Forget a finished cast: budget, detonation memory, and hand back its id. */
+  release(ability) {
+    const id = this._castIds.get(ability);
+    if (id === undefined) return -1;
+    this._tickBudget.delete(id);
+    this._detonated.delete(id);
+    return id;
+  }
+
+  tick(step, active) {
+    for (const ability of active) {
+      const c = settings.combat[ability.element];
+      if (!c || c.kind === 'self') continue;
+      const castId = this._castKey(ability);
+
+      switch (c.kind) {
+        case 'sweep': {
+          if (ability.phase !== 'travel') break;
+          this.targets.damageOnce(castId, ability.position, c.width, c.damage);
+          if (c.slowFactor) {
+            this.targets.slow(ability.position, c.width * 1.5, c.slowFactor, c.slowTime);
+          }
+          break;
+        }
+
+        case 'burst': {
+          // One detonation per cast. A phase-window gate double-fires here:
+          // abilities advance on the render frame while this runs at a fixed
+          // 60Hz, so any time window is seen once per queued tick, not once.
+          // The per-cast Set fires it exactly once — on 'fade' too, since a
+          // stalled frame can jump clean past 'impact'.
+          if (
+            (ability.phase === 'impact' || ability.phase === 'fade') &&
+            !this._detonated.has(castId)
+          ) {
+            this._detonated.add(castId);
+            const radius = c.radius ?? settings[ability.element].zoneRadius ?? 2;
+            this.targets.damage(ability.position, radius, c.damage);
+            if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
+          }
+          // Meteor's lava keeps burning through the fade. Flush inline — a
+          // callback here would allocate a closure every tick.
+          if (c.burnDps && (ability.phase === 'impact' || ability.phase === 'fade')) {
+            if (this._dot(castId, step, c.burnDps)) {
+              this.targets.damage(ability.position, c.radius, this._take(castId));
+            }
+          }
+          break;
+        }
+
+        case 'lineTick': {
+          if (ability.phase === 'idle' || ability.phase === 'done') break;
+          const perSecond = c.dps / LINE_SAMPLES;
+          for (let s = 1; s <= LINE_SAMPLES; s++) {
+            const t = (s / LINE_SAMPLES) * ability.u;
+            this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
+            this._p.z = ability.origin.z + ability.direction.z * ability.length * t;
+            this.targets.damage(this._p, c.width, perSecond * step);
+          }
+          break;
+        }
+
+        case 'zoneTick': {
+          if (ability.phase === 'idle' || ability.phase === 'done') break;
+          const radius = settings[ability.element].zoneRadius ?? 2;
+          this.targets.damage(ability.position, radius, c.dps * step);
+          if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, 0.4);
+          break;
+        }
+
+        default:
+          break;
+      }
+    }
+  }
+
+  /* Accumulate fractional dot damage so tiny per-tick amounts still land.
+     Returns true when a full point is banked — caller flushes via _take. */
+  _dot(castId, step, dps) {
+    const acc = (this._tickBudget.get(castId) ?? 0) + dps * step;
+    this._tickBudget.set(castId, acc);
+    return acc >= 1;
+  }
+
+  _take(castId) {
+    const acc = this._tickBudget.get(castId) ?? 0;
+    this._tickBudget.set(castId, 0);
+    return acc;
+  }
+}
