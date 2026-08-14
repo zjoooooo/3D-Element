@@ -179,6 +179,30 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.ok(calls.some(([k]) => k === 'once'), 'combat: sweep deals damageOnce at the front');
   assert.ok(calls.some(([k]) => k === 'slow'), 'combat: ice applies its slow');
 
+  // No tunneling: the front's position advances per render frame, so one tick
+  // can observe a jump far past the sweep width. Every point of the jumped
+  // segment must still be covered — an enemy 4m along a 0→8m jump sits well
+  // inside some sample's width even though no single observation was near it.
+  {
+    const seen = [];
+    const seg = new CombatSystem({
+      damageOnce: (id, p, r) => (seen.push(p.x), 0),
+      damage: () => 0,
+      slow: () => {}
+    });
+    const jumpy = {
+      element: 'ice', phase: 'travel', age: 0.3,
+      position: { x: 8, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 8, u: 1 // front leapt 0→8m in one look
+    };
+    seg.tick(1 / 60, [jumpy]);
+    const width = settings.combat.ice.width;
+    assert.ok(
+      seen.some((x) => Math.abs(x - 4) <= width),
+      'combat: a sweep samples the segment it travelled, not just the front'
+    );
+  }
+
   // A holding beam ticks dps along the whole line, budgeted per tick.
   // One second of ticks must sum to ≈ the configured dps (3 samples of
   // (dps/3)·step each), so the anchor is the dps itself: 60.

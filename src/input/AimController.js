@@ -154,7 +154,12 @@ export class AimController extends EventEmitter {
    */
   quickCast() {
     this._resolve();
-    if (this.shape !== CastShape.ZONE) {
+    // Lines whose damage rides the line (sweeps, beams) fire at full range;
+    // a line whose payload sits at the END point (meteor's burst) keeps the
+    // cursor-resolved distance instead, or the rock always lands well past
+    // whatever you were actually aiming at.
+    const kind = settings.combat[this.element]?.kind;
+    if (this.shape !== CastShape.ZONE && kind !== 'burst') {
       this.distance = Math.max(0.4, this.config.range);
     }
     if (!this.valid && this.shape === CastShape.ZONE) return false;

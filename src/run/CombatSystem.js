@@ -25,6 +25,7 @@ export class CombatSystem {
     // primitives. Entries are dropped via release() when a cast finishes.
     this._tickBudget = new Map(); // per-cast dot accumulator
     this._detonated = new Set(); // castIds whose burst already went off
+    this._sweptU = new Map(); // per-cast u the sweep has been sampled up to
     this._p = { x: 0, z: 0 }; // scratch point, reused — no allocs per tick
   }
 
@@ -46,6 +47,7 @@ export class CombatSystem {
     this._castIds.delete(ability);
     this._tickBudget.delete(id);
     this._detonated.delete(id);
+    this._sweptU.delete(id);
     return id;
   }
 
@@ -58,11 +60,22 @@ export class CombatSystem {
       switch (c.kind) {
         case 'sweep': {
           if (ability.phase !== 'travel') break;
-          // ponytail: at default tuning the front moves ≪ width per tick, but
-          // the live speed/timeScale sliders can push it past width per sample —
-          // a segment sweep test replaces point sampling if fast sweeps ever
-          // visibly skip enemies.
-          this.targets.damageOnce(castId, ability.position, c.width, c.damage);
+          // The front's position only advances on the render frame, so at low
+          // fps (or with the live speed/timeScale sliders up) it can jump past
+          // `width` between two observations and a bolt visually crossing an
+          // enemy deals nothing. Sample the whole segment travelled since the
+          // last look instead of the point where the front happens to be —
+          // damageOnce's per-cast dedup makes overlapping samples free.
+          const from = this._sweptU.get(castId) ?? 0;
+          const stepU = Math.max(0.01, c.width / ability.length);
+          for (let t = from; ; t += stepU) {
+            const u = Math.min(t, ability.u);
+            this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
+            this._p.z = ability.origin.z + ability.direction.z * ability.length * u;
+            this.targets.damageOnce(castId, this._p, c.width, c.damage);
+            if (u >= ability.u) break;
+          }
+          this._sweptU.set(castId, ability.u);
           if (c.slowFactor) {
             this.targets.slow(ability.position, c.width * 1.5, c.slowFactor, c.slowTime);
           }
