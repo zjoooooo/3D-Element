@@ -234,9 +234,8 @@ export class FireballAbility extends Ability {
    * @returns {boolean} true if this frame ended the flight
    */
   _struckSomething() {
-    const dummies = this.ctx.dummies;
-    if (!dummies || this.u >= 1) return false;
-    if (!dummies.hits(this.position, this.config.size)) return false;
+    if (this.u >= 1) return false;
+    if (!this.ctx.targets.hits(this.position, this.config.size)) return false;
 
     this.length = Math.max(0.1, this.front);
     this.u = 1;
@@ -335,7 +334,7 @@ export class FireballAbility extends Ability {
 
     // What it actually does to anything standing there. Kept clear of the global
     // multipliers above on purpose: those are the look, this is the hit.
-    this.ctx.dummies?.damage(_pos, c.damageRadius, c.damage);
+    this.ctx.targets.damage(_pos, c.damageRadius, c.damage);
 
     this.ctx.shake.add(
       c.impactShake * g.explosionIntensity * g.cameraShake,

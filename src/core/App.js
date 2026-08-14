@@ -10,6 +10,7 @@ import { Ground } from '../world/Ground.js';
 import { DustMotes } from '../world/DustMotes.js';
 import { ContactShadows } from '../world/ContactShadows.js';
 import { TrainingDummies } from '../world/TrainingDummies.js';
+import { Targets } from '../run/Targets.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
 import { CharacterController } from '../animation/CharacterController.js';
@@ -96,6 +97,9 @@ export class App {
     this.shake = new CameraShake(this.rig);
     this.flash = new ScreenFlash();
 
+    this.targets = new Targets();
+    this.targets.register(this.dummies);
+
     this.abilities = new AbilityManager({
       scene: this.scene,
       camera: this.camera,
@@ -107,7 +111,8 @@ export class App {
       bursts: this.bursts,
       shake: this.shake,
       flash: this.flash,
-      dummies: this.dummies
+      dummies: this.dummies,
+      targets: this.targets
     });
 
     /* ---- character ---- */

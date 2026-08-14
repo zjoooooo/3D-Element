@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
 import { GameClock } from '../src/run/GameClock.js';
+import { Targets } from '../src/run/Targets.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -67,6 +68,24 @@ import { GameClock } from '../src/run/GameClock.js';
   const alpha = new GameClock(60).advance(1 / 120, () => {});
   assert.ok(alpha > 0.49 && alpha < 0.51, 'clock: half a step leaves alpha ~0.5');
   console.log('ok  game clock');
+}
+
+/* ---- targets facade: routing + graceful degradation ---- */
+{
+  const log = [];
+  const pop = {
+    hits: () => true,
+    damage: (p, r, amount) => (log.push(amount), 2)
+    // no damageOnce / slow on purpose — facade must degrade politely
+  };
+  const targets = new Targets();
+  targets.register(pop);
+  assert.equal(targets.hits({ x: 0, z: 0 }, 1), true);
+  assert.equal(targets.damage({ x: 0, z: 0 }, 1, 10), 2);
+  assert.equal(targets.damageOnce(7, { x: 0, z: 0 }, 1, 10), 2, 'falls back to damage');
+  targets.slow({ x: 0, z: 0 }, 1, 0.5, 1); // must not throw
+  assert.deepEqual(log, [10, 10]);
+  console.log('ok  targets facade');
 }
 
 console.log('\nevery game-logic check passed');
