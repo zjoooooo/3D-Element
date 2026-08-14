@@ -55,7 +55,15 @@ App
 - `settings.js`：新增 run / enemies / combat / upgrades / audio 数值块 → 自动获得编辑器滑杆
 
 数据流单向：RunManager 出波次 → EnemySystem 刷怪 → CombatSystem 读技能状态打怪
-→ 死怪掉宝石 → PickupSystem 喂经验 → UpgradeSystem 改 settings/装载技能 → 技能变强。
+→ 死怪掉宝石 → PickupSystem 喂经验 → UpgradeSystem 写局内修正层/装载技能 → 技能变强。
+
+**数值分层（防污染铁律）**：`生效值 = settings 基值 × 局内修正层`。
+升级/被动/共鸣**只写修正层**，一局结束整层丢弃；编辑器/沙盒/预设**只动基值**；
+两界互不污染——沙盒调的是游戏的"出厂数值"，升级堆的是这一局的"临时 buff"，
+`check:balance` 与模拟器永远只对基值负责。
+
+**两种暂停**：沙盒暂停 = 冻结效果但可走动观察（现状哲学不变）；
+run 模式暂停（三选一/暂停菜单）= **全停**，含走位与施法。
 
 角色系统已实装（`CHARACTERS` 注册表 + 编辑器切换 + 逐角色 `npm run check`），
 v1 沿用；"角色本命被动"立牌远期。
