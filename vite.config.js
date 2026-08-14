@@ -4,7 +4,9 @@ export default defineConfig({
   base: './',
   server: {
     host: '127.0.0.1',
-    port: 5173,
+    // Honour a harness-assigned port (PORT env) so parallel sessions never
+    // fight over 5173; plain `npm run dev` still lands on the usual port.
+    port: Number(process.env.PORT) || 5173,
     open: false
   },
   build: {
