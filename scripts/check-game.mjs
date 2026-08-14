@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
+import { GameClock } from '../src/run/GameClock.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -52,6 +53,20 @@ import { settings, ELEMENTS } from '../src/config/settings.js';
   assert.ok(new Set(r.loadout).size === 6, 'run: loadout must have no duplicates');
 
   console.log('ok  run settings');
+}
+
+/* ---- fixed timestep: n ticks regardless of frame slicing ---- */
+{
+  const count = { a: 0, b: 0 };
+  const a = new GameClock(60);
+  a.advance(1.0, () => count.a++); // one whole second in one frame
+  const b = new GameClock(60);
+  for (let i = 0; i < 100; i++) b.advance(0.01, () => count.b++); // same second, sliced
+  assert.equal(count.a, 60, 'clock: one second is 60 ticks');
+  assert.equal(count.b, 60, 'clock: slicing frames must not change tick count');
+  const alpha = new GameClock(60).advance(1 / 120, () => {});
+  assert.ok(alpha > 0.49 && alpha < 0.51, 'clock: half a step leaves alpha ~0.5');
+  console.log('ok  game clock');
 }
 
 console.log('\nevery game-logic check passed');
