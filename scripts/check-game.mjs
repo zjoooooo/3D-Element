@@ -17,6 +17,7 @@ import { EnemySystem } from '../src/run/EnemySystem.js';
 import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
+import { RunManager } from '../src/run/RunManager.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -233,6 +234,58 @@ import { PlayerState } from '../src/run/PlayerState.js';
   player.reset();
   assert.ok(player.alive && player.hp === settings.run.playerHp);
   console.log('ok  player state');
+}
+
+/* ---- run manager: schedule, deaths feed gems, verdicts ---- */
+{
+  const rng = createRng(7);
+  const enemies = new EnemySystem(rng);
+  const pickups = new PickupSystem();
+  const player = new PlayerState();
+  const run = new RunManager({
+    enemies, pickups, player, rng,
+    combat: { tick: () => {}, release: () => -1 },
+    targets: { register: () => {} },
+    abilities: { active: [] }
+  });
+  run.start();
+
+  // A minute of ticks must have spawned roughly spawnBase enemies (±jitter),
+  // telegraphs included.
+  settings.run.godMode = true; // D3: contact is lethal in a pinned minute — spec anchor, not a bug
+  for (let t = 0; t < 60 * 60; t++) run.tick(1 / 60, { x: 0, z: 0 });
+  settings.run.godMode = false;
+  const spawned = enemies.count + run.kills;
+  assert.ok(spawned > 10 && spawned < 40, `run: minute-one spawns ≈20 (got ${spawned})`);
+
+  // Killing enemies drops one gem per death. (The brief asserted a single
+  // death, but after the godMode minute the horde is packed around the pinned
+  // player — a radius-1 blast fells a cluster, so pin gems-per-death instead.)
+  const before = pickups.count;
+  const killsBefore = run.kills;
+  enemies.damage({ x: enemies.x[0], z: enemies.z[0] }, 1, 1e6);
+  assert.ok(run.kills > killsBefore, 'run: the blast killed something');
+  assert.equal(pickups.count - before, run.kills - killsBefore, 'run: each death drops a gem');
+
+  // The retirement seam: the manager hands each cast leaving play to
+  // onRetire, and the id must thread combat.release → enemies.releaseCast.
+  const fakeAbility = {};
+  const seen = [];
+  run.s.combat.release = (a) => (a === fakeAbility ? 7 : -1);
+  run.s.enemies.releaseCast = (id) => seen.push(id); // shadows the prototype
+  run.s.abilities.onRetire(fakeAbility);
+  run.s.abilities.onRetire({}); // unknown cast: -1, must not reach enemies
+  assert.deepEqual(seen, [7], 'run: retiring a cast releases its hit memory');
+  delete run.s.enemies.releaseCast; // real method back for later assertions
+
+  // Verdicts.
+  player.hp = 0;
+  player.alive = false;
+  assert.equal(run.tick(1 / 60, { x: 0, z: 0 }), 'dead');
+  run.start();
+  run.elapsed = settings.run.duration + 1;
+  assert.equal(run.tick(1 / 60, { x: 0, z: 0 }), 'won');
+  console.log('ok  run manager');
 }
 
 console.log('\nevery game-logic check passed');

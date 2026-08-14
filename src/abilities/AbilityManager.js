@@ -40,6 +40,8 @@ export class AbilityManager {
     this.ctx = context;
     this.active = [];
     this.selected = ELEMENTS[0];
+    /** Assigned by the run mode: observes every ability leaving play (pooling-safe cast cleanup). */
+    this.onRetire = null;
 
     this.pools = new Map();
     for (const [element, Type] of Object.entries(ABILITY_TYPES)) {
@@ -77,6 +79,7 @@ export class AbilityManager {
     // Retire the oldest cast rather than letting the scene grow without bound.
     if (this.active.length >= MAX_CONCURRENT) {
       const oldest = this.active.shift();
+      this.onRetire?.(oldest);
       oldest.destroy();
       this.pools.get(oldest.element).release(oldest);
     }
@@ -93,6 +96,7 @@ export class AbilityManager {
       ability.update(dt);
       if (ability.isFinished) {
         this.active.splice(i, 1);
+        this.onRetire?.(ability);
         ability.destroy();
         this.pools.get(ability.element).release(ability);
       }
@@ -102,6 +106,7 @@ export class AbilityManager {
   /** Cancel everything currently in flight. */
   clear() {
     for (const ability of this.active) {
+      this.onRetire?.(ability);
       ability.destroy();
       this.pools.get(ability.element).release(ability);
     }
