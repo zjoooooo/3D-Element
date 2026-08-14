@@ -29,7 +29,8 @@ export class EnemySystem {
     this.prevX = new Float32Array(cap);
     this.prevZ = new Float32Array(cap);
     this.hp = new Float32Array(cap);
-    this.slow = new Float32Array(cap);
+    // per-enemy slow factor — named 'slowed' so it cannot shadow the slow() method below
+    this.slowed = new Float32Array(cap);
     this.slowT = new Float32Array(cap);
     this.flash = new Float32Array(cap);
     this.kbX = new Float32Array(cap);
@@ -55,7 +56,7 @@ export class EnemySystem {
     this.x[i] = this.prevX[i] = x;
     this.z[i] = this.prevZ[i] = z;
     this.hp[i] = c.hpBase * (1 + c.hpPerMinute * minute) * c.swarm.hpMult;
-    this.slow[i] = 0;
+    this.slowed[i] = 0;
     this.slowT[i] = 0;
     this.flash[i] = 0;
     this.kbX[i] = 0;
@@ -89,7 +90,7 @@ export class EnemySystem {
       let dz = player.z - this.z[i];
       const d = Math.hypot(dx, dz);
       const dist = d || 1; // the || 1 guards normalisation; contact uses raw d
-      const v = speed * (1 - this.slow[i]);
+      const v = speed * (1 - this.slowed[i]);
       dx = (dx / dist) * v;
       dz = (dz / dist) * v;
 
@@ -106,7 +107,7 @@ export class EnemySystem {
       this.kbZ[i] *= decay;
 
       // Timers.
-      if ((this.slowT[i] -= step) <= 0) this.slow[i] = 0;
+      if ((this.slowT[i] -= step) <= 0) this.slowed[i] = 0;
       this.flash[i] = Math.max(0, this.flash[i] - step * 6);
 
       if (d < contactR) contact = Math.max(contact, c.swarm.contactDamage);
@@ -202,7 +203,7 @@ export class EnemySystem {
   slow(point, radius, factor, duration) {
     for (let i = 0; i < this.count; i++) {
       if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= radius) continue;
-      this.slow[i] = Math.max(this.slow[i], factor);
+      this.slowed[i] = Math.max(this.slowed[i], factor);
       this.slowT[i] = Math.max(this.slowT[i], duration);
     }
   }
@@ -216,7 +217,7 @@ export class EnemySystem {
     const last = --this.count;
     if (i === last) return;
     for (const a of [
-      this.x, this.z, this.prevX, this.prevZ, this.hp, this.slow, this.slowT,
+      this.x, this.z, this.prevX, this.prevZ, this.hp, this.slowed, this.slowT,
       this.flash, this.kbX, this.kbZ, this.element, this.id
     ]) {
       a[i] = a[last];

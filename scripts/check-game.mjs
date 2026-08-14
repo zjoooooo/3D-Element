@@ -122,6 +122,21 @@ import { RunManager } from '../src/run/RunManager.js';
   const gap = Math.abs(enemies.x[1] - enemies.x[0]);
   assert.ok(gap > 0.2, `enemies: separation opened only ${gap.toFixed(3)}m`);
 
+  // Slow: a slowed enemy covers measurably less ground than a free one.
+  // Also pins that slow() stays callable — a field named `slow` once shadowed it.
+  enemies.clear();
+  assert.equal(typeof enemies.slow, 'function', 'enemies: slow() must not be shadowed by a field');
+  enemies.spawnAt(-5, 0, 0);
+  enemies.spawnAt(5, 0, 0);
+  enemies.slow({ x: -5, z: 0 }, 1, 0.5, 1);
+  enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
+  const slowedStep = Math.abs(enemies.x[0] - enemies.prevX[0]);
+  const freeStep = Math.abs(enemies.x[1] - enemies.prevX[1]);
+  assert.ok(
+    slowedStep < freeStep * 0.75,
+    `enemies: slow barely bit (${slowedStep.toFixed(4)} vs ${freeStep.toFixed(4)})`
+  );
+
   // Damage + dedup: damageOnce with one castId hits an enemy a single time.
   enemies.clear();
   enemies.spawnAt(0, 0, 0);
