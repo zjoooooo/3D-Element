@@ -541,3 +541,29 @@ body {
   pointer-events: none;
   z-index: 30;
 }
+
+/* In a run the sandbox panels get out of the way: slid to their screen edge
+   with a sliver left showing, hover slides one back out. G / H still toggle. */
+.run-mode .lil-gui.autoPlace {
+  transform: translateX(calc(100% - 16px));
+  transition: transform 0.25s ease;
+}
+
+.run-mode .lil-gui.autoPlace:hover,
+.run-mode .lil-gui.autoPlace:focus-within {
+  transform: none;
+}
+
+.run-mode .hud__help {
+  transform: translateX(calc(-100% + 16px));
+  transition: transform 0.25s ease, opacity 0.3s ease;
+}
+
+.run-mode .hud__help:hover {
+  transform: none;
+}
+
+/* The keys legend up top is sandbox coaching — the run HUD replaces it. */
+.run-mode .hud__title {
+  display: none;
+}

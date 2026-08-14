@@ -141,6 +141,10 @@ export class App {
 
     /* ---- run mode (only lives while the page opened on #run) ---- */
     if (this.runMode) {
+      // The sandbox panels (editor, help card) tuck themselves against the
+      // screen edge in a run — styles.css keys off this class; hovering the
+      // exposed sliver (or G / H as ever) brings a panel back.
+      document.body.classList.add('run-mode');
       const rng = createRng((Date.now() % 0xffffffff) >>> 0);
       this.gameClock = new GameClock(settings.run.tickRate);
       this.enemySystem = new EnemySystem(rng);
