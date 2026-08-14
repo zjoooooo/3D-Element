@@ -1,5 +1,5 @@
 import GUI from 'lil-gui';
-import { settings, CAST_ANIMATIONS } from '../config/settings.js';
+import { settings, ELEMENTS, CAST_ANIMATIONS } from '../config/settings.js';
 import { CHARACTERS } from '../animation/CharacterController.js';
 import { PresetManager } from './PresetManager.js';
 
@@ -20,7 +20,7 @@ import { PresetManager } from './PresetManager.js';
  */
 export class Editor {
   /**
-   * @param {object} hooks { onClear, onToast }
+   * @param {object} hooks { onClear, onToast, runMode }
    */
   constructor(hooks = {}) {
     this.hooks = hooks;
@@ -32,6 +32,7 @@ export class Editor {
     this._presetState = { name: 'My preset', selected: this.presets.names[0] ?? '' };
 
     this._buildPresets();
+    if (hooks.runMode) this._buildRun();
     this._buildGlobal();
     this._buildAim();
     this._buildZone();
@@ -217,6 +218,24 @@ export class Editor {
       .name('Reset to defaults');
 
     this.presetFolder = folder;
+  }
+
+  /**
+   * Run-mode knobs — only built when the page opened on `#run`, so the sandbox
+   * panel never mentions the run at all. The six dropdowns are M1's loadout
+   * screen; `spawn base` and `god mode` are the levers the stress test drives.
+   */
+  _buildRun() {
+    const folder = this.gui.addFolder('Run');
+    const r = settings.run;
+
+    // One dropdown per loadout seat, labelled by the key that fires it.
+    ['LMB', 'RMB', 'Q', 'E', 'R', 'T'].forEach((label, i) => {
+      folder.add(r.loadout, i, ELEMENTS).name(label);
+    });
+
+    Editor.range(folder, r, 'spawnBase', 0, 300, 1, 'spawn base');
+    folder.add(r, 'godMode').name('god mode');
   }
 
   _buildGlobal() {

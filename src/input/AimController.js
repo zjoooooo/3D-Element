@@ -147,6 +147,21 @@ export class AimController extends EventEmitter {
     return true;
   }
 
+  /**
+   * Resolve the pointer right now and fire without the arm/confirm dance —
+   * the run mode's casting verb (spec: lines fire at full range toward the
+   * cursor, zones land on the cursor clamped to range).
+   */
+  quickCast() {
+    this._resolve();
+    if (this.shape !== CastShape.ZONE) {
+      this.distance = Math.max(0.4, this.config.range);
+    }
+    if (!this.valid && this.shape === CastShape.ZONE) return false;
+    this.emit('cast', this.origin, this.direction, this.distance);
+    return true;
+  }
+
   /* ------------------------------------------------------------------ */
 
   /** Project the pointer onto the ground and resolve the aim from it. */

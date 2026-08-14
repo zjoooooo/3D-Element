@@ -60,7 +60,7 @@ export class InputManager extends EventEmitter {
     if (event.button === 0) {
       this.emit('pointer:confirm', this.pointer);
     } else if (event.button === 2) {
-      // Right button doubles as the camera drag, so cancelling waits for the
+      // Right button doubles as the camera drag, so the click waits for the
       // release: a press that barely moved is a click, anything longer is a drag.
       this._rightDown = { x: event.clientX, y: event.clientY };
     }
@@ -73,7 +73,7 @@ export class InputManager extends EventEmitter {
       event.clientY - this._rightDown.y
     );
     this._rightDown = null;
-    if (moved < 6) this.emit('action', 'cancel');
+    if (moved < 6) this.emit('action', 'rightclick');
   };
 
   _onPointerMove = (event) => {
@@ -120,6 +120,12 @@ export class InputManager extends EventEmitter {
         break;
       case 'Escape':
         this.emit('action', 'cancel');
+        break;
+      case 'Space':
+        this.emit('action', 'dodge');
+        break;
+      case 'Enter':
+        this.emit('action', 'restart');
         break;
       case 'KeyH':
         this.emit('action', 'toggleHelp');

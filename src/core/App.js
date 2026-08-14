@@ -12,6 +12,16 @@ import { ContactShadows } from '../world/ContactShadows.js';
 import { TrainingDummies } from '../world/TrainingDummies.js';
 import { Targets } from '../run/Targets.js';
 
+import { GameClock } from '../run/GameClock.js';
+import { createRng } from '../run/rng.js';
+import { EnemySystem } from '../run/EnemySystem.js';
+import { EnemyRenderer } from '../run/EnemyRenderer.js';
+import { CombatSystem } from '../run/CombatSystem.js';
+import { PickupSystem } from '../run/PickupSystem.js';
+import { PlayerState } from '../run/PlayerState.js';
+import { RunManager } from '../run/RunManager.js';
+import { RunHud } from '../run/RunHud.js';
+
 import { AssetLoader } from '../loaders/AssetLoader.js';
 import { CharacterController } from '../animation/CharacterController.js';
 
@@ -37,6 +47,14 @@ import { settings, ELEMENTS } from '../config/settings.js';
 const HDR_URL = './hdri/spruit_sunrise.hdr';
 
 const UP = new Vector3(0, 1, 0);
+
+/**
+ * Run mode's keyboard half of the loadout. The six on-stage abilities sit in
+ * `settings.run.loadout`, ordered [LMB, RMB, Q, E, R, T] — so the sandbox's
+ * seven ability slots collapse onto loadout slots 2–5, and the keys with no
+ * seat (F, V, X) sit the run out.
+ */
+const RUN_KEY_SLOTS = { 0: 2, 1: 3, 2: 4, 6: 5 };
 
 /**
  * Application root: owns every subsystem and the frame loop.
@@ -115,6 +133,33 @@ export class App {
       targets: this.targets
     });
 
+    /* ---- run mode (only lives while the page opened on #run) ---- */
+    // Read once, so flipping the hash mid-session changes nothing until a
+    // reload — off this gate, every frame is byte-identical to the sandbox.
+    this.runMode = location.hash === '#run';
+    if (this.runMode) {
+      const rng = createRng((Date.now() % 0xffffffff) >>> 0);
+      this.gameClock = new GameClock(settings.run.tickRate);
+      this.enemySystem = new EnemySystem(rng);
+      this.enemyRenderer = new EnemyRenderer(this.scene);
+      this.pickups = new PickupSystem();
+      this.scene.add(this.pickups.points);
+      this.playerState = new PlayerState();
+      this.combat = new CombatSystem(this.targets);
+      this.targets.register(this.enemySystem);
+      this.run = new RunManager({
+        enemies: this.enemySystem,
+        pickups: this.pickups,
+        combat: this.combat,
+        player: this.playerState,
+        targets: this.targets,
+        abilities: this.abilities,
+        rng
+      });
+      this.runHud = new RunHud();
+      this.run.start();
+    }
+
     /* ---- character ---- */
     this.character = new CharacterController(this.environment);
     this.scene.add(this.character.root);
@@ -131,6 +176,7 @@ export class App {
     this.loading = new LoadingScreen();
     this.hud = new HUD(document.getElementById('hud'));
     this.editor = new Editor({
+      runMode: this.runMode,
       onClear: () => this.clearEffects(),
       onToast: (message) => this.hud.showToast(message),
       onResetDummies: () => this.dummies.reset(),
@@ -175,7 +221,8 @@ export class App {
     this.input.on('pointer:move', (pointer) => this.aim.point(pointer));
     this.input.on('pointer:confirm', (pointer) => {
       this.aim.point(pointer);
-      this.aim.confirm();
+      if (this.runMode) this._quickCast(settings.run.loadout[0]);
+      else this.aim.confirm();
     });
     this.input.on('action', (action, slot) => this._handleAction(action, slot));
 
@@ -188,6 +235,12 @@ export class App {
   _handleAction(action, slot) {
     switch (action) {
       case 'ability': {
+        if (this.runMode) {
+          // Keys cast their loadout seat straight away; unseated keys do nothing.
+          const seat = RUN_KEY_SLOTS[slot];
+          if (seat !== undefined) this._quickCast(settings.run.loadout[seat]);
+          break;
+        }
         const element = ELEMENTS[slot] ?? this.element;
         // Pressing the *same* key again puts an armed cast away, as it does in a
         // MOBA; pressing a different one swaps the slot without disarming.
@@ -195,8 +248,37 @@ export class App {
         else this.armAbility(element);
         break;
       }
+      case 'rightclick':
+        // A right click that never became a camera drag: the sandbox reads it
+        // as "put the cast away", the run mode as the second loadout seat.
+        if (this.runMode) this._quickCast(settings.run.loadout[1]);
+        else this.aim.cancel();
+        break;
       case 'cancel':
         this.aim.cancel();
+        break;
+      case 'dodge': {
+        if (!this.runMode || !this.playerState.tryDodge()) break;
+        // Dash along the current move axis, or facing when standing still.
+        const axis = this.input.moveAxis(this._moveAxis);
+        this._camForward.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        this._camForward.y = 0;
+        this._camForward.normalize();
+        this._camRight.crossVectors(this._camForward, UP);
+        this._moveDir.copy(this._camRight).multiplyScalar(axis.x)
+          .addScaledVector(this._camForward, axis.y);
+        if (this._moveDir.lengthSq() < 0.01) {
+          this._moveDir.set(Math.sin(this.character.facing), 0, Math.cos(this.character.facing));
+        }
+        this._moveDir.normalize().multiplyScalar(settings.run.dodgeDistance);
+        this.character.root.position.add(this._moveDir);
+        break;
+      }
+      case 'restart':
+        if (this.runMode && !this.run.active) {
+          this.clearEffects();
+          this.run.start();
+        }
         break;
       case 'toggleHelp':
         this.hud.toggleHelp();
@@ -239,6 +321,14 @@ export class App {
     // ability's range on the frame it appears.
     if (element !== this.element) this.selectAbility(element);
     this.aim.arm();
+  }
+
+  /** Run mode's casting verb: no arm/confirm dance, straight from the pointer. */
+  _quickCast(element) {
+    if (!element || !ELEMENTS.includes(element)) return;
+    if ((this.cooldowns.get(element) ?? 0) > 0) return;
+    if (element !== this.element) this.selectAbility(element, { silent: true });
+    this.aim.quickCast();
   }
 
   _cast(origin, direction, distance) {
@@ -391,6 +481,25 @@ export class App {
     // still get back up while the effects are frozen for a look.
     this.dummies.update(raw, this.camera);
 
+    if (this.runMode) {
+      // The run ticks on *raw* time through the fixed-step clock — the enemies
+      // do not slow down because the VFX time scale was turned down, and the
+      // renderer interpolates between the last two ticks with the leftover.
+      const verdict = { value: 'playing' };
+      this._runAlpha = this.gameClock.advance(raw, (step) => {
+        verdict.value = this.run.tick(step, this.character.position);
+      });
+      if (verdict.value !== 'playing' && this.run.active) {
+        this.run.stop();
+        this.runHud.showVerdict(verdict.value === 'won' ? '生存达成 — 回车重开' : '倒下了 — 回车重开');
+      }
+      this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
+      this.enemyRenderer.render(this.enemySystem, this._runAlpha);
+      this.pickups.sync();
+      // The verdict borrows the hp span, so a live update would stamp it out.
+      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups);
+    }
+
     this.abilities.update(dt);
     this.particles.flush();
     this.decals.update(dt);
@@ -432,6 +541,11 @@ export class App {
 
   dispose() {
     this.stop();
+    if (this.runMode) {
+      this.runHud.dispose();
+      this.enemyRenderer.dispose();
+      this.scene.remove(this.pickups.points);
+    }
     this.input.dispose();
     this.aim.dispose();
     this.abilities.dispose();
