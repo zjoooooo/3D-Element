@@ -30,9 +30,9 @@ export class CombatSystem {
 
   _castKey(ability) {
     let id = this._castIds.get(ability);
-    if (id === undefined || ability.u < 0.001) {
-      // A pooled ability object reused for a new cast gets a fresh id the
-      // moment its front is back at the start.
+    if (id === undefined) {
+      // The id lives for the cast's lifetime; release() retires it with the
+      // cast, so a pooled object re-acquired for a new one mints fresh here.
       id = this._nextCast++;
       this._castIds.set(ability, id);
     }
@@ -43,6 +43,7 @@ export class CombatSystem {
   release(ability) {
     const id = this._castIds.get(ability);
     if (id === undefined) return -1;
+    this._castIds.delete(ability);
     this._tickBudget.delete(id);
     this._detonated.delete(id);
     return id;
@@ -57,6 +58,10 @@ export class CombatSystem {
       switch (c.kind) {
         case 'sweep': {
           if (ability.phase !== 'travel') break;
+          // ponytail: at default tuning the front moves ≪ width per tick, but
+          // the live speed/timeScale sliders can push it past width per sample —
+          // a segment sweep test replaces point sampling if fast sweeps ever
+          // visibly skip enemies.
           this.targets.damageOnce(castId, ability.position, c.width, c.damage);
           if (c.slowFactor) {
             this.targets.slow(ability.position, c.width * 1.5, c.slowFactor, c.slowTime);
@@ -79,9 +84,16 @@ export class CombatSystem {
             this.targets.damage(ability.position, radius, c.damage);
             if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           }
-          // Meteor's lava keeps burning through the fade. Flush inline — a
-          // callback here would allocate a closure every tick.
-          if (c.burnDps && (ability.phase === 'impact' || ability.phase === 'fade')) {
+          // Meteor's lava keeps burning through the fade, but the lava stops
+          // burning when the knob says so, not when the VFX happens to fade:
+          // impactTime freezes once the fade starts and fadeTime accrues from
+          // 0, so their sum is seconds since impact. Flush inline — a callback
+          // here would allocate a closure every tick.
+          if (
+            c.burnDps &&
+            (ability.phase === 'impact' || ability.phase === 'fade') &&
+            ability.impactTime + ability.fadeTime < c.burnTime
+          ) {
             if (this._dot(castId, step, c.burnDps)) {
               this.targets.damage(ability.position, c.radius, this._take(castId));
             }
@@ -105,7 +117,7 @@ export class CombatSystem {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const radius = settings[ability.element].zoneRadius ?? 2;
           this.targets.damage(ability.position, radius, c.dps * step);
-          if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, 0.4);
+          if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           break;
         }
 

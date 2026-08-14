@@ -1,11 +1,12 @@
 /**
  * One "things you can hit" service for every ability (spec §3).
  *
- * The sandbox registers the training dummies, the run mode also registers the
+ * The sandbox registers the training dummies, the run mode registers the
  * enemy system; abilities talk to this and never know which is live. The
- * contract is the dummies' own hits/damage pair — populations that support
- * per-cast dedup (`damageOnce`) or slows opt in by implementing them, and the
- * facade quietly degrades for those that don't.
+ * contract is the dummies' own hits/damage pair — `damage` and `damageOnce`
+ * tally the hit counts each population reports, not damage dealt. Populations
+ * that support per-cast dedup (`damageOnce`) or slows opt in by implementing
+ * them, and the facade quietly degrades for those that don't.
  */
 export class Targets {
   constructor() {

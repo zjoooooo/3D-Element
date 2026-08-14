@@ -211,7 +211,7 @@ export const settings = {
   run: {
     duration: 900, // seconds per run
     tickRate: 60, // fixed simulation Hz; rendering interpolates
-    enemyCap: 300, // hard on-screen ceiling; oldest far enemy recycles beyond it
+    enemyCap: 300, // hard on-screen ceiling; spawns beyond it are refused (recycling is a future decision)
     spawnBase: 20, // enemies per minute at minute 0
     spawnQuad: 2.2, // + quad * minute² — gentle start, fierce final tide
     spawnRadius: 26, // metres from the player enemies appear at (outside view)
@@ -255,7 +255,8 @@ export const settings = {
     thunder: { kind: 'sweep', damage: 26, width: 1.0 },
     meteor: { kind: 'burst', damage: 55, radius: 2.6, burnDps: 12, burnTime: 2.5 },
     beam: { kind: 'lineTick', dps: 60, width: 0.9 },
-    snare: { kind: 'zoneTick', dps: 28, slowFactor: 0.45 },
+    // slowTime: seconds each tick's slow lingers on an enemy
+    snare: { kind: 'zoneTick', dps: 28, slowFactor: 0.45, slowTime: 0.4 },
     glacier: { kind: 'burst', damage: 70, slowFactor: 0.6, slowTime: 2.5 },
     fireball: { kind: 'self' } // FireballAbility already resolves its own hits
   },

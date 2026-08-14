@@ -115,8 +115,14 @@ export class App {
     this.shake = new CameraShake(this.rig);
     this.flash = new ScreenFlash();
 
+    // Read once, so flipping the hash mid-session changes nothing until a
+    // reload — off this gate, every frame is byte-identical to the sandbox.
+    this.runMode = location.hash === '#run';
+
     this.targets = new Targets();
-    this.targets.register(this.dummies);
+    // Dummies are sandbox furniture; in a run the horde is the only target
+    // population. They stay visible in the arena either way.
+    if (!this.runMode) this.targets.register(this.dummies);
 
     this.abilities = new AbilityManager({
       scene: this.scene,
@@ -134,9 +140,6 @@ export class App {
     });
 
     /* ---- run mode (only lives while the page opened on #run) ---- */
-    // Read once, so flipping the hash mid-session changes nothing until a
-    // reload — off this gate, every frame is byte-identical to the sandbox.
-    this.runMode = location.hash === '#run';
     if (this.runMode) {
       const rng = createRng((Date.now() % 0xffffffff) >>> 0);
       this.gameClock = new GameClock(settings.run.tickRate);
@@ -157,6 +160,12 @@ export class App {
         rng
       });
       this.runHud = new RunHud();
+      // Frame-loop scratch: the verdict box and the tick closure are minted
+      // once here so advance() never allocates per frame.
+      this._verdict = { value: 'playing' };
+      this._runTick = (step) => {
+        this._verdict.value = this.run.tick(step, this.character.position);
+      };
       this.run.start();
     }
 
@@ -229,7 +238,11 @@ export class App {
     this.aim.on('cast', (origin, direction, distance) => this._cast(origin, direction, distance));
     this.aim.on('reject', () => this.hud.showToast('Too close — aim further out'));
 
-    this.hud.onAbility = (element) => this.armAbility(element);
+    // The HUD shows all seven abilities, off-stage snare included, so in run
+    // mode a click there must not arm the sandbox aim arrow.
+    this.hud.onAbility = (element) => {
+      if (!this.runMode) this.armAbility(element);
+    };
   }
 
   _handleAction(action, slot) {
@@ -277,6 +290,8 @@ export class App {
       case 'restart':
         if (this.runMode && !this.run.active) {
           this.clearEffects();
+          // A fresh run starts with every ability ready.
+          for (const element of this.cooldowns.keys()) this.cooldowns.set(element, 0);
           this.run.start();
         }
         break;
@@ -485,13 +500,11 @@ export class App {
       // The run ticks on *raw* time through the fixed-step clock — the enemies
       // do not slow down because the VFX time scale was turned down, and the
       // renderer interpolates between the last two ticks with the leftover.
-      const verdict = { value: 'playing' };
-      this._runAlpha = this.gameClock.advance(raw, (step) => {
-        verdict.value = this.run.tick(step, this.character.position);
-      });
-      if (verdict.value !== 'playing' && this.run.active) {
+      this._verdict.value = 'playing';
+      this._runAlpha = this.gameClock.advance(raw, this._runTick);
+      if (this._verdict.value !== 'playing' && this.run.active) {
         this.run.stop();
-        this.runHud.showVerdict(verdict.value === 'won' ? '生存达成 — 回车重开' : '倒下了 — 回车重开');
+        this.runHud.showVerdict(this._verdict.value === 'won' ? '生存达成 — 回车重开' : '倒下了 — 回车重开');
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);

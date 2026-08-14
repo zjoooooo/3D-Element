@@ -196,22 +196,56 @@ import { RunManager } from '../src/run/RunManager.js';
   // the impact phase (60Hz logic under a variable render rate). Burn ticks may
   // land beside it — only the full-damage call counts as the detonation.
   let detonations = 0;
+  let burns = 0;
   const countTargets = {
     damageOnce: () => 1,
-    damage: (p, r, amt) => (amt === settings.combat.meteor.damage && detonations++, 1),
+    damage: (p, r, amt) => (amt === settings.combat.meteor.damage ? detonations++ : burns++, 1),
     slow: () => {}
   };
   const burstCombat = new CombatSystem(countTargets);
   const meteor = {
     element: 'meteor', phase: 'impact', age: 1.0,
     position: { x: 2, z: 2 }, origin: { x: 0, z: 0 },
-    direction: { x: 1, z: 0 }, length: 10, u: 1, impactTime: 0
+    direction: { x: 1, z: 0 }, length: 10, u: 1, impactTime: 0, fadeTime: 0
   };
-  for (let t = 0; t < 10; t++) {
+  // 30 ticks = 0.5s of impact: enough for the 12dps burn to bank whole points.
+  for (let t = 0; t < 30; t++) {
     meteor.impactTime += 1 / 60;
     burstCombat.tick(1 / 60, [meteor]);
   }
   assert.equal(detonations, 1, 'combat: burst detonates exactly once per cast');
+  assert.ok(burns > 0, 'combat: the lava burn ticks while burnTime holds');
+
+  // The lava goes out when the knob says so: impactTime + fadeTime is seconds
+  // since impact, and past burnTime no further burn damage may land.
+  meteor.phase = 'fade';
+  meteor.fadeTime = settings.combat.meteor.burnTime; // sum now past the knob
+  const burnsAtCutoff = burns;
+  for (let t = 0; t < 60; t++) burstCombat.tick(1 / 60, [meteor]);
+  assert.equal(burns, burnsAtCutoff, 'combat: the burn stops when burnTime says so');
+
+  // Cast ids are stable for the cast's whole lifetime — even at u=0, where a
+  // low timeScale can queue two fixed ticks before the front moves. Two ticks,
+  // one id, or the sweep double-hits at full damage on the origin. Only
+  // release() retires the id; the next tick after it mints fresh.
+  const ids = new Set();
+  const idTargets = {
+    damageOnce: (id) => (ids.add(id), 1),
+    damage: () => 1,
+    slow: () => {}
+  };
+  const idCombat = new CombatSystem(idTargets);
+  const sweep = {
+    element: 'thunder', phase: 'travel', age: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 8, u: 0
+  };
+  idCombat.tick(1 / 60, [sweep]);
+  idCombat.tick(1 / 60, [sweep]);
+  assert.equal(ids.size, 1, 'combat: queued ticks at u=0 share one castId');
+  idCombat.release(sweep); // the pool hands the object to a new cast...
+  idCombat.tick(1 / 60, [sweep]);
+  assert.equal(ids.size, 2, 'combat: a released cast mints a fresh castId');
   console.log('ok  combat shapes');
 }
 

@@ -1,6 +1,6 @@
 import {
-  CapsuleGeometry, Color, DynamicDrawUsage, InstancedMesh,
-  MeshStandardMaterial, Object3D, RingGeometry, MeshBasicMaterial
+  CapsuleGeometry, Color, DynamicDrawUsage, InstancedBufferAttribute,
+  InstancedMesh, MeshStandardMaterial, Object3D, RingGeometry, MeshBasicMaterial
 } from 'three';
 import { settings } from '../config/settings.js';
 import { LAYER } from '../core/Layers.js';
@@ -26,6 +26,10 @@ export class EnemyRenderer {
 
     this.mesh = new InstancedMesh(geometry, material, cap);
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    // Minted eagerly so the colour buffer carries the dynamic hint too —
+    // setColorAt would otherwise lazily create it with the static default.
+    this.mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+    this.mesh.instanceColor.setUsage(DynamicDrawUsage);
     this.mesh.count = 0;
     this.mesh.castShadow = false; // spec §5.7: enemies never enter the shadow map
     this.mesh.layers.set(LAYER.WORLD);
@@ -40,6 +44,7 @@ export class EnemyRenderer {
       new MeshBasicMaterial({ color: 0xff4433, transparent: true, opacity: 0.7, depthWrite: false }),
       TELEGRAPH_POOL
     );
+    this.telegraphs.instanceMatrix.setUsage(DynamicDrawUsage);
     this.telegraphs.count = 0;
     this.telegraphs.layers.set(LAYER.VFX);
     scene.add(this.telegraphs);
