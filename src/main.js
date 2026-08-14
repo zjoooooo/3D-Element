@@ -9,6 +9,11 @@ import { LoadingScreen } from './ui/HUD.js';
  */
 const canvas = document.getElementById('viewport');
 
+// The sandbox/run split is decided once, at App construction, off `#run` in the
+// URL — so typing the hash into an already-open page must reload, or nothing
+// changes and the switch silently looks broken.
+window.addEventListener('hashchange', () => location.reload());
+
 async function boot() {
   try {
     const app = new App(canvas);
