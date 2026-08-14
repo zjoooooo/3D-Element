@@ -10,6 +10,7 @@ import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
+import { EnemySystem } from '../src/run/EnemySystem.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -86,6 +87,54 @@ import { Targets } from '../src/run/Targets.js';
   targets.slow({ x: 0, z: 0 }, 1, 0.5, 1); // must not throw
   assert.deepEqual(log, [10, 10]);
   console.log('ok  targets facade');
+}
+
+/* ---- enemies: seek, separation, damage, dedup, death ---- */
+{
+  const enemies = new EnemySystem(createRng(1));
+
+  // Seek: an enemy left of the player must step right.
+  const i = enemies.spawnAt(-5, 0, 0);
+  enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
+  assert.ok(enemies.x[i] > -5, 'enemies: seek moves toward the player');
+
+  // Contact: an enemy standing on the player deals one full hit per tick.
+  enemies.clear();
+  enemies.spawnAt(0, 0, 0);
+  assert.equal(
+    enemies.tick(1 / 60, { x: 0, z: 0 }, 0),
+    settings.enemies.swarm.contactDamage,
+    'enemies: contact reports one full hit, not a dps slice'
+  );
+
+  // Separation: two stacked enemies push apart.
+  enemies.clear();
+  enemies.spawnAt(0, 0, 0);
+  enemies.spawnAt(0.05, 0, 0);
+  for (let t = 0; t < 30; t++) enemies.tick(1 / 60, { x: 50, z: 0 }, 0);
+  const gap = Math.abs(enemies.x[1] - enemies.x[0]);
+  assert.ok(gap > 0.2, `enemies: separation opened only ${gap.toFixed(3)}m`);
+
+  // Damage + dedup: damageOnce with one castId hits an enemy a single time.
+  enemies.clear();
+  enemies.spawnAt(0, 0, 0);
+  const hpBefore = enemies.hp[0];
+  enemies.damageOnce(99, { x: 0, z: 0 }, 1, 5);
+  enemies.damageOnce(99, { x: 0, z: 0 }, 1, 5);
+  assert.equal(hpBefore - enemies.hp[0], 5, 'enemies: same cast never double-hits');
+
+  // Death: hp to zero fires onDeath and shrinks count via swap-remove.
+  let deaths = 0;
+  enemies.onDeath = () => deaths++;
+  enemies.damage({ x: 0, z: 0 }, 1, 1e6);
+  assert.equal(deaths, 1);
+  assert.equal(enemies.count, 0);
+
+  // Cap: the 301st spawn is refused.
+  enemies.clear();
+  for (let n = 0; n < 300; n++) assert.ok(enemies.spawnAt(n * 0.1, 0, 0) >= 0);
+  assert.equal(enemies.spawnAt(0, 0, 0), -1, 'enemies: hard cap holds');
+  console.log('ok  enemy system');
 }
 
 console.log('\nevery game-logic check passed');
