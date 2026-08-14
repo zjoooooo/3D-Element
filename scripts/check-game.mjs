@@ -15,6 +15,7 @@ import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
 import { CombatSystem } from '../src/run/CombatSystem.js';
+import { PickupSystem } from '../src/run/PickupSystem.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -195,6 +196,20 @@ import { CombatSystem } from '../src/run/CombatSystem.js';
   }
   assert.equal(detonations, 1, 'combat: burst detonates exactly once per cast');
   console.log('ok  combat shapes');
+}
+
+/* ---- pickups: drop, magnet, level math ---- */
+{
+  const pickups = new PickupSystem();
+  pickups.dropAt(1.0, 0, 0); // 1 xp at minute 0, inside the 2m magnet radius
+  let levels = 0;
+  for (let t = 0; t < 240; t++) levels += pickups.tick(1 / 60, { x: 0, z: 0 });
+  assert.equal(pickups.count, 0, 'pickups: gem inside magnet radius gets collected');
+  assert.ok(pickups.xp > 0 || levels > 0, 'pickups: collection feeds xp');
+
+  // Level curve: need(l) = xpBase * xpGrowth^l, strictly increasing.
+  assert.ok(pickups.xpNeed(2) > pickups.xpNeed(1), 'pickups: curve rises');
+  console.log('ok  pickups');
 }
 
 console.log('\nevery game-logic check passed');
