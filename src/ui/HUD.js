@@ -40,11 +40,16 @@ export class HUD {
         <div><strong>Q</strong> — Frost Lance &nbsp; <strong>E</strong> — Storm Lance</div>
         <div><strong>R</strong> — Cinder Fall &nbsp; <strong>F</strong> — Nova Beam</div>
         <div><strong>V</strong> — Voltaic Snare &nbsp; <strong>X</strong> — Glacial Crown</div>
+        <div><strong>T</strong> — Ember Bolt</div>
         <div class="hud__help-note">V and X are far casts — aimed with a circle, not an arrow.</div>
         <div><strong>W A S D</strong> — walk, relative to the camera</div>
         <div><strong>Mouse</strong> — aim &nbsp; <strong>Left click</strong> — cast</div>
         <div><strong>Esc / right click</strong> — cancel the cast</div>
-        <div><strong>Right drag</strong> — orbit &nbsp; <strong>Scroll</strong> — zoom</div>
+        <div><strong>Scroll</strong> — zoom</div>
+        <div class="hud__help-note">
+          The camera is locked to one bearing. Turn off <em>fixed angle</em> in Camera to orbit with
+          a right drag.
+        </div>
         <div style="margin-top:6px">
           <kbd>G</kbd> editor &nbsp; <kbd>P</kbd> pause &nbsp; <kbd>C</kbd> clear
         </div>

@@ -57,6 +57,33 @@ export class CameraRig {
     this.domElement = domElement;
     this._onWheel = this._onWheel.bind(this);
     domElement.addEventListener('wheel', this._onWheel, { passive: false });
+
+    // Right-drag swings the bearing even with `fixed` on: the drag writes
+    // `settings.camera.fixedYaw` — the same value the editor slider owns and the
+    // pinned azimuth limits read every frame — so the ARPG follow, the pitch
+    // lock and the zoom all keep working while the player looks around.
+    this._dragX = null;
+    this._onDragStart = (event) => {
+      if (event.button === 2 && event.target === domElement && settings.camera.fixed) {
+        this._dragX = event.clientX;
+      }
+    };
+    this._onDragMove = (event) => {
+      if (this._dragX === null) return;
+      const dx = event.clientX - this._dragX;
+      this._dragX = event.clientX;
+      // Same feel as OrbitControls: a full viewport width sweeps 2π · rotateSpeed.
+      const yaw =
+        settings.camera.fixedYaw -
+        (dx / this.domElement.clientWidth) * Math.PI * 2 * this.controls.rotateSpeed;
+      settings.camera.fixedYaw = MathUtils.euclideanModulo(yaw + Math.PI, Math.PI * 2) - Math.PI;
+    };
+    this._onDragEnd = (event) => {
+      if (event.button === 2) this._dragX = null;
+    };
+    domElement.addEventListener('pointerdown', this._onDragStart);
+    window.addEventListener('pointermove', this._onDragMove);
+    window.addEventListener('pointerup', this._onDragEnd);
   }
 
   /** Wheel zoom. Multiplicative, so each notch feels the same at any distance. */
@@ -96,6 +123,18 @@ export class CameraRig {
     this.controls.minPolarAngle = cam.minPolar;
     this.controls.maxPolarAngle = cam.maxPolar;
 
+    // Fixed bearing: pinning both limits to one angle is all it takes — the
+    // controls clamp the orbit into it on their own update, so the follow, the
+    // zoom and the shake below keep working exactly as they do when it is free.
+    this.controls.enableRotate = !cam.fixed;
+    if (cam.fixed) {
+      this.controls.minPolarAngle = this.controls.maxPolarAngle = cam.fixedPolar;
+      this.controls.minAzimuthAngle = this.controls.maxAzimuthAngle = cam.fixedYaw;
+    } else {
+      this.controls.minAzimuthAngle = -Infinity;
+      this.controls.maxAzimuthAngle = Infinity;
+    }
+
     // Blend the orbit target between the character and any active ability.
     const blend = MathUtils.clamp(this.focusWeight * cam.autoFrame, 0, 0.85);
     _desiredTarget.copy(this.anchor);
@@ -133,6 +172,9 @@ export class CameraRig {
 
   dispose() {
     this.domElement.removeEventListener('wheel', this._onWheel);
+    this.domElement.removeEventListener('pointerdown', this._onDragStart);
+    window.removeEventListener('pointermove', this._onDragMove);
+    window.removeEventListener('pointerup', this._onDragEnd);
     this.controls.dispose();
   }
 }

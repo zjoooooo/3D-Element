@@ -2,18 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frost-sandbox",
+      "name": "dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 5173,
-      "url": "http://127.0.0.1:5173"
-    },
-    {
-      "name": "frost-verify",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5321", "--strictPort"],
-      "port": 5321,
-      "url": "http://127.0.0.1:5321"
+      "port": 5173
     }
   ]
 }

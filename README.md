@@ -34,6 +34,16 @@ out of the middle, tendrils crawl outward to the boundary, arcs run around the r
 disc burns. It holds there re-striking and hauling the air up into the pillar, then collapses to a
 thread. The circle you measured out before the click is exactly the circle you get.
 
+**T — Ember Bolt.** The small one, and the cheap one. A 30cm ball of fire thrown flat and fast,
+detonating on whatever it touches into a torn sphere of flame, a ring across the floor and a burnt
+patch that outlives it. It owns no mesh and no shader: the ball is a hundred and ninety additive
+particles a second emitted along the flight path with a fifth-of-a-second life, the wake is the same
+emission inheriting a fraction of the velocity instead of all of it, and the impact is the burst
+sphere and the decals every other element already drives. Which is why it is the one to copy when
+adding an ability.
+
+It is also the only ability that **does anything** — see *Targets and damage* below.
+
 Everything you can see is generated. There are no textures, no sprite sheets and no meshes on
 disk except the character: the crystals are procedural geometry, the bolt is a strip of ribbon
 placed entirely by a vertex shader, the meteor is an icosphere cratered and sliced by fracture
@@ -42,7 +52,7 @@ whole cage is that same ribbon strip threaded along four different parametric pa
 targeting circle, the rime, the burns and the molten cracks are signed-distance and noise shaders,
 and the mist, sparks, chips and glitter are GPU particles.
 
-**Every parameter is a live slider** — 938 of them — and they stay live while the simulation is
+**Every parameter is a live slider** — 1217 of them — and they stay live while the simulation is
 paused. That is the point of the project: freeze a frame mid-eruption, mid-strike or mid-burn with
 **P**, then reshape the silhouette, the palette and the timing against a still image.
 
@@ -73,22 +83,34 @@ npm run preview
 
 ### Assets
 
-Six binary assets are served from `public/` and loaded automatically at boot:
+Seven binary assets are served from `public/` and loaded automatically at boot:
 
 | File | Purpose |
 | --- | --- |
 | `public/models/Idle.fbx` | Rigged character **and** its idle animation clip |
 | `public/models/diffuse.png` | The character's colour map |
+| `public/models/run.fbx` | Run cycle, blended against the idle by travel speed |
 | `public/models/cast1.fbx` | Cast animation |
 | `public/models/cast2.fbx` | Cast animation |
 | `public/models/cast3.fbx` | Cast animation — the default for Frost Lance, Root Snare and Glacier Crown |
 | `public/hdri/spruit_sunrise.hdr` | HDR probe used for image-based lighting and crystal reflections |
 
-All four FBX files are Mixamo exports of the same rig, each carrying a skinned mesh plus one
-animation stack. The character comes from the idle file; the cast files are loaded for their clip
-alone, and the duplicate rig that arrives with each one is released the moment its `AnimationClip`
-has been taken. Clips bind to the skeleton by bone name, which is the whole reason an animation
-authored in another file plays here without retargeting.
+All five FBX files are Mixamo exports carrying a skinned mesh plus one animation stack. The
+character comes from the idle file; every other file is loaded for its clip alone, and the duplicate
+rig that arrives with each one is released the moment its `AnimationClip` has been taken. Clips bind
+to the skeleton by bone name, which is the whole reason an animation authored in another file plays
+here without retargeting.
+
+`prepareClip` in `animation/CharacterController.js` is what makes a foreign export playable: it takes
+the first stack that actually has tracks (some exports ship an empty `Take 001` beside the real one)
+and drops the tracks naming bones this rig does not have — the run cycle arrives with thirty finger
+tracks the character has no bones for.
+
+Dropping a new clip in is otherwise a copy into `public/models`, and `npm run check` says whether it
+took: it plays every clip on the real skeleton and measures how far the planted toe lands from where
+the idle puts it. That is the failure worth catching, because the hips track is authored in absolute
+centimetres and a clip from a differently proportioned character can quietly float or sink the whole
+body.
 
 The rig ships no material, so `diffuse.png` is loaded beside it and assigned as the colour map when
 the imported materials are converted to PBR — an FBX that *does* carry an embedded texture keeps its
@@ -98,6 +120,11 @@ Every ability picks the clip it throws — `castAnim` in its settings block, a d
 cast** in its editor folder. Out of the box slots 1, 5 and 6 — Frost Lance, Root Snare and Glacier
 Crown — throw `cast3`, and the other three throw `cast1`. The clip is a one-shot laid over
 the looping idle, with `character.castBlendIn` / `castBlendOut` as the two edges of that overlap.
+
+The clips are Mixamo performances and run long for a game — `cast3` alone spends 1.8 of its 3.25
+seconds winding up before the hand moves. `character.castSpeed` (**cast rate** in the editor) is the
+rate they are thrown at, which pulls the wind-up and the recovery in together; the spell leaves on
+the click regardless of where the clip has got to.
 
 The HDR is loaded as image-based lighting and as the reflection source for the ice — it is never
 shown as a visible sky. The stage keeps its flat dark backdrop.
@@ -113,10 +140,12 @@ shown as a visible sky. The stage keeps its flat dark backdrop.
 | **R** (or **3**) | Arm Cinder Fall — press again to put it away |
 | **F** (or **4**) | Arm Nova Beam — press again to put it away |
 | **V** (or **5**) | Arm Voltaic Snare — the far cast, aimed with a circle |
+| **X** (or **6**) | Arm Glacial Crown — the second far cast |
+| **T** (or **7**) | Arm Ember Bolt |
 | **Move the mouse** | Swing the aim arrow, or move the far-cast circle |
 | **Left click** | Cast along the arrow, or drop the circle where it is |
 | **Esc** / **right click** | Cancel an armed cast |
-| **Right mouse + drag** | Orbit the camera |
+| **Right mouse + drag** | Swing the camera bearing — works with **fixed angle** on or off; a right *click* (under 6px of travel) still cancels an armed cast |
 | **Scroll** | Zoom |
 | **G** | Show/hide the VFX editor |
 | **P** | Pause / resume — *the editor keeps applying* |
@@ -128,6 +157,12 @@ selected. Aiming closer than the selected ability's `minRange` tints it red and 
 set `minRange` to 0 if you would rather cast at your own feet, which is what the Snare ships with —
 a trap you cannot drop on yourself is missing half its uses. Cooldowns are per ability too, so
 spending one slot never locks the other out.
+
+The camera ships **fixed angle** on (`camera.fixed`): an isometric ARPG rig that sits on one bearing
+— `fixedPolar` off vertical, `fixedYaw` around it — rather than an orbit you fly by hand. It is what
+puts the whole footprint of a cast on screen, which is the point of an aim indicator drawn on the
+floor. Both angles, and the toggle, are live in the **Camera** folder; switching it off hands the
+right-drag orbit back, clamped by `minPolar` / `maxPolar` as before.
 
 ---
 
@@ -408,6 +443,34 @@ Everything else — pooling, the travelling front, the local frame, lights, phas
 cooldowns, the aim reach and camera framing — is inherited or driven off `ELEMENTS`. The HUD
 builds its slots from that array, so a new ability appears in the bar on its own.
 
+`abilities/FireballAbility.js` is the shortest worked example: no mesh, no shader, no new geometry,
+nothing but emission parameters and one flight path.
+
+### Targets and damage
+
+`world/TrainingDummies.js` is a ring of straw posts with hit points — the only thing in the project
+that can be damaged, and the measuring stick the abilities are otherwise missing. Each post is three
+primitives and a material of its own (the hit flash is per-target), takes a knock when it is hit,
+tips over at zero and stands back up after `dummies.respawn`.
+
+Both readouts are DOM rather than geometry. A health bar is a rectangle that has to stay legible at
+every camera distance and never be occluded, which is what a projected `<div>` is good at and what a
+sprite in the scene has to fight the renderer to achieve — and it keeps the feature in one file
+rather than adding a texture atlas and a draw call to say "184". `TrainingDummies.update` projects
+each target once per frame and writes one transform per readout; nothing in the CSS lays anything
+out, so a hundred figures cost a hundred transforms and no reflow.
+
+The hit test is two spheres. `damage(point, radius, amount)` falls off linearly to half at the rim,
+so `radius` is the honest reach of a blast rather than a cliff, and `hits(point, radius)` is the
+same overlap with no damage and no readouts — what a projectile asks every frame of its flight.
+
+Only **Ember Bolt** is wired to it, and it is wired in two places: `hitStop` in `onTravel`, which
+shortens the cast to the distance already flown so the burst lands *on* the target rather than on
+the floor behind it, and one `damage()` call in `onImpact`. Its `damage` and `damageRadius` are
+deliberately not scaled by any of the Global multipliers — turning the explosions up is a look, not
+a buff, and a sandbox has to be able to answer "does this read as hard as it hits" with the two
+separable. Pointing another ability at the dummies is those same two lines.
+
 ### Particles
 
 `particles/ParticleSystem.js` is a GPU-simulated, instanced-quad system. Motion (velocity, gravity,
@@ -460,8 +523,8 @@ target, blurred twice and projected onto the ground.
 ## Editor and presets
 
 Press **G** for the panel. Folders: Presets, Global, Aim indicator, Far-cast circle, Frost Lance,
-Storm Lance, Cinder Fall, Nova Beam, Voltaic Snare, Environment, Post processing, Camera,
-Character. Every folder starts collapsed — there are enough controls here that one open section
+Storm Lance, Cinder Fall, Nova Beam, Voltaic Snare, Glacial Crown, Ember Bolt, Environment, Post
+processing, Camera, Character. Every folder starts collapsed — there are enough controls here that one open section
 pushes the rest off the screen.
 
 - **Global** multipliers scale everything at once (speed, glow, noise, particles, lights, impact
@@ -485,6 +548,14 @@ pushes the rest off the screen.
   column, the tendrils, the rim arcs, the shared filament shape and flicker, the ribbon and its
   colour, the field on the floor, the burns, sparks/updraft/smoke/debris, throw/snap/hold, and the
   dynamic light.
+- **Ember Bolt** (64 controls) — the cast, what it does, where it leaves the hand, the ball, what it
+  sheds, where it lands, the light and the palette. The shortest ability folder in the panel, because
+  the ability is nothing but emission parameters: `size`, `coreRate` and `coreLife` between them
+  decide whether the head reads as a ball or as a streak, and `burstTurbulence` is what stops the
+  impact reading as a solid orange sphere.
+- **Training dummies** — how many targets, how far out they stand, their hit points and how long
+  they stay down. `count` and `ringRadius` are read every frame by the system itself, so dragging
+  either rebuilds or repositions the ring live.
 - **Presets** save to `localStorage`, and can be duplicated, deleted, exported to JSON, imported
   from JSON, or reset to the shipped defaults.
 

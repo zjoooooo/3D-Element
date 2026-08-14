@@ -14,20 +14,182 @@ import { LAYER } from '../core/Layers.js';
 import { disposeObject } from '../utils/dispose.js';
 import { clamp, damp } from '../utils/math.js';
 
-const CHARACTER_URL = './models/Idle.fbx';
-/** This export carries no material, so the skin ships beside it as a file. */
-const CHARACTER_TEXTURE_URL = './models/diffuse.png';
-/** One file per entry in `CAST_ANIMATIONS`; only their clips are kept. */
-const castUrl = (name) => `./models/${name}.fbx`;
+/**
+ * Character id → the files one skin needs.
+ *
+ * Clips are listed per character because Mixamo retargets the hips track in
+ * absolute centimetres: a clip downloaded for one rig quietly floats or sinks
+ * on another, so every character brings its own set. `model` carries the mesh
+ * and the idle clip in one export; `texture` is the sidecar skin for models
+ * that ship without an embedded map. The clip ids are fixed —
+ * `settings[element].castAnim` and the editor dropdown speak them — so swapping
+ * an animation is editing a filename here, not renaming a download.
+ */
+export const CHARACTERS = {
+  classic: {
+    model: 'Idle.fbx',
+    texture: 'diffuse.png',
+    clips: { run: 'run.fbx', cast1: 'cast1.fbx', cast2: 'cast2.fbx', cast3: 'cast3.fbx' }
+  },
+  sorcerer: {
+    model: 'Standing Idle.fbx',
+    texture: 'diffuse2.png',
+    clips: {
+      run: 'Fast Run-2.fbx',
+      cast1: 'Standing 1H Magic Attack 02.fbx',
+      cast2: 'Standing 1H Magic Attack 02.fbx',
+      cast3: 'Standing 1H Magic Attack 02.fbx'
+    }
+  }
+};
+
+const modelUrl = (file) => `./models/${file}`;
+const _scratch = new Vector3();
 /** Mixamo exports in centimetres. */
 const FBX_SCALE = 0.01;
 /** Rigs vary; normalise to a believable human height so the world scale holds. */
 const TARGET_HEIGHT = 1.78;
 
 /**
+ * Pull the clip out of a freshly loaded export and make it playable on *this* rig.
+ *
+ * Two things sit between a Mixamo file and the mixer:
+ *
+ *  - Some exports carry an empty `Take 001` beside the real take, so the first
+ *    clip in the list is not necessarily the one holding the animation.
+ *  - A clip authored on another character binds by bone name, so its tracks for
+ *    bones this rig does not have — fingers, usually — animate nothing and warn
+ *    once each at bind time. They are dropped here instead.
+ *
+ * The hips track is left exactly as authored. It is the one channel in absolute
+ * centimetres rather than a rotation, so a clip from a differently proportioned
+ * character *can* stand this one off the floor — but rescaling it on the clips
+ * we actually ship pushes the feet 5cm through it, so the correction is not
+ * applied blind. `npm run check` measures where the planted foot lands.
+ *
+ * @param {string} name                  what to call the clip
+ * @param {import('three').Group} file   the loaded export
+ * @param {Set<string>} bones            every node name in this rig
+ * @returns {import('three').AnimationClip|null}
+ */
+export function prepareClip(name, file, bones) {
+  const clip = (file?.animations ?? []).find((entry) => entry.tracks.length > 0);
+  if (!clip) {
+    console.warn(`[CharacterController] "${name}" carries no animation`);
+    return null;
+  }
+
+  clip.tracks = clip.tracks.filter((track) => bones.has(track.name.split('.')[0]));
+  if (!clip.tracks.length) {
+    console.warn(`[CharacterController] "${name}" does not match this skeleton`);
+    return null;
+  }
+
+  clip.name = name;
+  return clip;
+}
+
+/** Both toe bones, whatever namespace the exporter wrote them under. */
+function findToes(root) {
+  const toes = [];
+  root.traverse((node) => {
+    if (!node.isBone) return;
+    const short = node.name.split(':').pop().replace(/^mixamorig/i, '');
+    if (short === 'LeftToeBase' || short === 'RightToeBase') toes.push(node);
+  });
+  return toes;
+}
+
+/** How high the lower toe is standing right now, world space. */
+function toeHeight(root, toes) {
+  root.updateMatrixWorld(true);
+  let lowest = Infinity;
+  for (const toe of toes) lowest = Math.min(lowest, toe.getWorldPosition(_scratch).y);
+  return lowest;
+}
+
+/**
+ * Take back out whatever the idle clip does to the rig's *height*.
+ *
+ * The drop in `_buildBundle` is measured on the bind pose, and a clip is under
+ * no obligation to agree with it. `Idle.fbx` binds standing on its own origin,
+ * so its drop is zero and nothing moves. `Standing Idle.fbx` binds *centred* on
+ * its origin — half the body below the floor — so it is lifted 0.89m to stand
+ * up, and then the first frame of its own hips track puts the body back where
+ * the file had it. The lift stays. The character floats by exactly half its own
+ * height, which is what you are looking at when a new model hangs in the air.
+ *
+ * So: measure the feet in the bind pose, measure them again with the clip
+ * playing, and subtract the difference. A rig that already stood correctly
+ * measures zero and is left alone.
+ *
+ * It has to be the toes. `Box3.setFromObject` transforms a skinned mesh's
+ * *bind* geometry by its node matrix, and that node does not move when the
+ * bones do — the box happily reports the feet on the floor no matter where the
+ * animation has actually put them, which is why the original placement could
+ * not see this at all.
+ */
+function plantOnFloor(root, mixer, action) {
+  const toes = findToes(root);
+  if (!toes.length || !action) return;
+
+  const bindHeight = toeHeight(root, toes);
+
+  action.play();
+  const clip = action.getClip();
+  const step = 1 / 30;
+  let lowest = Infinity;
+  // Over a cycle rather than at frame zero: an idle that shifts its weight has
+  // a lowest moment, and that is the one that should be touching the floor.
+  for (let time = 0; time < Math.min(clip.duration, 4); time += step) {
+    mixer.update(step);
+    lowest = Math.min(lowest, toeHeight(root, toes));
+  }
+  action.stop();
+  mixer.setTime(0);
+
+  if (Number.isFinite(lowest)) root.position.y -= lowest - bindHeight;
+  root.updateMatrixWorld(true);
+}
+
+/**
+ * Derive a rig's own forward from its bind pose.
+ *
+ * The heel → toe vector is the most reliable indicator of facing on a bind
+ * pose that may not be axis aligned, and everything that turns the body reads
+ * the yaw it produces.
+ */
+function measureFacing(root) {
+  root.updateMatrixWorld(true);
+
+  let foot = null;
+  let toe = null;
+  root.traverse((node) => {
+    if (!node.isBone) return;
+    // Exporters disagree on the namespace: "mixamorig:LeftFoot", "mixamorigLeftFoot".
+    const short = node.name.split(':').pop().replace(/^mixamorig/i, '');
+    if (short === 'LeftFoot' && !foot) foot = node;
+    else if (short === 'LeftToeBase' && !toe) toe = node;
+  });
+
+  const forwardAxis = new Vector3(0, 0, 1);
+  if (foot && toe) {
+    const heel = foot.getWorldPosition(new Vector3());
+    const tip = toe.getWorldPosition(new Vector3()).sub(heel).setY(0);
+    if (tip.lengthSq() > 1e-6) forwardAxis.copy(tip).normalize();
+  }
+
+  return {
+    forwardAxis,
+    forwardYaw: Math.atan2(forwardAxis.x, forwardAxis.z),
+    rightAxis: new Vector3(0, 1, 0).cross(forwardAxis).normalize()
+  };
+}
+
+/**
  * Loads the rigged FBX, normalises it for the scene and drives its animation.
  *
- * The character breathes on a loop, walks where you steer it, turns to face
+ * The character breathes on a loop, runs where you steer it, turns to face
  * where you are aiming, and throws one of the cast clips when you fire. Those
  * clips ship as separate Mixamo exports of the *same* skeleton, so only their
  * `AnimationClip` is kept: the mixer binds tracks by bone name, which is all
@@ -37,11 +199,12 @@ const TARGET_HEIGHT = 1.78;
  * choice, editable live, which is why `playCast` takes the name each time
  * rather than caching one.
  *
- * Note there is no locomotion clip on disk — the rig ships an idle and three
- * casts, nothing else — so `move` carries the walk entirely in the transform:
- * position, heading, and a lean into the run. The legs keep playing the idle
- * underneath. Drop a walk cycle in beside the casts and this is where it would
- * be blended in against `speed`.
+ * Locomotion is the idle and the run cycle held against each other: `move`
+ * carries the travel in the transform — position, heading, a lean into the run
+ * — and `_blendLegs` trades weight between the two clips against how fast the
+ * body is actually going, so a tap of a key walks and a held key runs. A cast
+ * takes both of them off screen for its duration; it is a full-body clip and a
+ * run left underneath it would average the two into neither.
  */
 export class CharacterController {
   constructor(environment) {
@@ -59,10 +222,15 @@ export class CharacterController {
     this.mixer = null;
     /** The looping breath, always running underneath a cast. */
     this.idle = null;
+    /** The looping run cycle, weighted against the idle by travel speed. */
+    this.run = null;
     /** name → one-shot cast action. */
     this.casts = new Map();
     /** The cast currently being thrown, null while idling. */
     this._cast = null;
+    /** Every character built so far, kept warm so switching back is instant. */
+    this._bundles = new Map();
+    this._active = null;
     this.height = 1.8;
     this.headPosition = new Vector3(0, 1.5, 0);
     /** The rig's own forward, in model space — the axis a bank rotates about. */
@@ -87,15 +255,39 @@ export class CharacterController {
   }
 
   /**
+   * Load the configured character and put it on stage.
    * @param {import('../loaders/AssetLoader.js').AssetLoader} assets
    */
   async load(assets) {
-    // The cast files are the same character again, so they cost a parse each
+    return this.setCharacter(settings.character.model, assets);
+  }
+
+  /**
+   * Switch to (and lazily build) a character by id.
+   *
+   * Safe at runtime: each character is built once and kept warm, so toggling
+   * back is instant and no GPU resource is ever shared between two rigs.
+   */
+  async setCharacter(id, assets) {
+    const character = CHARACTERS[id] ?? Object.values(CHARACTERS)[0];
+    let bundle = this._bundles.get(character);
+    if (!bundle) {
+      bundle = await this._buildBundle(character, assets);
+      this._bundles.set(character, bundle);
+    }
+    this._activate(bundle);
+    return this;
+  }
+
+  /** Parse one character's files into a self-contained, stage-ready bundle. */
+  async _buildBundle(character, assets) {
+    const clipIds = ['run', ...CAST_ANIMATIONS];
+    // The clip files are the same skeleton again, so they cost a parse each
     // but nothing at run time — everything but the clip is thrown away below.
-    const [fbx, skin, ...castFiles] = await Promise.all([
-      assets.loadFBX(CHARACTER_URL),
-      assets.loadTexture(CHARACTER_TEXTURE_URL),
-      ...CAST_ANIMATIONS.map((name) => assets.loadFBX(castUrl(name)))
+    const [fbx, skin, ...clipFiles] = await Promise.all([
+      assets.loadFBX(modelUrl(character.model)),
+      assets.loadTexture(modelUrl(character.texture)),
+      ...clipIds.map((id) => assets.loadFBX(modelUrl(character.clips[id] ?? `${id}.fbx`)))
     ]);
     // The FBX resolves before its textures do; material prep inspects them.
     await assets.settled();
@@ -114,69 +306,98 @@ export class CharacterController {
     box.setFromObject(fbx);
     box.getSize(size);
     box.getCenter(center);
-    this.height = size.y;
     fbx.position.x -= center.x;
     fbx.position.z -= center.z;
     fbx.position.y -= box.min.y;
 
     this._prepareMaterials(fbx, skin);
-    this._measureFacing(fbx);
 
-    this.tilt.add(fbx);
-    this.model = fbx;
-    this.headPosition.set(0, size.y * 0.86, 0);
+    const mixer = new AnimationMixer(fbx);
+    mixer.addEventListener('finished', this._onCastFinished);
 
-    this.mixer = new AnimationMixer(fbx);
-    this.mixer.addEventListener('finished', this._onCastFinished);
-
-    // The breath ships inside the character file itself.
-    const idleClip = (fbx.animations ?? [])[0];
-    if (!idleClip) {
-      console.warn('[CharacterController] no idle clip found in the FBX');
-    } else {
-      this.idle = this.mixer.clipAction(idleClip);
-      this.idle.setLoop(LoopRepeat, Infinity);
-      this.idle.play();
-    }
-
+    // Every clip binds by bone name, so this rig's names decide what plays.
     const bones = new Set();
     fbx.traverse((node) => bones.add(node.name));
-    CAST_ANIMATIONS.forEach((name, index) => this._registerCast(name, castFiles[index], bones));
 
-    return this;
+    const bundle = {
+      root: fbx,
+      mixer,
+      idle: null,
+      run: null,
+      casts: new Map(),
+      height: size.y,
+      headY: size.y * 0.86,
+      ...measureFacing(fbx)
+    };
+
+    // The breath ships inside the character file itself.
+    const idleClip = prepareClip('idle', fbx, bones);
+    if (!idleClip) {
+      console.warn(`[CharacterController] no idle clip found in ${character.model}`);
+    } else {
+      bundle.idle = mixer.clipAction(idleClip);
+      bundle.idle.setLoop(LoopRepeat, Infinity);
+      // The drop above was measured on a pose nobody ever sees. Plant it against
+      // the one that is actually on screen.
+      plantOnFloor(fbx, mixer, bundle.idle);
+    }
+
+    // The run loops from the start and simply carries no weight while standing,
+    // so stepping off is a blend rather than a clip starting from frame zero.
+    const runClip = prepareClip('run', clipFiles[0], bones);
+    if (runClip) {
+      bundle.run = mixer.clipAction(runClip);
+      bundle.run.setLoop(LoopRepeat, Infinity);
+      disposeObject(clipFiles[0]); // the duplicate rig it came with, like the casts
+    }
+
+    CAST_ANIMATIONS.forEach((name, index) => {
+      const clip = prepareClip(name, clipFiles[index + 1], bones);
+      if (!clip) return;
+      const action = mixer.clipAction(clip);
+      action.setLoop(LoopOnce, 1);
+      // Hold the last frame rather than snapping home; the fade back to the
+      // idle is what actually ends the cast.
+      action.clampWhenFinished = true;
+      bundle.casts.set(name, action);
+      disposeObject(clipFiles[index + 1]);
+    });
+
+    return bundle;
   }
 
-  /**
-   * Keep one cast file's clip and release the duplicate rig that came with it.
-   *
-   * @param {string} name                 the id used by `settings[element].castAnim`
-   * @param {import('three').Group} file  the freshly loaded FBX
-   * @param {Set<string>} bones           every node name in *this* rig
-   */
-  _registerCast(name, file, bones) {
-    const clip = (file?.animations ?? [])[0];
-    if (!clip) {
-      console.warn(`[CharacterController] "${name}.fbx" carries no animation`);
-      return;
+  /** Put a built bundle on stage, replacing whatever is there. */
+  _activate(bundle) {
+    if (this._active === bundle) return;
+    // Rigs bind facing different ways; carry the current heading across.
+    const yaw = this._active ? this.facing : null;
+
+    if (this._active) {
+      this._active.mixer.stopAllAction();
+      this.tilt.remove(this._active.root);
     }
 
-    // A clip authored against another export of this rig binds by bone name, so
-    // a mismatch shows up as a track that resolves to nothing rather than as an
-    // error — say so here instead of letting the cast silently do nothing.
-    if (!clip.tracks.some((track) => bones.has(track.name.split('.')[0]))) {
-      console.warn(`[CharacterController] "${name}.fbx" does not match this skeleton`);
-      return;
+    this._active = bundle;
+    this.model = bundle.root;
+    this.mixer = bundle.mixer;
+    this.idle = bundle.idle;
+    this.run = bundle.run;
+    this.casts = bundle.casts;
+    this._cast = null;
+    this.height = bundle.height;
+    this.headPosition.set(0, bundle.headY, 0);
+    this.forwardAxis.copy(bundle.forwardAxis);
+    this._forwardYaw = bundle.forwardYaw;
+    this._rightAxis.copy(bundle.rightAxis);
+
+    this.tilt.add(bundle.root);
+    if (yaw !== null) this.setFacing(yaw);
+
+    if (this.idle) this.idle.reset().play();
+    if (this.run) {
+      this.run.reset().play();
+      this.run.weight = 0;
     }
-
-    clip.name = name;
-    const action = this.mixer.clipAction(clip);
-    action.setLoop(LoopOnce, 1);
-    // Hold the last frame rather than snapping home; the fade back to the idle
-    // is what actually ends the cast.
-    action.clampWhenFinished = true;
-    this.casts.set(name, action);
-
-    disposeObject(file);
   }
 
   /**
@@ -243,36 +464,6 @@ export class CharacterController {
     });
   }
 
-  /**
-   * Derive the rig's own forward from the bind pose.
-   *
-   * The heel → toe vector is the most reliable indicator of facing on a bind
-   * pose that may not be axis aligned, and everything that turns the body reads
-   * the yaw it produces.
-   */
-  _measureFacing(root) {
-    root.updateMatrixWorld(true);
-
-    let foot = null;
-    let toe = null;
-    root.traverse((node) => {
-      if (!node.isBone) return;
-      // Exporters disagree on the namespace: "mixamorig:LeftFoot", "mixamorigLeftFoot".
-      const short = node.name.split(':').pop().replace(/^mixamorig/i, '');
-      if (short === 'LeftFoot' && !foot) foot = node;
-      else if (short === 'LeftToeBase' && !toe) toe = node;
-    });
-
-    if (foot && toe) {
-      const heel = foot.getWorldPosition(new Vector3());
-      const tip = toe.getWorldPosition(new Vector3()).sub(heel).setY(0);
-      if (tip.lengthSq() > 1e-6) this.forwardAxis.copy(tip).normalize();
-    }
-
-    this._forwardYaw = Math.atan2(this.forwardAxis.x, this.forwardAxis.z);
-    this._rightAxis.set(0, 1, 0).cross(this.forwardAxis).normalize();
-  }
-
   /* ------------------------------------------------------------------ */
   /* cast clips                                                          */
   /* ------------------------------------------------------------------ */
@@ -291,7 +482,7 @@ export class CharacterController {
     this._cast = next;
 
     next.reset();
-    next.setEffectiveTimeScale(1);
+    next.setEffectiveTimeScale(settings.character.castSpeed);
     next.play();
 
     // Fade from whatever is actually on screen — the idle on a first cast, the
@@ -300,6 +491,10 @@ export class CharacterController {
     // restarts it: `reset()` has already left it at full weight.
     const from = previous ?? this.idle;
     if (from !== next) next.crossFadeFrom(from, settings.character.castBlendIn, false);
+
+    // The legs leave with the idle. Only on the *first* throw: a re-cast would
+    // restart this fade from full weight and pop the run back for a frame.
+    if (this.run && !previous) this.run.fadeOut(settings.character.castBlendIn);
   }
 
   /** True while a cast clip is playing. */
@@ -317,6 +512,12 @@ export class CharacterController {
     this.idle.enabled = true;
     this.idle.setEffectiveTimeScale(1);
     this.idle.crossFadeFrom(event.action, settings.character.castBlendOut, false);
+
+    // Same for the legs — their own fade left them disabled at zero weight.
+    if (this.run) {
+      this.run.enabled = true;
+      this.run.fadeIn(settings.character.castBlendOut);
+    }
   };
 
   /* ------------------------------------------------------------------ */
@@ -444,6 +645,29 @@ export class CharacterController {
     this.tilt.position.set(0, 0, 0);
   }
 
+  /**
+   * Trade weight between the idle and the run against how fast the body is
+   * actually travelling.
+   *
+   * Written to `weight` — the *base* the mixer's own cross-fades are applied on
+   * top of — rather than through `setEffectiveWeight`, which cancels any fade in
+   * flight. So the legs are steered here every frame and a cast still owns the
+   * blend for as long as it runs.
+   */
+  _blendLegs() {
+    if (!this.run || !this.idle) return;
+
+    const c = settings.character;
+    const blend = clamp(this.velocity.length() / Math.max(0.001, c.walkSpeed), 0, 1);
+    this.idle.weight = 1 - blend;
+    this.run.weight = blend;
+
+    // Stride follows ground speed, or the feet skate across the floor. The clip
+    // covers `walkSpeed` at rate 1 closely enough that `runPlayback` starts at
+    // one; it is the knob for when it does not.
+    this.run.timeScale = blend * c.runPlayback;
+  }
+
   update(dt) {
     // Driven by the *simulation* delta, and re-applied every frame even at
     // dt = 0: pausing mid-cast holds the lunge, and `castLean` stays a live
@@ -452,6 +676,7 @@ export class CharacterController {
 
     if (!this.mixer) return;
 
+    this._blendLegs();
     this.mixer.timeScale = settings.global.animationSpeed;
     this.mixer.update(dt);
   }
@@ -461,10 +686,16 @@ export class CharacterController {
   }
 
   dispose() {
-    this.mixer?.removeEventListener('finished', this._onCastFinished);
-    this.mixer?.stopAllAction();
+    for (const bundle of this._bundles.values()) {
+      bundle.mixer.removeEventListener('finished', this._onCastFinished);
+      bundle.mixer.stopAllAction();
+      disposeObject(bundle.root);
+    }
+    this._bundles.clear();
+    this._active = null;
     this.mixer = null;
     this.idle = null;
+    this.run = null;
     this.casts.clear();
     this._cast = null;
     disposeObject(this.root);

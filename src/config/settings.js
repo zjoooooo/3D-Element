@@ -207,12 +207,20 @@ export const settings = {
   /* Character                                                           */
   /* ------------------------------------------------------------------ */
   character: {
+    // Which rig is on stage — a key of CHARACTERS in CharacterController.
+    model: 'sorcerer',
+
     /* --- blending the cast clip over the idle --- */
     // The idle loops forever; a cast clip is a one-shot laid over the top of it,
     // so these are the two edges of that overlap. In fast, out soft: the throw
     // has to land on the frame you clicked, the recovery does not.
     castBlendIn: 0.12, // seconds to cross-fade from the idle into the cast
     castBlendOut: 0.3, // seconds to fall back to the idle once it finishes
+    // Mixamo casts are authored at a performance's pace, not a game's — `cast3`
+    // spends 1.8s winding up before the hand goes anywhere. This is the rate the
+    // clip is thrown at, so it shortens the wind-up and the recovery together;
+    // the spell itself has already left on the click either way.
+    castSpeed: 1.5,
 
     /* --- how the body sells the cast --- */
     turnToAim: true, // face the arrow while aiming
@@ -233,6 +241,10 @@ export const settings = {
     walkStop: 0.000002, // ease back to standing once they all let go
     turnToMove: 0.00002, // heading follow while walking; aiming overrides it
     walkLean: 0.12, // radians the body leans into a full-speed run
+    // The run clip plays at travel speed / `walkSpeed`, so its stride tracks the
+    // ground on its own. This trims that rate when the two disagree: raise it if
+    // the feet skate forward, lower it if they scuff backwards.
+    runPlayback: 1.0,
     roamRadius: 90 // metres from the origin the character is kept inside
   },
 
@@ -1724,25 +1736,179 @@ export const settings = {
     colorFlash: '#cdefff' // the full-screen flash when it blooms
   },
 
+  /* ================================================================== */
+  /* FIREBALL — the small one                                            */
+  /* ================================================================== */
+  /**
+   * A fist-sized ball of fire, thrown flat and fast, that pops where it lands.
+   *
+   * The cheap ability of the set, and deliberately so: it has no mesh and no
+   * shader of its own. The head is a dense cluster of additive particles fed a
+   * hundred-odd times a second along the flight path, the wake is the same
+   * emission with a shorter rate and a longer life, and the impact is the burst
+   * sphere, the shockwave decal and the scorch every other element already uses.
+   * That makes it the file to copy when adding an ability — see the README —
+   * because every piece of it is a shared system rather than new machinery.
+   *
+   * Sizes are in metres and rates in particles/second, both landed on by eye at
+   * `size` 0.4: a ball you could hold, not a meteor.
+   */
+  fireball: {
+    /* --- the cast --- */
+    range: 20.0, // maximum throw, metres
+    minRange: 0, // it is a bolt, not an eruption — casting at your feet is fine
+    speed: 34.0, // how fast the ball travels, metres/second — light things move fast
+    cooldown: 0.25, // the spammable one
+    castAnim: 'cast2', // the shortest of the three clips, throw at 0.27s
+
+    /* --- what it does --- */
+    // The only ability wired to the training dummies. Damage is deliberately
+    // *not* scaled by any of the global VFX multipliers: turning the explosions
+    // up is a look, not a buff, and the two have to stay separable or the sandbox
+    // stops being able to answer "does this read as hard as it hits".
+    //
+    // The blast reaches further than the fire is drawn — `burstSize` is 0.9 —
+    // because a bolt that visibly washes over a target and does nothing reads as
+    // broken, while the reverse is never noticed.
+    damage: 140, // at the centre, falling to half at the rim
+    damageRadius: 1.4, // metres
+    hitStop: true, // whether a mid-flight hit detonates it early
+
+    /* --- where it leaves the hand --- */
+    // The ball starts at the hand rather than at the caster's feet, then flies
+    // flat and dips into the floor over the last stretch.
+    handHeight: 1.32,
+    handForward: 0.6,
+    handSide: 0.3,
+    endHeight: 0.45, // height it is at when it reaches the target
+    dip: 0.65, // how late in the flight the drop happens (1 = only at the end)
+
+    /* --- the ball --- */
+    // "Small" is read against the caster and nothing else: at 1.78m tall, his
+    // head is about 0.22m across, so a ball he could palm is `size` 0.15 — a
+    // 0.3m sphere. Everything below is sized off that one number, and the
+    // temptation to raise it is the temptation to build a second Cinder Fall.
+    size: 0.15, // radius of the head, metres
+    coreRate: 190, // particles/second forming the head
+    coreLife: 0.18, // seconds each of them lives — short, or the ball smears
+    coreGlow: 3.0, // small and bright beats large and dim: it has to still read
+    coreTurbulence: 0.6,
+    coreRise: 0.4, // buoyancy on the head's own particles
+
+    /* --- what it sheds on the way --- */
+    // Deliberately thin. A heavy wake is the single thing that makes a small
+    // projectile read as a big one — mass is inferred from what it leaves behind.
+    sparkRate: 45,
+    sparkSpeed: 1.3,
+    sparkSize: 0.06,
+    sparkLifetime: 0.32,
+    sparkGravity: -6.5,
+    sparkStretch: 0.5,
+    smokeRate: 14,
+    smokeSize: 0.22,
+    smokeLifetime: 0.75,
+    smokeRise: 1.1,
+    smokeOpacity: 0.26,
+
+    /* --- where it lands --- */
+    // Chest-high on the caster and no higher. A pop, not a detonation: the
+    // shake and the flash are near zero, because a screen that lurches is a
+    // screen telling you something heavy just happened. The turbulence stays
+    // high — a small sphere with a smooth edge reads as a solid orange ball.
+    burstSize: 0.9, // outer radius the fire reaches, metres
+    burstIntensity: 2.6,
+    burstTurbulence: 1.9,
+    burstEmbers: 55,
+    burstSparks: 60,
+    burstSmoke: 10,
+    shockRadius: 1.1,
+    scorchRadius: 0.7,
+    scorchLife: 3.0,
+    scorchIntensity: 0.7,
+    impactShake: 0.14,
+    shakeDuration: 0.35,
+    impactFlash: 0.05,
+    castFlash: 0.05, // the muzzle flash as it leaves the hand
+    muzzleSparks: 18,
+
+    /* --- light --- */
+    // A tight pool that travels with it. Reach is the other half of how big
+    // something reads: a 0.3m ball lighting the floor 8m away is a lie the eye
+    // catches before it catches the sphere.
+    lightColor: '#ff8a2b',
+    lightIntensity: 1.7,
+    lightRadius: 5.0,
+
+    /* --- colour --- */
+    // Hot core to cooling edge, the same black-body walk the meteor takes.
+    colorHot: '#fff1c4',
+    colorFlameMid: '#ff9a2e',
+    colorFlameEdge: '#d63a12',
+    colorEmberA: '#fff4cf',
+    colorEmberB: '#ffa93a',
+    colorEmberC: '#ff5a18',
+    colorEmberD: '#6d1405',
+    colorSmokeA: '#5a4438',
+    colorSmokeB: '#3b2c25',
+    colorSmokeC: '#241b17',
+    colorSmokeD: '#14100e',
+    colorScorch: '#241109',
+    colorCrack: '#ff7a25',
+    colorShockA: '#ffd9a0',
+    colorShockB: '#ff7a2a',
+    colorFlash: '#ffb066'
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Training dummies — the things that can be hit                       */
+  /* ------------------------------------------------------------------ */
+  /**
+   * A ring of straw posts with hit points, and the two readouts that make a
+   * number real: a bar that drops and a figure that floats off.
+   *
+   * They stand at `ringRadius` from the origin, evenly spaced and facing in, so
+   * whichever way the camera is locked there is a target in frame. `count` and
+   * `ringRadius` are live — the system rebuilds or repositions itself when they
+   * change rather than needing a reload.
+   */
+  dummies: {
+    count: 6,
+    ringRadius: 9.0, // metres from the origin
+    hp: 500,
+    respawn: 4.0, // seconds down before it stands back up
+    showBars: true
+  },
+
   /* ------------------------------------------------------------------ */
   /* Camera rig                                                          */
   /* ------------------------------------------------------------------ */
   camera: {
-    distance: 11.5,
+    /* --- fixed bearing: an isometric ARPG rig rather than a free orbit --- */
+    // Diablo's camera does not orbit: it sits on one bearing, high enough to see
+    // the arena and flat enough that the floor reads as a map. With `fixed` on,
+    // right-drag is off and the two angles below hold the rig there. Turn it off
+    // and the free orbit comes back, clamped by min/max pitch as before.
+    fixed: true,
+    fixedPolar: 0.72, // radians off vertical: 0 is straight down, π/2 is level
+    fixedYaw: 0.79, // the bearing it looks along; π/4 is the isometric diagonal
+
+    // Further out and flatter than a cinematic third-person rig: the long lens
+    // is what keeps the floor from fanning out toward the edges of the frame.
+    distance: 32,
     minDistance: 3.5,
-    maxDistance: 30,
+    maxDistance: 44, // has to clear `distance`, or the first scroll notch yanks it back in
     zoomSpeed: 1.0,
     zoomDamping: 0.002,
     minPolar: 0.35,
     maxPolar: 1.32,
-    fov: 46,
-    targetHeight: 1.35,
-    // Fraction of the follow gap left after 1s. Deliberately loose: this is the
-    // leash that lets the character pull ahead in frame while walking — about
-    // 2.4m at full speed rather than being pinned to the centre — which is most
-    // of what makes a walk read as travel instead of a camera pan. It also
-    // paces the drift toward an active cast, so tightening it snaps both back.
-    damping: 0.2,
+    fov: 34,
+    targetHeight: 1.1,
+    // Fraction of the follow gap left after 1s. A short leash: an ARPG keeps the
+    // character near the middle of the frame, because the frame *is* the play
+    // area. Loosen it toward 0.2 and the body pulls a couple of metres ahead
+    // while running, which reads more cinematic and less like a game board. It
+    // also paces the drift toward an active cast, so this trades off both.
+    damping: 0.04,
     autoFrame: 0.35 // how strongly the rig drifts toward an active cast
   },
 
@@ -1846,7 +2012,7 @@ export const CastShape = Object.freeze({
  * array, and the index is the slot the keyboard binds to — adding a third
  * ability is a new file, an entry here and a settings block above.
  */
-export const ELEMENTS = ['ice', 'thunder', 'meteor', 'beam', 'snare', 'glacier'];
+export const ELEMENTS = ['ice', 'thunder', 'meteor', 'beam', 'snare', 'glacier', 'fireball'];
 
 /**
  * Registry metadata: how an ability is presented, and how it is aimed.
@@ -1872,7 +2038,8 @@ export const ELEMENT_META = {
     key: 'X',
     hint: 'Glacial Crown',
     cast: CastShape.ZONE
-  }
+  },
+  fireball: { label: 'Ember Bolt', accent: '#ffa23c', key: 'T', hint: 'Ember Bolt' }
 };
 
 /** How the given ability is aimed. Line unless its metadata says otherwise. */

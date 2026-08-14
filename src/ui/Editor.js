@@ -1,5 +1,6 @@
 import GUI from 'lil-gui';
 import { settings, CAST_ANIMATIONS } from '../config/settings.js';
+import { CHARACTERS } from '../animation/CharacterController.js';
 import { PresetManager } from './PresetManager.js';
 
 /**
@@ -40,6 +41,8 @@ export class Editor {
     this._buildBeam();
     this._buildSnare();
     this._buildGlacier();
+    this._buildFireball();
+    this._buildDummies();
     this._buildEnvironment();
     this._buildPost();
     this._buildCamera();
@@ -1563,6 +1566,108 @@ export class Editor {
 
   /* ------------------------------------------------------------------ */
 
+  _buildFireball() {
+    const folder = this.gui.addFolder('🔥  Ember Bolt');
+    const c = settings.fireball;
+    const R = Editor.range;
+
+    const cast = folder.addFolder('The cast');
+    R(cast, c, 'range', 2, 60, 0.1, 'max range');
+    R(cast, c, 'minRange', 0, 10, 0.1, 'min range');
+    R(cast, c, 'speed', 4, 80, 0.5, 'throw speed');
+    R(cast, c, 'cooldown', 0, 3, 0.05, 'cooldown');
+    Editor.castAnimation(cast, c);
+
+    const anchor = folder.addFolder('Where it leaves the hand');
+    R(anchor, c, 'handHeight', 0, 3, 0.01, 'hand height');
+    R(anchor, c, 'handForward', -1, 3, 0.01, 'hand forward');
+    R(anchor, c, 'handSide', -1.5, 1.5, 0.01, 'hand lateral');
+    R(anchor, c, 'endHeight', 0, 3, 0.01, 'height at target');
+    R(anchor, c, 'dip', 0, 0.95, 0.01, 'drop starts at');
+
+    // The head has no mesh — it *is* these particles, so `rate` and `life`
+    // together are what decide whether it reads as a ball or as a streak.
+    const ball = folder.addFolder('The ball');
+    R(ball, c, 'size', 0.05, 1.5, 0.01, 'radius');
+    R(ball, c, 'coreRate', 10, 400, 1, 'particles / sec');
+    R(ball, c, 'coreLife', 0.05, 1.2, 0.01, 'particle life');
+    R(ball, c, 'coreGlow', 0, 6, 0.05, 'glow');
+    R(ball, c, 'coreTurbulence', 0, 3, 0.01, 'boil');
+    R(ball, c, 'coreRise', -4, 6, 0.05, 'buoyancy');
+
+    const trail = folder.addFolder('What it sheds');
+    R(trail, c, 'sparkRate', 0, 200, 1, 'sparks / sec');
+    R(trail, c, 'sparkSpeed', 0, 8, 0.05, 'spark speed');
+    R(trail, c, 'sparkSize', 0.01, 0.5, 0.005, 'spark size');
+    R(trail, c, 'sparkLifetime', 0.05, 2, 0.01, 'spark life');
+    R(trail, c, 'sparkGravity', -20, 5, 0.1, 'spark gravity');
+    R(trail, c, 'sparkStretch', 0, 3, 0.01, 'spark stretch');
+    R(trail, c, 'smokeRate', 0, 120, 1, 'smoke / sec');
+    R(trail, c, 'smokeSize', 0.05, 2, 0.01, 'smoke size');
+    R(trail, c, 'smokeLifetime', 0.1, 4, 0.01, 'smoke life');
+    R(trail, c, 'smokeRise', -2, 5, 0.05, 'smoke rise');
+    R(trail, c, 'smokeOpacity', 0, 1, 0.01, 'smoke opacity');
+
+    // The only ability wired to the dummies. Damage sits apart from the Global
+    // multipliers on purpose — turning the explosions up is a look, not a buff.
+    const hurt = folder.addFolder('What it does');
+    R(hurt, c, 'damage', 0, 1000, 5, 'damage');
+    R(hurt, c, 'damageRadius', 0.1, 8, 0.05, 'blast radius');
+    hurt.add(c, 'hitStop').name('detonate on contact');
+
+    const hit = folder.addFolder('Where it lands');
+    R(hit, c, 'burstSize', 0.3, 8, 0.05, 'burst radius');
+    R(hit, c, 'burstIntensity', 0, 6, 0.05, 'burst intensity');
+    R(hit, c, 'burstTurbulence', 0, 3, 0.01, 'burst turbulence');
+    R(hit, c, 'burstEmbers', 0, 400, 1, 'embers');
+    R(hit, c, 'burstSparks', 0, 400, 1, 'sparks');
+    R(hit, c, 'burstSmoke', 0, 120, 1, 'smoke puffs');
+    R(hit, c, 'shockRadius', 0, 10, 0.05, 'shockwave radius');
+    R(hit, c, 'scorchRadius', 0, 6, 0.05, 'scorch radius');
+    R(hit, c, 'scorchLife', 0.2, 12, 0.1, 'scorch life');
+    R(hit, c, 'scorchIntensity', 0, 2, 0.01, 'scorch intensity');
+    R(hit, c, 'impactShake', 0, 3, 0.01, 'impact shake');
+    R(hit, c, 'shakeDuration', 0.1, 3, 0.01, 'shake duration');
+    R(hit, c, 'impactFlash', 0, 1, 0.01, 'impact flash');
+    R(hit, c, 'castFlash', 0, 1, 0.01, 'muzzle flash');
+    R(hit, c, 'muzzleSparks', 0, 120, 1, 'muzzle sparks');
+
+    const light = folder.addFolder('Light');
+    light.addColor(c, 'lightColor').name('colour');
+    R(light, c, 'lightIntensity', 0, 12, 0.05, 'intensity');
+    R(light, c, 'lightRadius', 1, 30, 0.1, 'radius');
+
+    const flame = folder.addFolder('Flame colour');
+    flame.addColor(c, 'colorHot').name('core');
+    flame.addColor(c, 'colorFlameMid').name('mid');
+    flame.addColor(c, 'colorFlameEdge').name('edge');
+    flame.addColor(c, 'colorFlash').name('screen flash');
+
+    Editor.gradient(folder, c, 'colorEmber', 'Ember colour');
+    Editor.gradient(folder, c, 'colorSmoke', 'Smoke colour');
+
+    const ground = folder.addFolder('Ground marks');
+    ground.addColor(c, 'colorScorch').name('scorch');
+    ground.addColor(c, 'colorCrack').name('embers in it');
+    ground.addColor(c, 'colorShockA').name('shockwave inner');
+    ground.addColor(c, 'colorShockB').name('shockwave outer');
+  }
+
+  _buildDummies() {
+    const folder = this.gui.addFolder('🎯  Training dummies');
+    const c = settings.dummies;
+    const R = Editor.range;
+
+    // `count` and `ringRadius` are read every frame by the system itself, which
+    // rebuilds or repositions the ring — no reload, and nothing to wire here.
+    R(folder, c, 'count', 0, 16, 1, 'how many');
+    R(folder, c, 'ringRadius', 2, 40, 0.5, 'ring radius');
+    R(folder, c, 'hp', 50, 5000, 10, 'hit points');
+    R(folder, c, 'respawn', 0.5, 20, 0.5, 'time down');
+    folder.add(c, 'showBars').name('health bars');
+    folder.add({ heal: () => this.hooks.onResetDummies?.() }, 'heal').name('Stand them all up');
+  }
+
   _buildEnvironment() {
     const folder = this.gui.addFolder('Environment');
     const e = settings.environment;
@@ -1638,12 +1743,17 @@ export class Editor {
     const R = Editor.range;
 
     // The wheel writes `distance` straight into settings, so the slider listens.
-    R(folder, c, 'distance', 1, 40, 0.1, 'distance').listen();
+    R(folder, c, 'distance', 1, 50, 0.1, 'distance').listen();
     R(folder, c, 'minDistance', 1, 20, 0.1, 'min distance');
-    R(folder, c, 'maxDistance', 4, 40, 0.1, 'max distance');
+    R(folder, c, 'maxDistance', 4, 50, 0.1, 'max distance');
     R(folder, c, 'zoomSpeed', 0.1, 3, 0.01, 'zoom speed');
     R(folder, c, 'fov', 20, 90, 0.5, 'field of view');
     R(folder, c, 'targetHeight', 0, 4, 0.01, 'target height');
+    // With the bearing fixed the two clamps below are what hold it, so the free
+    // orbit's own pitch limits only matter once `fixed angle` is off.
+    folder.add(c, 'fixed').name('fixed angle (ARPG)');
+    R(folder, c, 'fixedPolar', 0.15, 1.45, 0.01, 'fixed pitch');
+    R(folder, c, 'fixedYaw', -Math.PI, Math.PI, 0.01, 'fixed bearing');
     R(folder, c, 'minPolar', 0.05, 1.5, 0.01, 'min pitch');
     R(folder, c, 'maxPolar', 0.2, 1.55, 0.01, 'max pitch');
     R(folder, c, 'damping', 0.001, 0.5, 0.001, 'follow damping');
@@ -1657,6 +1767,13 @@ export class Editor {
     const c = settings.character;
     const R = Editor.range;
 
+    // Which rig is on stage. The first switch to a character loads its files;
+    // after that toggling is instant.
+    folder
+      .add(c, 'model', Object.keys(CHARACTERS))
+      .name('character')
+      .onChange((id) => this.hooks.onCharacter?.(id));
+
     // The mixer's own rate, so it scales the idle and the cast clips together.
     // The same value as Global → animation speed, mirrored here where it is
     // actually reached for; `listen` keeps the two readouts honest.
@@ -1665,16 +1782,18 @@ export class Editor {
     // Which clip each ability throws lives in that ability's own folder, under
     // "The cast"; these are the edges of the blend that lays it over the idle.
     const cast = folder.addFolder('Casting');
+    R(cast, c, 'castSpeed', 0.5, 3.5, 0.05, 'cast rate');
     R(cast, c, 'castBlendIn', 0.01, 1, 0.01, 'blend into cast');
     R(cast, c, 'castBlendOut', 0.01, 1.5, 0.01, 'blend back to idle');
     cast.add(c, 'turnToAim').name('turn to aim');
     R(cast, c, 'turnRate', 0.000001, 0.02, 0.000001, 'turn follow');
 
-    // Walking the body around. The rig ships no locomotion clip, so these
-    // carry the whole walk on their own — `run lean` is what keeps it from
-    // reading as a statue on a conveyor belt.
+    // Walking the body around. `walk speed` sets the ground speed *and* the
+    // speed the run clip is blended in at, so it and `stride rate` are the two
+    // that decide whether the feet grip the floor or skate over it.
     const walk = folder.addFolder('Movement');
     R(walk, c, 'walkSpeed', 0, 12, 0.1, 'walk speed');
+    R(walk, c, 'runPlayback', 0.2, 2, 0.01, 'stride rate');
     R(walk, c, 'walkAccel', 0.000001, 0.02, 0.000001, 'start ease');
     R(walk, c, 'walkStop', 0.000001, 0.02, 0.000001, 'stop ease');
     R(walk, c, 'turnToMove', 0.000001, 0.02, 0.000001, 'turn follow');

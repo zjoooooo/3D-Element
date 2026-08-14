@@ -28,6 +28,7 @@ export class InputManager extends EventEmitter {
   _bind() {
     this.dom.addEventListener('pointerdown', this._onPointerDown);
     window.addEventListener('pointermove', this._onPointerMove);
+    window.addEventListener('pointerup', this._onPointerUp);
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
     window.addEventListener('blur', this._onBlur);
@@ -59,10 +60,20 @@ export class InputManager extends EventEmitter {
     if (event.button === 0) {
       this.emit('pointer:confirm', this.pointer);
     } else if (event.button === 2) {
-      // Right button also orbits (OrbitControls owns the drag); putting an armed
-      // cast away on the same press is the convention players expect.
-      this.emit('action', 'cancel');
+      // Right button doubles as the camera drag, so cancelling waits for the
+      // release: a press that barely moved is a click, anything longer is a drag.
+      this._rightDown = { x: event.clientX, y: event.clientY };
     }
+  };
+
+  _onPointerUp = (event) => {
+    if (event.button !== 2 || !this._rightDown) return;
+    const moved = Math.hypot(
+      event.clientX - this._rightDown.x,
+      event.clientY - this._rightDown.y
+    );
+    this._rightDown = null;
+    if (moved < 6) this.emit('action', 'cancel');
   };
 
   _onPointerMove = (event) => {
@@ -102,6 +113,10 @@ export class InputManager extends EventEmitter {
       case 'KeyX':
       case 'Digit6':
         this.emit('action', 'ability', 5);
+        break;
+      case 'KeyT':
+      case 'Digit7':
+        this.emit('action', 'ability', 6);
         break;
       case 'Escape':
         this.emit('action', 'cancel');
@@ -155,6 +170,7 @@ export class InputManager extends EventEmitter {
   dispose() {
     this.dom.removeEventListener('pointerdown', this._onPointerDown);
     window.removeEventListener('pointermove', this._onPointerMove);
+    window.removeEventListener('pointerup', this._onPointerUp);
     window.removeEventListener('keydown', this._onKeyDown);
     window.removeEventListener('keyup', this._onKeyUp);
     window.removeEventListener('blur', this._onBlur);

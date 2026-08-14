@@ -105,6 +105,20 @@ const GLACIER = WRAP(`
   <path d="M79 66L87 41L91 70"/>
 `);
 
+/**
+ * Fireball — a small ball with the flame streaming off it.
+ *
+ * Deliberately the same reading as the Meteor sigil, one size down and with
+ * nothing cracked: a plain circle, half the radius, sat at the head of a teardrop
+ * of flame that runs back along the shared diagonal. The pair say "the rock" and
+ * "the bolt", which is exactly how the two abilities differ.
+ */
+const FIREBALL = WRAP(`
+  <path d="M70 30C82 42 82 58 70 70C58 82 42 82 30 70C24 64 22 55 24 47C29 52 35 52 38 48C43 42 40 33 34 26C46 22 62 22 70 30Z"/>
+  <circle cx="56" cy="56" r="12"/>
+  <path d="M20 82L8 94M30 88L24 96M12 70L4 76"/>
+`);
+
 /** Keyed by the ids in `ELEMENTS`. */
 export const ELEMENT_SIGILS = {
   ice: ICE,
@@ -112,5 +126,6 @@ export const ELEMENT_SIGILS = {
   meteor: METEOR,
   beam: BEAM,
   snare: SNARE,
-  glacier: GLACIER
+  glacier: GLACIER,
+  fireball: FIREBALL
 };

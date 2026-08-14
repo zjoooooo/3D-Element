@@ -450,3 +450,79 @@ body {
     width: 78px;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Training dummies — health bars and damage figures                   */
+/* ------------------------------------------------------------------ */
+/*
+ * A layer of projected readouts sitting over the canvas. Both are positioned
+ * from `TrainingDummies.update`, which writes a transform per frame; nothing in
+ * here lays anything out, so a hundred figures cost a hundred transforms and no
+ * reflow. Pointer events are off throughout — these sit directly over the play
+ * area and must never eat a click meant for the ground.
+ */
+.dummy-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.dummy-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 54px;
+  height: 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  background: rgba(8, 12, 18, 0.72);
+  overflow: hidden;
+  will-change: transform;
+}
+
+.dummy-bar > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  /* Colour is set per frame from the health fraction, not from a gradient
+     sliding under a mask: the hue is a second readout, so a bar caught at the
+     edge of the frame still says something before you have read its width. */
+  background: #7ee08a;
+  transition: width 0.18s ease-out, background-color 0.18s linear;
+}
+
+.dummy-hit {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font: 600 15px/1 var(--ui-font);
+  color: #ffd9a4;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  will-change: transform, opacity;
+  animation: dummy-rise 0.85s ease-out forwards;
+}
+
+/* A direct hit reads hotter and larger than a clip from the rim. */
+.dummy-hit--solid {
+  font-size: 19px;
+  color: #fff2d0;
+}
+
+@keyframes dummy-rise {
+  0% {
+    opacity: 0;
+    margin-top: 0;
+    margin-left: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    margin-top: -46px;
+    margin-left: var(--drift, 0px);
+  }
+}

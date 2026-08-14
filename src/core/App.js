@@ -9,6 +9,7 @@ import { Environment } from '../world/Environment.js';
 import { Ground } from '../world/Ground.js';
 import { DustMotes } from '../world/DustMotes.js';
 import { ContactShadows } from '../world/ContactShadows.js';
+import { TrainingDummies } from '../world/TrainingDummies.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
 import { CharacterController } from '../animation/CharacterController.js';
@@ -63,6 +64,7 @@ export class App {
     this.cooldowns = new Map(ELEMENTS.map((element) => [element, 0]));
 
     /* ---- core ---- */
+    this.assets = new AssetLoader();
     this.renderer = new Renderer(canvas);
     this.rig = new CameraRig(canvas);
     this.camera = this.rig.camera;
@@ -75,7 +77,14 @@ export class App {
     this.dust = new DustMotes();
     this.contactShadows = new ContactShadows(this.renderer, { size: 2.6, height: 2.4, blur: 2.0 });
 
-    this.scene.add(this.ground.mesh, this.dust.points, this.contactShadows.group);
+    this.dummies = new TrainingDummies(this.environment, canvas);
+
+    this.scene.add(
+      this.ground.mesh,
+      this.dust.points,
+      this.contactShadows.group,
+      this.dummies.group
+    );
     this.dust.setPixelRatio(this.renderer.gl.getPixelRatio());
 
     /* ---- shared VFX services ---- */
@@ -97,7 +106,8 @@ export class App {
       fissures: this.fissures,
       bursts: this.bursts,
       shake: this.shake,
-      flash: this.flash
+      flash: this.flash,
+      dummies: this.dummies
     });
 
     /* ---- character ---- */
@@ -117,7 +127,18 @@ export class App {
     this.hud = new HUD(document.getElementById('hud'));
     this.editor = new Editor({
       onClear: () => this.clearEffects(),
-      onToast: (message) => this.hud.showToast(message)
+      onToast: (message) => this.hud.showToast(message),
+      onResetDummies: () => this.dummies.reset(),
+      onCharacter: (id) => {
+        this.hud.showToast('Loading character…');
+        this.character
+          .setCharacter(id, this.assets)
+          .then(() => this.hud.showToast(`Character: ${id}`))
+          .catch((error) => {
+            console.error('[App] character switch failed', error);
+            this.hud.showToast('Character failed to load');
+          });
+      }
     });
 
     this._bindEvents();
@@ -273,7 +294,7 @@ export class App {
 
   /** Load assets, warm the shader cache, then start the loop. */
   async load() {
-    const assets = new AssetLoader();
+    const assets = this.assets;
 
     this.loading.setProgress(0.05, 'Loading environment…');
     const hdr = await assets.loadHDR(HDR_URL);
@@ -361,6 +382,9 @@ export class App {
 
     this.ground.update(this.elapsed);
     this.dust.update(this.elapsed, this.character.position);
+    // Real time, like the camera and the aim: a target you knocked down should
+    // still get back up while the effects are frozen for a look.
+    this.dummies.update(raw, this.camera);
 
     this.abilities.update(dt);
     this.particles.flush();
@@ -415,6 +439,7 @@ export class App {
     this.ground.dispose();
     this.dust.dispose();
     this.contactShadows.dispose();
+    this.dummies.dispose();
     this.post.dispose();
     this.environment.dispose();
     this.editor.dispose();
