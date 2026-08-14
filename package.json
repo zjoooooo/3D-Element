@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "node scripts/check-clips.mjs",
+    "check:game": "node scripts/check-game.mjs",
     "sim": "node scripts/sim-run.mjs"
   },
   "dependencies": {
