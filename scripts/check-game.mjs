@@ -2,6 +2,9 @@
  * Game-logic checks: pure Node, no renderer. Mirrors the check-clips pattern —
  * every silent way the run mode can rot gets one loud assert here.
  *
+ * The render layer (EnemyRenderer) is verified in the browser at integration,
+ * not here—it depends on three.js and scene state only available at runtime.
+ *
  *   npm run check:game
  */
 import assert from 'node:assert/strict';
