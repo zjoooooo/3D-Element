@@ -16,6 +16,7 @@ import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
 import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
+import { PlayerState } from '../src/run/PlayerState.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -210,6 +211,28 @@ import { PickupSystem } from '../src/run/PickupSystem.js';
   // Level curve: need(l) = xpBase * xpGrowth^l, strictly increasing.
   assert.ok(pickups.xpNeed(2) > pickups.xpNeed(1), 'pickups: curve rises');
   console.log('ok  pickups');
+}
+
+/* ---- player: hp, iframes, dodge ---- */
+{
+  const player = new PlayerState();
+  assert.ok(player.takeDamage(10), 'player: first hit lands');
+  assert.ok(!player.takeDamage(10), 'player: iframes eat the second hit');
+  for (let t = 0; t < 60; t++) player.tick(1 / 60);
+  assert.ok(player.takeDamage(10), 'player: iframes expire');
+  assert.equal(player.hp, settings.run.playerHp - 20);
+
+  assert.ok(player.tryDodge(), 'player: dodge fires off cooldown');
+  assert.ok(!player.tryDodge(), 'player: dodge respects its cooldown');
+  assert.ok(!player.takeDamage(10), 'player: dodge grants iframes');
+
+  player.hp = 5;
+  for (let t = 0; t < 200; t++) player.tick(1 / 60);
+  player.takeDamage(10);
+  assert.equal(player.alive, false, 'player: lethal damage kills');
+  player.reset();
+  assert.ok(player.alive && player.hp === settings.run.playerHp);
+  console.log('ok  player state');
 }
 
 console.log('\nevery game-logic check passed');

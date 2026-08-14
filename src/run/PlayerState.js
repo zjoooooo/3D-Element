@@ -1,0 +1,44 @@
+import { settings } from '../config/settings.js';
+
+/**
+ * The player's mortal half (spec §7).
+ *
+ * Contact damage, invulnerability windows and the spacebar dash all live on
+ * this one small object; the character controller stays a pure puppet and
+ * never learns it can die.
+ */
+export class PlayerState {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    this.hp = settings.run.playerHp;
+    this.alive = true;
+    this.iframes = 0;
+    this.dodgeCooldown = 0;
+  }
+
+  takeDamage(amount) {
+    if (!this.alive || this.iframes > 0 || settings.run.godMode) return false;
+    this.hp -= amount;
+    this.iframes = settings.run.iframes;
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.alive = false;
+    }
+    return true;
+  }
+
+  tryDodge() {
+    if (!this.alive || this.dodgeCooldown > 0) return false;
+    this.dodgeCooldown = settings.run.dodgeCooldown;
+    this.iframes = Math.max(this.iframes, settings.run.dodgeIframes);
+    return true;
+  }
+
+  tick(step) {
+    this.iframes = Math.max(0, this.iframes - step);
+    this.dodgeCooldown = Math.max(0, this.dodgeCooldown - step);
+  }
+}
