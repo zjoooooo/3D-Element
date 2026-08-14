@@ -166,6 +166,27 @@ right-drag orbit back, clamped by `minPolar` / `maxPolar` as before.
 
 ---
 
+## Run mode
+
+Open the URL with `#run` to launch the M1 grey-box: an arena where abilities face procedurally spawning capsule enemies and gem pickups. The six-slot loadout is:
+
+| Slot | Key | Ability |
+| --- | --- | --- |
+| 1 | **LMB** | Ice |
+| 2 | **RMB** | Fireball |
+| 3 | **Q** | Thunder |
+| 4 | **E** | Meteor |
+| 5 | **R** | Beam |
+| 6 | **T** | Glacier |
+
+**Space** dodges; **Enter** restarts after victory or defeat. The loadout — which ability sits in each of the six slots — is live-rebindable in the editor's Run folder without restarting.
+
+The HUD is four numbers: health, elapsed time, kill count, and level. Enemies are capsules and pickups are coloured dots — all placeholder geometry for M1. Real character bodies and a full HUD land in M2+.
+
+To validate the game loop headless, run `npm run check:game` — nine blocks of logic tests plus the 300-enemy stress gate (measures tick time at full spawn cap; must stay under 2 ms/tick).
+
+---
+
 ## Project layout
 
 ```

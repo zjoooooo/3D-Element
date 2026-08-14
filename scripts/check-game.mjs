@@ -303,4 +303,18 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  run manager');
 }
 
+/* ---- stress: a full cap of enemies ticks fast enough headless ---- */
+{
+  const enemies = new EnemySystem(createRng(3));
+  for (let n = 0; n < 300; n++) {
+    enemies.spawnAt(Math.cos(n) * 20, Math.sin(n) * 20, 10);
+  }
+  const t0 = performance.now();
+  for (let t = 0; t < 600; t++) enemies.tick(1 / 60, { x: 0, z: 0 }, 10);
+  const ms = (performance.now() - t0) / 600;
+  // 60Hz leaves 16.6ms per frame for everything; the horde may take 2.
+  assert.ok(ms < 2, `stress: enemy tick averages ${ms.toFixed(2)}ms at cap (budget 2ms)`);
+  console.log(`ok  stress (${ms.toFixed(2)}ms/tick at 300 enemies)`);
+}
+
 console.log('\nevery game-logic check passed');
