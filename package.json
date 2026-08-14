@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "node scripts/check-clips.mjs",
+    "sim": "node scripts/sim-run.mjs"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",
