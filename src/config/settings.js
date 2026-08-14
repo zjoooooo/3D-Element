@@ -203,6 +203,63 @@ export const settings = {
     colorInvalid: '#ff6a5c' // shown when the target is inside `minRange`
   },
 
+  /**
+   * The 15-minute run. Every number here was calibrated by scripts/sim-run.mjs
+   * (Monte-Carlo difficulty bands, spec §8 anchor 6) — retune by editing here
+   * and re-running `npm run sim`, not by feel.
+   */
+  run: {
+    duration: 900, // seconds per run
+    tickRate: 60, // fixed simulation Hz; rendering interpolates
+    enemyCap: 300, // hard on-screen ceiling; oldest far enemy recycles beyond it
+    spawnBase: 20, // enemies per minute at minute 0
+    spawnQuad: 2.2, // + quad * minute² — gentle start, fierce final tide
+    spawnRadius: 26, // metres from the player enemies appear at (outside view)
+    arenaRadius: 40, // playable field; matches character.roamRadius in run mode
+    xpBase: 22, // xp to reach level 1...
+    xpGrowth: 1.13, // ...times this per level
+    gemBase: 1, // green gem value at minute 0
+    gemPerMinute: 0.12, // green gems appreciate as the run ages
+    magnetRadius: 2, // metres gems fly to the player from
+    playerHp: 100,
+    iframes: 0.5, // seconds of invulnerability after a hit
+    dodgeDistance: 3, // metres the spacebar dash covers
+    dodgeIframes: 0.3,
+    dodgeCooldown: 2,
+    godMode: false, // debug: take no damage, everything else runs
+    // The six abilities on stage in run mode, in slot order:
+    // left mouse, right mouse, Q, E, R, T. Every id must be one of ELEMENTS;
+    // whatever is missing sits out the run (M1 has no loadout screen yet — the
+    // editor's dropdowns are how you change your mind).
+    loadout: ['ice', 'fireball', 'thunder', 'meteor', 'beam', 'glacier']
+  },
+
+  /** Per-behaviour enemy stats. HP scales with the minute (spec anchor 3). */
+  enemies: {
+    hpBase: 20, // swarm HP at minute 0 — one Frost Lance, by design
+    hpPerMinute: 0.16, // fractional HP growth per minute
+    swarm: { speed: 3.2, radius: 0.45, contactDamage: 8, hpMult: 1, mass: 1 },
+    // ranged/tank land in M3 with the tide schedule; swarm alone carries M1
+    separation: 1.1, // metres of personal space the grid push maintains
+    knockback: 4, // impulse metres/second per hit
+    knockbackDecay: 6 // s⁻¹ exponential decay on that impulse
+  },
+
+  /**
+   * How each ability's VFX maps onto damage (spec §3). Widths and radii are the
+   * *visual* footprints — WYSIWYG hitting is the contract, so these reuse the
+   * same numbers the shaders draw with wherever one exists.
+   */
+  combat: {
+    ice: { kind: 'sweep', damage: 20, width: 1.4, slowFactor: 0.35, slowTime: 1.2 },
+    thunder: { kind: 'sweep', damage: 26, width: 1.0 },
+    meteor: { kind: 'burst', damage: 55, radius: 2.6, burnDps: 12, burnTime: 2.5 },
+    beam: { kind: 'lineTick', dps: 60, width: 0.9 },
+    snare: { kind: 'zoneTick', dps: 28, slowFactor: 0.45 },
+    glacier: { kind: 'burst', damage: 70, slowFactor: 0.6, slowTime: 2.5 },
+    fireball: { kind: 'self' } // FireballAbility already resolves its own hits
+  },
+
   /* ------------------------------------------------------------------ */
   /* Character                                                           */
   /* ------------------------------------------------------------------ */
