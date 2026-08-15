@@ -1,6 +1,6 @@
 // src/run/EnemySystem.js
 import { settings } from '../config/settings.js';
-import { BEATS } from './TideSchedule.js';
+import { BEATS, FEEDS } from './TideSchedule.js';
 
 /** Behaviour template ids — indexes both `this.behavior[i]` and `settings.enemies`. */
 export const BEHAVIORS = ['swarm', 'ranged', 'tank'];
@@ -43,6 +43,14 @@ export class EnemySystem {
     this.behavior = new Uint8Array(cap); // BEHAVIORS index: 0 swarm / 1 ranged / 2 tank
     this.elite = new Uint8Array(cap); // 0 normal / 1 elite — scales hp/damage, marks the corpse
     this.fireT = new Float32Array(cap); // ranged fire cooldown
+    // Marks and their three 相克 debuff channels (spec §4.6) — one clinging
+    // wuxing per body, plus the timers/magnitude the reactions and taxes read.
+    this.mark = new Uint8Array(cap); // wuxing clinging to this body, 255 = none
+    this.markT = new Float32Array(cap); // seconds left on that mark
+    this.vulnT = new Float32Array(cap); // 易伤 timer (断枝/破土 or 熔甲)
+    this.vulnAmt = new Float32Array(cap); // its magnitude — vuln or the stronger vulnStrong, never both
+    this.weakT = new Float32Array(cap); // 熄灭 timer — tick() shaves contact/bolt damage while it holds
+    this.slowAmpT = new Float32Array(cap); // 淤塞 timer — slow() doubles its own factor while it holds
     this.id = new Float64Array(cap);
 
     // Uniform grid: head index per cell + linked "next" per enemy.
@@ -58,9 +66,14 @@ export class EnemySystem {
     this.onHit = null;
     /** Assigned by whoever wants ranged fire events (projectile spawns). */
     this.onFire = null;
+    /** Assigned by whoever wants reaction events: (markWux, triggerWux, x, z, amount). */
+    this.onReaction = null;
 
     /** element/behavior of the strongest contact this tick — reused scratch, zero-alloc. */
     this.lastContact = { element: 0, behavior: 0 };
+
+    /** Matchup/knockback/slow knobs a resonance build can override (spec §4.8). */
+    this.tuning = { kbMult: 1, slowDurMult: 1, advantage: 0, disadvantage: 0, reactionMult: 1 };
   }
 
   spawnAt(x, z, minute, element = 0, behavior = 0, elite = 0) {
@@ -80,6 +93,12 @@ export class EnemySystem {
     this.behavior[i] = behavior;
     this.elite[i] = elite;
     this.fireT[i] = 0;
+    this.mark[i] = 255;
+    this.markT[i] = 0;
+    this.vulnT[i] = 0;
+    this.vulnAmt[i] = 0;
+    this.weakT[i] = 0;
+    this.slowAmpT[i] = 0;
     this.id[i] = this._nextId++;
     return i;
   }
@@ -112,12 +131,14 @@ export class EnemySystem {
       // Fire cadence: cools down every tick a ranged enemy is alive, closing
       // or holding alike, so a spitter that's still walking in doesn't get
       // stuck with a full wait the instant it arrives. It only pulls the
-      // trigger while holding.
+      // trigger while holding. A weakened spitter's bolt bites softer too.
       if (this.behavior[i] === 1) {
         this.fireT[i] -= step;
         if (holding && this.fireT[i] <= 0) {
           this.fireT[i] = kind.fireEvery;
-          this.onFire?.(this.x[i], this.z[i], (player.x - this.x[i]) / dist, (player.z - this.z[i]) / dist);
+          const dmg =
+            c.projectile.damage * (this.weakT[i] > 0 ? 1 - settings.combat.debuffs.weak.amount : 1);
+          this.onFire?.(this.x[i], this.z[i], (player.x - this.x[i]) / dist, (player.z - this.z[i]) / dist, dmg);
         }
       }
 
@@ -137,12 +158,22 @@ export class EnemySystem {
       this.kbX[i] *= decay;
       this.kbZ[i] *= decay;
 
-      // Timers.
+      // Timers: the old two, plus the mark and its three debuff channels.
+      // slowAmpT needs no separate clamp beyond the timer itself — once it's
+      // back at 0, slow() just stops doubling, no residual coefficient.
       if ((this.slowT[i] -= step) <= 0) this.slowed[i] = 0;
       this.flash[i] = Math.max(0, this.flash[i] - step * 6);
+      if ((this.markT[i] -= step) <= 0) {
+        this.markT[i] = 0;
+        this.mark[i] = 255;
+      }
+      if ((this.vulnT[i] -= step) <= 0) this.vulnT[i] = 0;
+      if ((this.weakT[i] -= step) <= 0) this.weakT[i] = 0;
+      if ((this.slowAmpT[i] -= step) <= 0) this.slowAmpT[i] = 0;
 
       if (!holding && d < kind.radius + 0.5) {
-        const dmg = kind.contactDamage * (this.elite[i] ? c.elites.damageMult : 1);
+        let dmg = kind.contactDamage * (this.elite[i] ? c.elites.damageMult : 1);
+        if (this.weakT[i] > 0) dmg *= 1 - settings.combat.debuffs.weak.amount; // 熄灭 dulls the bite
         if (dmg > contact) {
           contact = dmg;
           this.lastContact.element = this.element[i];
@@ -220,17 +251,10 @@ export class EnemySystem {
       hits++;
       this.flash[i] = 1;
       const d = Math.hypot(dx, dz) || 1;
-      const kb = settings.enemies.knockback / kind.mass;
+      const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult;
       this.kbX[i] += (dx / d) * kb;
       this.kbZ[i] += (dz / d) * kb;
-      let dealt = amount;
-      if (wuxing >= 0) {
-        const target = this.element[i];
-        if (BEATS[wuxing] === target) dealt *= settings.combat.matchup.advantage;
-        else if (BEATS[target] === wuxing) dealt *= settings.combat.matchup.disadvantage;
-      }
-      this.onHit?.(this.x[i], this.z[i], dealt);
-      if ((this.hp[i] -= dealt) <= 0) this._kill(i);
+      this._applyWux(i, amount, wuxing);
     }
     return hits;
   }
@@ -246,25 +270,86 @@ export class EnemySystem {
       seen.add(this.id[i]);
       hits++;
       this.flash[i] = 1;
-      let dealt = amount;
-      if (wuxing >= 0) {
-        const target = this.element[i];
-        if (BEATS[wuxing] === target) dealt *= settings.combat.matchup.advantage;
-        else if (BEATS[target] === wuxing) dealt *= settings.combat.matchup.disadvantage;
-      }
-      this.onHit?.(this.x[i], this.z[i], dealt);
-      if ((this.hp[i] -= dealt) <= 0) this._kill(i);
+      this._applyWux(i, amount, wuxing);
     }
     // ponytail: memory grows one Set per cast; RunManager clears finished casts.
     return hits;
   }
 
+  /**
+   * The wuxing half of a hit (spec §4.6): matchup multiplier, the debuff
+   * channel an overcoming hit inflicts, and mark resolution — or, for a hit
+   * cast with no wuxing at all, the one thing it can still profit from: a
+   * lingering vuln. Matchup and vuln deliberately never both apply to the
+   * same hit: elemental swings already get their tax/reward from the
+   * matchup table, so vuln is the reward channel for everything else
+   * (splash, 助燃 follow-ups) instead of stacking on top of it.
+   * Shared by damage() and damageOnce() so neither hit loop forks this.
+   */
+  _applyWux(i, amount, wuxing) {
+    let dealt = amount;
+    if (wuxing >= 0) {
+      const target = this.element[i];
+      if (BEATS[wuxing] === target) {
+        dealt *= this._advantage();
+        this._applyDebuff(i, wuxing);
+      } else if (BEATS[target] === wuxing) {
+        dealt *= this._disadvantage();
+      }
+
+      const old = this.mark[i];
+      if (old !== 255 && old !== wuxing && FEEDS[old] === wuxing) {
+        // Detonate: the sheng pair is the payoff, so the triggering hit
+        // itself reverts to its raw amount — no stacked matchup bonus.
+        const bonus = amount * settings.marks.reactionMult * this.tuning.reactionMult;
+        dealt = amount;
+        this.onHit?.(this.x[i], this.z[i], bonus);
+        this.onReaction?.(old, wuxing, this.x[i], this.z[i], amount);
+        this.mark[i] = 255;
+        if ((this.hp[i] -= bonus) <= 0) {
+          this._kill(i);
+          return;
+        }
+      } else {
+        this.mark[i] = wuxing;
+        this.markT[i] = settings.marks.duration;
+      }
+    } else if (this.vulnT[i] > 0) {
+      dealt *= 1 + this.vulnAmt[i];
+    }
+    this.onHit?.(this.x[i], this.z[i], dealt);
+    if ((this.hp[i] -= dealt) <= 0) this._kill(i);
+  }
+
+  /** 克中 debuff channel, keyed by the attacker's wuxing (spec §4.6 三通道). */
+  _applyDebuff(i, wuxing) {
+    const d = settings.combat.debuffs;
+    if (wuxing === 2) this.weakT[i] = d.weak.duration; // 水 熄灭
+    else if (wuxing === 4) this.slowAmpT[i] = d.slowAmp.duration; // 土 淤塞
+    else {
+      const ch = wuxing === 3 ? d.vulnStrong : d.vuln; // 火 熔甲 vs 金/木 断枝·破土
+      this.vulnT[i] = ch.duration;
+      this.vulnAmt[i] = ch.amount;
+    }
+  }
+
+  _advantage() {
+    return this.tuning.advantage || settings.combat.matchup.advantage;
+  }
+
+  _disadvantage() {
+    return this.tuning.disadvantage || settings.combat.matchup.disadvantage;
+  }
+
   slow(point, radius, factor, duration) {
+    const dur = duration * this.tuning.slowDurMult;
     for (let i = 0; i < this.count; i++) {
       const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
       if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
-      this.slowed[i] = Math.max(this.slowed[i], factor);
-      this.slowT[i] = Math.max(this.slowT[i], duration);
+      // 淤塞: a standing slowAmp doubles this slow's own factor before it merges.
+      const f = this.slowAmpT[i] > 0 ? Math.min(0.9, factor * settings.combat.debuffs.slowAmp.mult) : factor;
+      this.slowed[i] = Math.max(this.slowed[i], f);
+      this.slowT[i] = Math.max(this.slowT[i], dur);
     }
   }
 
@@ -292,7 +377,8 @@ export class EnemySystem {
     if (i === last) return;
     for (const a of [
       this.x, this.z, this.prevX, this.prevZ, this.hp, this.slowed, this.slowT,
-      this.flash, this.kbX, this.kbZ, this.element, this.behavior, this.elite, this.fireT, this.id
+      this.flash, this.kbX, this.kbZ, this.element, this.behavior, this.elite, this.fireT, this.id,
+      this.mark, this.markT, this.vulnT, this.vulnAmt, this.weakT, this.slowAmpT
     ]) {
       a[i] = a[last];
     }

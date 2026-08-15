@@ -1042,6 +1042,74 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  m4 numbers');
 }
 
+/* ---- marks, reactions, debuff channels ---- */
+{
+  const enemies = new EnemySystem(createRng(17));
+  const i = enemies.spawnAt(0, 0, 0, 0, 0, 0); // metal enemy, plenty irrelevant
+  enemies.hp[i] = 1000;
+
+  // A wood hit marks; a fire hit detonates (FEEDS[1]===3) with ×1.5 bonus.
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 1);
+  assert.equal(enemies.mark[i], 1, 'marks: first elemental hit clings');
+  let reacted = null;
+  enemies.onReaction = (markWux, wux, x, z, amount) => (reacted = [markWux, wux, amount]);
+  const hpBefore = enemies.hp[i];
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 3);
+  assert.deepEqual(reacted?.slice(0, 2), [1, 3], 'marks: 木→火 detonates 助燃');
+  const expected = 10 + 10 * settings.marks.reactionMult; // hit + detonation
+  assert.ok(Math.abs(hpBefore - enemies.hp[i] - expected) < 1e-6, 'marks: detonation adds ×1.5');
+  assert.equal(enemies.mark[i], 255, 'marks: detonation consumes the mark');
+
+  // Non-generating pair overwrites instead.
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 2); // water marks
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 4); // earth: 水 does not feed 土 → overwrite
+  assert.equal(enemies.mark[i], 4, 'marks: a stranger pair overwrites');
+
+  // Debuffs: a metal hit on wood applies vuln, and vuln amplifies the next hit.
+  enemies.clear();
+  const w = enemies.spawnAt(0, 0, 0, 1);
+  enemies.hp[w] = 1000;
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 0); // 金克木 → vuln 15%
+  assert.ok(enemies.vulnT[w] > 0, 'debuffs: the overcoming hit sets vuln');
+  const before = enemies.hp[w];
+  enemies.damage({ x: 0, z: 0 }, 1, 10, -1); // neutral probe
+  assert.ok(
+    Math.abs(before - enemies.hp[w] - 10 * (1 + settings.combat.debuffs.vuln.amount)) < 1e-6,
+    'debuffs: vuln amplifies incoming'
+  );
+
+  // 熄灭: a water hit on fire weakens its bite.
+  enemies.clear();
+  const f = enemies.spawnAt(0.2, 0, 0, 3);
+  enemies.hp[f] = 1000;
+  enemies.damage({ x: 0.2, z: 0 }, 1, 10, 2);
+  const bite = enemies.tick(1 / 60, { x: 0.2, z: 0 }, 0);
+  assert.ok(
+    Math.abs(bite - settings.enemies.swarm.contactDamage * (1 - settings.combat.debuffs.weak.amount)) < 1e-6,
+    'debuffs: weak dulls the contact hit'
+  );
+
+  // 淤塞: an earth hit doubles later slows.
+  enemies.clear();
+  const s = enemies.spawnAt(0, 0, 0, 2); // water enemy
+  enemies.damage({ x: 0, z: 0 }, 1, 1, 4); // 土克水 → slowAmp
+  enemies.slow({ x: 0, z: 0 }, 1, 0.3, 1);
+  assert.ok(Math.abs(enemies.slowed[s] - 0.6) < 1e-6, 'debuffs: slowAmp doubles the factor');
+
+  // tuning: knockback multiplier reaches the shove.
+  enemies.clear();
+  const k = enemies.spawnAt(1, 0, 0);
+  enemies.tuning.kbMult = 2;
+  enemies.damage({ x: 1, z: 0.01 }, 0.5, 1, -1);
+  const shoved = Math.abs(enemies.kbZ[k]);
+  enemies.tuning.kbMult = 1;
+  enemies.clear();
+  const k2 = enemies.spawnAt(1, 0, 0);
+  enemies.damage({ x: 1, z: 0.01 }, 0.5, 1, -1);
+  assert.ok(shoved > Math.abs(enemies.kbZ[k2]) * 1.8, 'tuning: kbMult scales the shove');
+  console.log('ok  marks & debuffs');
+}
+
 /* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

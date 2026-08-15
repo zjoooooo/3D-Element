@@ -17,6 +17,7 @@ export class EnemyProjectiles {
     this.vx = new Float32Array(CAP);
     this.vz = new Float32Array(CAP);
     this.age = new Float32Array(CAP);
+    this.dmg = new Float32Array(CAP); // per-shot damage — a weakened spitter fires a softer bolt
 
     const geometry = new BufferGeometry();
     this._positions = new Float32Array(CAP * 3);
@@ -29,7 +30,7 @@ export class EnemyProjectiles {
     this.points.frustumCulled = false;
   }
 
-  spawn(x, z, dirX, dirZ) {
+  spawn(x, z, dirX, dirZ, damage = settings.enemies.projectile.damage) {
     if (this.count >= CAP) return;
     const c = settings.enemies.projectile;
     const i = this.count++;
@@ -38,6 +39,7 @@ export class EnemyProjectiles {
     this.vx[i] = dirX * c.speed;
     this.vz[i] = dirZ * c.speed;
     this.age[i] = 0;
+    this.dmg[i] = damage;
   }
 
   /** Advance every shot; returns the damage that reached the player this tick. */
@@ -52,7 +54,7 @@ export class EnemyProjectiles {
         continue;
       }
       if (Math.hypot(this.x[i] - player.x, this.z[i] - player.z) < c.radius + 0.5) {
-        dealt += c.damage;
+        dealt += this.dmg[i];
         this._remove(i);
       }
     }
@@ -66,6 +68,7 @@ export class EnemyProjectiles {
     this.vx[i] = this.vx[last];
     this.vz[i] = this.vz[last];
     this.age[i] = this.age[last];
+    this.dmg[i] = this.dmg[last];
   }
 
   sync() {
