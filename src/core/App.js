@@ -437,7 +437,12 @@ export class App {
 
     // 施法回响: a run-mode cast has a chance to fire itself once more.
     if (this.runMode && !this._echoing && this.runRng() < this.modifiers.echoChance()) {
-      this._echoAt = { element, t: 0.15 };
+      if (this._echoAt) {
+        /* an echo is already queued — a second proc inside the snapback
+           window would overwrite and eat the first; drop this one instead */
+      } else {
+        this._echoAt = { element, t: 0.15 };
+      }
     }
 
     // Snap onto the shot and throw the body into it. Which clip that is belongs
@@ -643,8 +648,13 @@ export class App {
     }
     this.character.update(dt);
 
-    for (const [element, remaining] of this.cooldowns) {
-      if (remaining > 0) this.cooldowns.set(element, Math.max(0, remaining - raw));
+    // A level-up hand freezes the world; a cooldown counting down behind it
+    // would hand back an ability the player never earned time for.
+    const frozen = this.runMode && this.upgradeUi.isOpen;
+    if (!frozen) {
+      for (const [element, remaining] of this.cooldowns) {
+        if (remaining > 0) this.cooldowns.set(element, Math.max(0, remaining - raw));
+      }
     }
 
     this.ground.update(this.elapsed);
@@ -680,8 +690,16 @@ export class App {
         }
       }
       if (!frozen && this.run.active && this._verdict.value === 'playing' && this.run.pendingLevels > 0) {
+        // A tick that banks more than one level (a burst of xp) leaves
+        // pickups.level already sitting on the destination — the levels in
+        // between never get their own hand. sinceLevel carries that span back
+        // to the pool so a milestone crossed mid-jump still guarantees a card.
+        const sinceLevel = this.pickups.level - this.run.pendingLevels + 1;
         this.run.pendingLevels--;
-        const hand = this.upgradePool.draw(this.pickups.level);
+        const hand = this.upgradePool.draw(
+          this.pickups.level,
+          sinceLevel === this.pickups.level ? this.pickups.level : sinceLevel
+        );
         this.upgradeUi.open(hand, {
           rerolls: hand.length ? this.modifiers.passiveLevel('reroll') : 0,
           summary: this._buildSummary()

@@ -545,6 +545,7 @@ export class CharacterController {
    *
    * @param {Vector3} direction on XZ, length 0..1
    * @param {number} dt
+   * @param {number} [speedScale=1] multiplier on walk speed (run mode's move-speed modifiers)
    */
   move(direction, dt, speedScale = 1) {
     const c = settings.character;

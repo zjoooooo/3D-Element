@@ -20,7 +20,7 @@ export class UpgradePool {
     this.modifiers = modifiers;
   }
 
-  draw(level) {
+  draw(level, sinceLevel = level) {
     const w = settings.upgrades.passiveWeights;
     const candidates = [];
 
@@ -62,7 +62,7 @@ export class UpgradePool {
 
     const hand = [];
     const wantNew =
-      settings.upgrades.milestones.includes(level) &&
+      settings.upgrades.milestones.some((m) => m > sinceLevel - 1 && m <= level) &&
       candidates.some((c) => c.card.kind === 'new');
     if (wantNew) {
       hand.push(this._take(candidates.filter((c) => c.card.kind === 'new'), candidates));

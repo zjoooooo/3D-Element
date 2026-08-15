@@ -19,7 +19,10 @@ export class Loadout {
     this._levels = Object.create(null);
     for (let seat = 0; seat < 6; seat++) {
       const keep = settings.run.draftLoadout ? seat === 0 : true;
-      this.seats[seat] = keep ? configured[seat] : null;
+      const element = keep ? configured[seat] : null;
+      // A debug loadout that repeats an id would deal duplicate cards later —
+      // first seat wins, repeats sit out (M2 ledger).
+      this.seats[seat] = element && !this.seats.slice(0, seat).includes(element) ? element : null;
       if (this.seats[seat]) this._levels[this.seats[seat]] = 1;
     }
   }

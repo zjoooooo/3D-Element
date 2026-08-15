@@ -554,6 +554,105 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  modifier plumbing');
 }
 
+/* ---- M2 ledger: deferred pins ---- */
+{
+  // Loadout: acquire refuses when full; upgrade refuses what isn't held.
+  const loadout = new Loadout();
+  settings.run.draftLoadout = false;
+  loadout.reset();
+  assert.equal(loadout.acquire('ice'), -1, 'loadout: full board refuses acquire');
+  assert.ok(!loadout.upgrade('nosuch'), 'loadout: cannot upgrade an unheld skill');
+
+  // Loadout: a duplicated id in the debug loadout must not seat twice.
+  const dup = settings.run.loadout.slice();
+  settings.run.loadout = ['ice', 'ice', 'thunder', 'meteor', 'beam', 'glacier'];
+  loadout.reset();
+  assert.equal(
+    loadout.seats.filter((e) => e === 'ice').length, 1,
+    'loadout: duplicate config ids seat once'
+  );
+  settings.run.loadout = dup;
+  settings.run.draftLoadout = true;
+
+  // RunManager.pendingLevels accumulates (+=, never =): two ticks that each
+  // gain a level must leave two pending.
+  const rng2 = createRng(11);
+  const enemies2 = new EnemySystem(rng2);
+  const pickups2 = new PickupSystem();
+  const player2 = new PlayerState();
+  const rm = new RunManager({
+    enemies: enemies2, pickups: pickups2, player: player2, rng: rng2,
+    combat: { tick: () => {}, release: () => -1 },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null }
+  });
+  rm.start();
+  pickups2.xp = pickups2.xpNeed(1) + 0.5;
+  rm.tick(1 / 60, { x: 0, z: 0 });
+  pickups2.xp = pickups2.xpNeed(2) + 0.5;
+  rm.tick(1 / 60, { x: 0, z: 0 });
+  assert.equal(rm.pendingLevels, 2, 'run: pending levels accumulate across ticks');
+
+  // UpgradePool: statistical kind coverage — 200 draws from a mid-run state
+  // must produce every kind, and a milestone *span* (sinceLevel < milestone ≤
+  // level) still guarantees a new-active card.
+  const mods2 = new Modifiers();
+  const pool = new UpgradePool(createRng(5), loadout, mods2);
+  settings.run.draftLoadout = true;
+  loadout.reset();
+  const kinds = new Set();
+  for (let n = 0; n < 200; n++) for (const card of pool.draw(2)) kinds.add(card.kind);
+  assert.ok(
+    kinds.has('upgrade') && kinds.has('new') && kinds.has('passive'),
+    `pool: 200 draws must cover all kinds (saw ${[...kinds].join(',')})`
+  );
+  // The guarantee above doesn't yet prove itself: with only seat 0 filled
+  // (the loadout above), 'new' candidates dominate the weighted pool by sheer
+  // count, so an ordinary draw finds one anyway and a regressed span check
+  // (back to `.includes(level)`) would pass undetected. Re-run the pair from
+  // a loadout with one empty seat — two elements stay unheld — so the legs
+  // actually discriminate: no milestone in the span must sometimes miss
+  // 'new', and a milestone crossed mid-span must not.
+  const savedLoadout = settings.run.loadout;
+  settings.run.loadout = ['ice', 'fireball', 'thunder', 'meteor', 'beam']; // 5 seats: glacier + snare unheld
+  settings.run.draftLoadout = false; // fill every configured seat, not just seat 0
+  loadout.reset();
+  let missedNoSpan = 0;
+  let everySpanHandHasNew = true;
+  for (let n = 0; n < 40; n++) {
+    if (!pool.draw(6, 6).some((card) => card.kind === 'new')) missedNoSpan++; // span (5,6]: no milestone inside
+    const spanHand = pool.draw(6, 4); // span (3,6]: milestone 5 inside
+    if (spanHand.length > 0 && !spanHand.some((card) => card.kind === 'new')) everySpanHandHasNew = false;
+  }
+  assert.ok(
+    missedNoSpan > 0,
+    `pool: without a milestone in the span, new is not guaranteed (missed ${missedNoSpan}/40)`
+  );
+  assert.ok(everySpanHandHasNew, 'pool: a milestone crossed mid-span still guarantees a new active');
+  settings.run.loadout = savedLoadout;
+  settings.run.draftLoadout = true;
+
+  // Combat: the modifier amp reaches every kind, not just sweep. zoneTick is
+  // the cheapest to pin headless: damage flows through targets.damage scaled.
+  const seen = [];
+  const combatAmp = new CombatSystem(
+    { damage: (p, r, amt) => (seen.push(amt), 0), damageOnce: () => 0, slow: () => {} },
+    { damageMult: (el) => (el === 'snare' ? 2 : 1) }
+  );
+  const snareCast = {
+    element: 'snare', phase: 'impact', impactTime: 0.2, fadeTime: 0, u: 1,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1
+  };
+  combatAmp.tick(1 / 60, [snareCast]);
+  const base = settings.combat.snare.dps * (1 / 60);
+  assert.ok(
+    seen.length && Math.abs(seen[0] - base * 2) < 1e-9,
+    'combat: zoneTick damage rides the modifier amp'
+  );
+  console.log('ok  m2 ledger pins');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));
