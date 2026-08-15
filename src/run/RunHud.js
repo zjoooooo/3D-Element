@@ -13,7 +13,7 @@ export class RunHud {
       '<span class="run-hud__bar"><i data-fill></i></span>' +
       '<span data-k="hp"></span><span data-k="time"></span>' +
       '<span data-k="kills"></span><span data-k="level"></span>' +
-      '<span data-k="tide"></span>';
+      '<span data-k="tide"></span><span data-k="resonance"></span>';
     parent.appendChild(this.root);
     this._fields = Object.fromEntries(
       [...this.root.querySelectorAll('[data-k]')].map((el) => [el.dataset.k, el])
@@ -23,7 +23,7 @@ export class RunHud {
     this._lastPct = -1;
   }
 
-  update(player, run, pickups, tideInfo) {
+  update(player, run, pickups, tideInfo, resonanceText) {
     // The red bar is the read; the number backs it up. Max HP comes in on the
     // player rather than from settings so this stays a dumb display.
     const pct = Math.round((player.hp / (player.maxHp || 100)) * 100);
@@ -37,6 +37,7 @@ export class RunHud {
     this._set('kills', `击杀 ${run.kills}`);
     this._set('level', `Lv ${pickups.level}`);
     this._set('tide', `${WUXING_LABEL[tideInfo.element]}潮 ${Math.ceil(tideInfo.timeLeft)}s · 下潮 ${WUXING_LABEL[tideInfo.nextElement]}`);
+    this._set('resonance', resonanceText);
   }
 
   _set(key, text) {

@@ -768,6 +768,19 @@ export class App {
     tuning.reactionMult = this.modifiers.cycleActive() ? settings.resonance.cycleReaction : 1;
   }
 
+  /** HUD resonance readout (spec §4.8): '共鸣 水 金' for whichever wuxing
+   * currently resonate, '· 周天' appended once every wuxing does; counts
+   * aren't public so this only lists labels, never tallies. Empty when
+   * nothing resonates. */
+  _resonanceText() {
+    const labels = [];
+    for (let w = 0; w < 5; w++) {
+      if (this.modifiers.resonates(w)) labels.push(WUXING_LABEL[w]);
+    }
+    if (!labels.length) return '';
+    return `共鸣 ${labels.join(' ')}${this.modifiers.cycleActive() ? ' · 周天' : ''}`;
+  }
+
   /** One line per seated skill, for the level-up hand's footer and the
    * verdict's build recap. A fused seat names the fusion and both parents:
    * `R 回春雷泽 Lv2（Frost Lance+Storm Lance）`. */
@@ -1088,7 +1101,7 @@ export class App {
       }
       this._lastHp = this.playerState.hp;
       // The verdict borrows the hp span, so a live update would stamp it out.
-      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide());
+      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide(), this._resonanceText());
     }
 
     // 自动施法: every seat left on auto fires itself at the nearest enemy,

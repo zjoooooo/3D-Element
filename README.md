@@ -187,9 +187,13 @@ The run rides five three-minute elemental tides (M3): a Fisher–Yates order dea
 
 **Shift**+1–6 (or **Shift**+click a loadout badge) arms that seat's autocast — it fires at the nearest enemy off cooldown for a 0.85× damage tax and marks the badge with a blue dot, sitting out while a card hand is open or after death; **Enter** clears it along with the rest of the run state on restart.
 
-The HUD is four numbers: health, elapsed time, kill count, and level. Enemies are capsules and pickups are coloured dots — placeholder geometry until M5's real dressing.
+Wuxing depth (M4): every hit tags its target with a mark (印记) carrying the attack's wuxing for 8 s. Follow it with a hit of the wuxing that mark generates (相生) and it detonates for 1.5× the triggering hit's raw damage — 2.25× once 周天 resonance is live — firing one of five paired payoffs down the generating cycle: 金→水 凝露 slows the target, 水→木 滋养 heals you, 木→火 助燃 splashes damage around it, 火→土 烧结 drops a bonus gem, and 土→金 淬炼 arms your next metal cast to land quenched (dormant until an earth skill exists, M6). Each of the five 相克 matchups also brands the losing side with a timed debuff on top of the usual 1.25×/0.8× matchup swing: 水克火 熄灭 cuts contact and bolt damage 30 %, 土克水 淤塞 doubles the next slow that lands (capped at 90 %), 火克金 熔甲 raises incoming damage 25 %, and 金克木/木克土 断枝/破土 raise it 15 %.
 
-To validate the game loop headless, run `npm run check:game` — twenty-two blocks of logic tests plus the mixed-horde stress gate (measures tick time at the 300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
+Two or more equipped skills sharing a wuxing resonate (共鸣): 金 raises matchup advantage from 1.25× to 1.35×, 木 heals 1 hp per kill, 水 stretches slow duration ×1.5, 火 boosts burn-tick damage ×1.3 — 土's knockback bonus and 周天 (every wuxing represented at once, amplifying reaction damage a further ×1.5) both wait on an earth skill that doesn't exist yet (M6). Casting a skill within 4 s of the one that generates it (相生轮转) halves its cooldown and pops a toast. Once both parents reach level 4, a 相生 pair of seated skills can fuse into one gold seat, firing both spells together (each ×1.2 damage, growing to ×1.8 as the fused seat itself levels to 3) off one shared cooldown and freeing the seat its absorbed parent leaves behind — a composite-cast placeholder, both parents' own VFX firing side by side until M6 ships five dedicated fusion effects; two of the five 相生 pairs need an earth skill to ever ripen.
+
+The HUD is four numbers plus two text rows: health, elapsed time, kill count, level, the tide banner, and — only while something resonates — a `共鸣` line naming which wuxing and whether 周天 is up. Enemies are capsules and pickups are coloured dots — placeholder geometry until M5's real dressing.
+
+To validate the game loop headless, run `npm run check:game` — thirty-one blocks of logic tests plus the mixed-horde stress gate (measures tick time at the 300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
 
 ---
 
