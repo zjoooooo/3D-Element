@@ -234,6 +234,21 @@ export const settings = {
     loadout: ['ice', 'fireball', 'thunder', 'meteor', 'beam', 'glacier']
   },
 
+  /**
+   * The growth loop's own numbers (spec §4.5 / anchors 4). The modifier layer
+   * multiplies these onto the base values above — upgrades never write into
+   * any other settings block, so the sandbox and the next run stay clean.
+   */
+  upgrades: {
+    damagePerLevel: 0.25, // each skill level past 1 adds this to the multiplier
+    swiftPerLevel: 0.08,
+    vitalityPerLevel: 0.1,
+    focusPerLevel: 0.94, // multiplicative CD factor per focus level...
+    cooldownFloor: 0.6, // ...never past the spec's 40% total reduction cap
+    scavengerPerLevel: 0.1,
+    echoPerLevel: 0.04 // 12% at max, spec's number
+  },
+
   /** Per-behaviour enemy stats. HP scales with the minute (spec anchor 3). */
   enemies: {
     hpBase: 20, // swarm HP at minute 0 — one Frost Lance, by design

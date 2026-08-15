@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
+import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
@@ -397,6 +398,38 @@ import { RunManager } from '../src/run/RunManager.js';
   run.elapsed = settings.run.duration + 1;
   assert.equal(run.tick(1 / 60, { x: 0, z: 0 }), 'won');
   console.log('ok  run manager');
+}
+
+/* ---- modifiers: upgrades never touch settings, multipliers stack right ---- */
+{
+  const mods = new Modifiers();
+  assert.equal(mods.damageMult('ice'), 1, 'mods: fresh run multiplies by 1');
+  mods.bumpDamage('ice');
+  mods.bumpDamage('ice');
+  assert.ok(Math.abs(mods.damageMult('ice') - 1.5) < 1e-9, 'mods: two bumps = +50%');
+  assert.equal(mods.damageMult('thunder'), 1, 'mods: per-element isolation');
+
+  assert.ok(mods.bumpPassive('focus'));
+  assert.ok(Math.abs(mods.cooldownMult() - 0.94) < 1e-9, 'mods: one focus level = ×0.94');
+  mods.bumpPassive('focus');
+  mods.bumpPassive('focus');
+  assert.ok(!mods.bumpPassive('focus'), 'mods: passive refuses past its max');
+  assert.ok(mods.cooldownMult() >= 0.6, 'mods: CD floor 0.6 holds (spec cap 40%)');
+
+  mods.bumpPassive('echo');
+  assert.ok(Math.abs(mods.echoChance() - settings.upgrades.echoPerLevel) < 1e-9);
+  mods.bumpPassive('vitality');
+  assert.ok(mods.maxHpMult() > 1 && mods.moveSpeedMult() === 1, 'mods: keys independent');
+  assert.equal(mods.passiveLevel('reroll'), 0);
+
+  mods.bumpPassive('scavenger');
+  assert.ok(Math.abs(mods.xpMult() - (1 + settings.upgrades.scavengerPerLevel)) < 1e-9, 'mods: one scavenger level scales xp');
+
+  mods.reset();
+  assert.equal(mods.damageMult('ice'), 1, 'mods: reset wipes everything');
+  assert.equal(mods.passiveLevel('focus'), 0);
+  assert.ok(PASSIVES.swift.max === 3 && PASSIVES.reroll.name.length > 0);
+  console.log('ok  modifiers');
 }
 
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
