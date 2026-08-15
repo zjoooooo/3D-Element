@@ -49,10 +49,6 @@ export class RunHud {
     this.root.style.display = on ? '' : 'none';
   }
 
-  showVerdict(text) {
-    this._set('hp', text);
-  }
-
   dispose() {
     this.root.remove();
   }

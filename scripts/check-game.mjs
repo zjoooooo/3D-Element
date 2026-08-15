@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
-import { TideSchedule, WUXING, BEATS } from '../src/run/TideSchedule.js';
+import { TideSchedule, WUXING, BEATS, FEEDS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
 import { UpgradePool } from '../src/run/UpgradePool.js';
@@ -999,6 +999,33 @@ import { RunManager } from '../src/run/RunManager.js';
   const none = pool.draw(3, 3, 4); // earth: no earth abilities exist yet
   assert.equal(none.length, 0, 'shard: an empty wuxing returns an empty hand');
   console.log('ok  verdict & shards');
+}
+
+/* ---- m4 ground truth: the sheng cycle and a per-run shuffle ---- */
+{
+  // FEEDS is the generating cycle: 金0→水2→木1→火3→土4→金0.
+  assert.deepEqual(FEEDS, [2, 3, 1, 4, 0], 'feeds: the sheng cycle as declared');
+  assert.deepEqual([...FEEDS].sort(), [0, 1, 2, 3, 4], 'feeds: a permutation');
+  let cursor = 0;
+  const seen = new Set();
+  for (let n = 0; n < 5; n++) {
+    seen.add(cursor);
+    cursor = FEEDS[cursor];
+  }
+  assert.equal(seen.size, 5, 'feeds: one closed five-cycle, no islands');
+
+  // reshuffle: a new deal changes order (eventually) and stays a permutation.
+  const tides = new TideSchedule(createRng(3));
+  const before = [...tides.order];
+  const r = createRng(99);
+  let changed = false;
+  for (let n = 0; n < 8 && !changed; n++) {
+    tides.reshuffle(r);
+    assert.deepEqual([...tides.order].sort(), [0, 1, 2, 3, 4]);
+    if (String(tides.order) !== String(before)) changed = true;
+  }
+  assert.ok(changed, 'tides: reshuffle actually deals new orders');
+  console.log('ok  m4 ground');
 }
 
 /* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */

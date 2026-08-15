@@ -52,6 +52,8 @@ export class RunManager {
   }
 
   start() {
+    // Every deal fresh: a restart replays nothing from the last run.
+    this.s.tides.reshuffle(this.s.rng);
     this.active = true;
     this.elapsed = 0;
     this.kills = 0;

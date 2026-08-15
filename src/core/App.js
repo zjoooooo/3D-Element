@@ -190,9 +190,9 @@ export class App {
       // damage ledger (D-M3-8) — same wiring shape as ctx.mods above.
       this.abilities.ctx.stats = this.combat;
       this.targets.register(this.enemySystem);
-      // One schedule per page load, seeded off the same run rng — a restart
-      // calls run.start() (elapsed back to 0) but never reshuffles this, so
-      // every run this session replays the same tide order.
+      // One schedule per page load, seeded off the same run rng — but
+      // RunManager.start() reshuffles it every call, so a restart still deals
+      // a fresh tide order each run, drawn from the same continuing stream.
       this.tideSchedule = new TideSchedule(rng);
       this.enemyProjectiles = new EnemyProjectiles();
       this.scene.add(this.enemyProjectiles.points);

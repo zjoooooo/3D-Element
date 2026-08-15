@@ -13,17 +13,24 @@ export const WUXING = ['metal', 'wood', 'water', 'fire', 'earth'];
 export const WUXING_LABEL = ['金', '木', '水', '火', '土'];
 /** 相克 across the cycle: BEATS[i] is the element i overcomes. */
 export const BEATS = [1, 4, 3, 0, 2];
+/** 相生 across the cycle: FEEDS[i] is the element i generates. */
+export const FEEDS = [2, 3, 1, 4, 0];
 
 export class TideSchedule {
   constructor(rng) {
     this.order = [0, 1, 2, 3, 4];
+    this.reshuffle(rng);
+    this._out = { index: 0, element: 0, progress: 0, timeLeft: 0, nextElement: 0 };
+  }
+
+  /** Fisher-Yates the tide order in place — construction, and one fresh deal per run. */
+  reshuffle(rng) {
     for (let i = this.order.length - 1; i > 0; i--) {
       const j = (rng() * (i + 1)) | 0;
       const swap = this.order[i];
       this.order[i] = this.order[j];
       this.order[j] = swap;
     }
-    this._out = { index: 0, element: 0, progress: 0, timeLeft: 0, nextElement: 0 };
   }
 
   /** Which tide `elapsed` seconds sits in. Returns a reused scratch object. */
