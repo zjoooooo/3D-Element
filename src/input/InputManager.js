@@ -91,33 +91,36 @@ export class InputManager extends EventEmitter {
     switch (event.code) {
       // Ability slots. Keep these in step with `ELEMENT_META[...].key`.
       case 'KeyQ':
-      case 'Digit1':
         this.emit('action', 'ability', 0);
         break;
       case 'KeyE':
-      case 'Digit2':
         this.emit('action', 'ability', 1);
         break;
       case 'KeyR':
-      case 'Digit3':
         this.emit('action', 'ability', 2);
         break;
       case 'KeyF':
-      case 'Digit4':
         this.emit('action', 'ability', 3);
         break;
       case 'KeyV':
-      case 'Digit5':
         this.emit('action', 'ability', 4);
         break;
       case 'KeyX':
-      case 'Digit6':
         this.emit('action', 'ability', 5);
         break;
       case 'KeyT':
       case 'Digit7':
         this.emit('action', 'ability', 6);
         break;
+      // Digit1..6 double the six letter slots above (unchanged); held with
+      // Shift they instead toggle that slot's autocast — App's loadout seats
+      // sit in this same 1..6 order, so the digit *is* the seat there.
+      case 'Digit1': case 'Digit2': case 'Digit3':
+      case 'Digit4': case 'Digit5': case 'Digit6': {
+        const slot = Number(event.code.slice(-1)) - 1;
+        this.emit('action', event.shiftKey ? 'autocast' : 'ability', slot);
+        break;
+      }
       case 'Escape':
         this.emit('action', 'cancel');
         break;

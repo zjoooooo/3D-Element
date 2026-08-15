@@ -939,6 +939,43 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  run cadence');
 }
 
+/* ---- autocast: the toggle costs 15% and never fires blind ---- */
+{
+  // CombatSystem's amp folds the autocast tax per cast.
+  const seen = [];
+  const combat = new CombatSystem(
+    { damage: () => 0, damageOnce: (id, p, r, amt) => (seen.push(amt), 0), slow: () => {} },
+    null
+  );
+  const cast = {
+    element: 'ice', phase: 'travel', u: 0.5, autocast: true,
+    position: { x: 1, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 4
+  };
+  combat.tick(1 / 60, [cast]);
+  assert.ok(
+    Math.abs(seen[0] - settings.combat.ice.damage * settings.run.autocastDamage) < 1e-9,
+    'autocast: damage pays the 0.85 tax'
+  );
+  seen.length = 0;
+  cast.autocast = false;
+  combat.release(cast);
+  combat.tick(1 / 60, [cast]);
+  assert.ok(Math.abs(seen[0] - settings.combat.ice.damage) < 1e-9, 'autocast: manual stays full price');
+
+  // book() is the public door FireballAbility's self-resolved hit calls
+  // through (ctx.stats?.book?.(...), D-M3-8) — FireballAbility itself only
+  // gets browser verification (M2 D-M2-4 precedent), so pin the ledger math
+  // directly here instead.
+  combat.book('fireball', 100);
+  assert.equal(combat.damageDealt.fireball, 100, 'book: books a nominal amount');
+  combat.book('fireball', 50);
+  assert.equal(combat.damageDealt.fireball, 150, 'book: accumulates, does not overwrite');
+  combat.resetStats();
+  assert.ok(!combat.damageDealt.fireball, 'book: resetStats wipes it too');
+  console.log('ok  autocast tax');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

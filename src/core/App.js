@@ -51,7 +51,7 @@ import { PostProcessing } from '../postprocessing/PostProcessing.js';
 import { HUD, LoadingScreen } from '../ui/HUD.js';
 import { Editor } from '../ui/Editor.js';
 
-import { settings, ELEMENTS } from '../config/settings.js';
+import { settings, ELEMENTS, CastShape, castShapeOf } from '../config/settings.js';
 
 const HDR_URL = './hdri/spruit_sunrise.hdr';
 
@@ -174,6 +174,8 @@ export class App {
       // draw pool and the level-up hand itself.
       this.modifiers = new Modifiers();
       this.loadout = new Loadout();
+      /** Seats currently left to fight on their own (自动施法), run state — cleared on restart. */
+      this._autocast = new Set();
       this.upgradePool = new UpgradePool(rng, this.loadout, this.modifiers);
       this.upgradeUi = new UpgradeUi();
       this.upgradeUi.onChoice = (result) => this._onUpgradeChoice(result);
@@ -182,6 +184,9 @@ export class App {
       // context; every other element's damage rides CombatSystem below instead.
       this.abilities.ctx.mods = this.modifiers;
       this.combat = new CombatSystem(this.targets, this.modifiers);
+      // FireballAbility books its self-resolved hits straight into the run's
+      // damage ledger (D-M3-8) — same wiring shape as ctx.mods above.
+      this.abilities.ctx.stats = this.combat;
       this.targets.register(this.enemySystem);
       // One schedule per page load, seeded off the same run rng — a restart
       // calls run.start() (elapsed back to 0) but never reshuffles this, so
@@ -324,9 +329,11 @@ export class App {
     this.aim.on('reject', () => this.hud.showToast('Too close — aim further out'));
 
     // The HUD shows all seven abilities, off-stage snare included, so in run
-    // mode a click there must not arm the sandbox aim arrow.
-    this.hud.onAbility = (element) => {
-      if (!this.runMode) this.armAbility(element);
+    // mode a click there must not arm the sandbox aim arrow — Shift+click
+    // there toggles that seat's autocast instead (mirrors Shift+digit).
+    this.hud.onAbility = (element, shiftKey) => {
+      if (!this.runMode) { this.armAbility(element); return; }
+      if (shiftKey) this._toggleAutocast(this.loadout.seats.indexOf(element));
     };
   }
 
@@ -351,6 +358,11 @@ export class App {
         else this.armAbility(element);
         break;
       }
+      case 'autocast':
+        // slot here is the loadout seat directly (Shift+digit maps 1:1 to
+        // seats — unlike 'ability' above, there is no RUN_KEY_SLOTS detour).
+        if (this.runMode) this._toggleAutocast(slot);
+        break;
       case 'rightclick':
         // A right click that never became a camera drag: the sandbox reads it
         // as "put the cast away", the run mode as the second loadout seat.
@@ -385,6 +397,8 @@ export class App {
           this.loadout.reset();
           this.modifiers.reset();
           this._syncRunHudLabels();
+          this._autocast.clear();
+          this._syncBadges();
           this._echoAt = null;
           this.run.start();
         }
@@ -432,6 +446,18 @@ export class App {
     this.aim.arm();
   }
 
+  /**
+   * Flip a loadout seat's autocast flag — shared by the Shift+digit key and
+   * the badge's Shift+click. An empty seat has nothing to toggle (账本 guard:
+   * never let a null element reach the loadout/cooldown maps downstream).
+   */
+  _toggleAutocast(seat) {
+    if (this.loadout.elementAt(seat) === null) return;
+    if (this._autocast.has(seat)) this._autocast.delete(seat);
+    else this._autocast.add(seat);
+    this._syncBadges();
+  }
+
   /** Run mode's casting verb: no arm/confirm dance, straight from the pointer. */
   _quickCast(element) {
     if (!element || !ELEMENTS.includes(element)) return;
@@ -442,7 +468,11 @@ export class App {
 
   _cast(origin, direction, distance) {
     const element = this.element;
-    this.abilities.cast(origin, direction, distance, element);
+    const ability = this.abilities.cast(origin, direction, distance, element);
+    // Written on every cast through here (sandbox, manual run cast, echo) so
+    // a pooled instance never carries an autocast tax over from a previous
+    // life (M1 勘误 same shape) — only `_quickCastToward` ever writes true.
+    if (ability) ability.autocast = false;
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
@@ -464,6 +494,57 @@ export class App {
   }
 
   /**
+   * Autocast's casting verb — like `_quickCast`, but aimed at a world point
+   * instead of the cursor, so it resolves direction/distance itself rather
+   * than going through `aim.quickCast()`'s pointer raycast. Deliberately
+   * never touches `this.aim` or `this.abilities.selected`: those drive the
+   * player's own aim arrow and the HUD's active-slot highlight, and a
+   * background slot firing must not hijack either out from under a manual
+   * aim in progress.
+   *
+   * Direction points straight at the target. Line abilities throw at full
+   * range, same as a manual quick-cast; zone casts and burst-kind line casts
+   * (meteor: the rock detonates wherever `length` ends) land at the
+   * target's own distance instead, clamped to `[minRange, range]` — the
+   * same reason `AimController#quickCast` keeps meteor's cursor-resolved
+   * distance rather than always throwing it to max range (or the rock
+   * sails past whatever it was actually aimed at), and the same floor
+   * `_resolve()` applies to every aimed distance so a cast can never be
+   * asked to land closer than the ability's own minimum.
+   */
+  _quickCastToward(element, tx, tz) {
+    if (!element || (this.cooldowns.get(element) ?? 0) > 0) return;
+
+    const origin = this.character.position;
+    const dx = tx - origin.x;
+    const dz = tz - origin.z;
+    const rawDist = Math.hypot(dx, dz);
+    if (rawDist < 1e-6) return; // degenerate: target sits exactly on the caster
+    const direction = { x: dx / rawDist, y: 0, z: dz / rawDist };
+
+    const c = settings[element];
+    const zoned = castShapeOf(element) === CastShape.ZONE;
+    const distance =
+      zoned || settings.combat[element]?.kind === 'burst'
+        ? MathUtils.clamp(rawDist, Math.max(0.2, c.minRange), Math.max(0.4, c.range))
+        : Math.max(0.4, c.range);
+
+    const ability = this.abilities.cast(origin, direction, distance, element);
+    if (ability) ability.autocast = true;
+    this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
+
+    // 施法回响 applies here exactly as it does to a manual cast (spec: any
+    // cast can proc it); see `_cast`'s own copy of this same roll.
+    if (!this._echoing && this.runRng() < this.modifiers.echoChance() && !this._echoAt) {
+      this._echoAt = { element, t: 0.15 };
+    }
+
+    this.character.setFacing(Math.atan2(direction.x, direction.z));
+    this.character.playCast(c.castAnim);
+    this.character.castLunge();
+  }
+
+  /**
    * The ability cards must wear the run's keys, or pressing E highlights a
    * card that still says R and the input reads as scrambled. Off-stage
    * abilities (whatever the loadout leaves out) dim. Repeatable — unlike the
@@ -478,6 +559,19 @@ export class App {
       if (element) labels[element] = RUN_SLOT_KEYS[seat];
     });
     this.hud.setRunKeys(labels);
+  }
+
+  /**
+   * Blue-dot every badge whose seat has autocast armed; bare otherwise.
+   * Walks every HUD card (not just seated ones) so a skill that loses its
+   * seat — draftLoadout un-drafting it on restart — drops a stale dot
+   * instead of keeping one no toggle can reach any more.
+   */
+  _syncBadges() {
+    for (const [element, card] of this.hud.cards) {
+      const seat = this.loadout.seats.indexOf(element);
+      card.classList.toggle('ability-card--auto', seat !== -1 && this._autocast.has(seat));
+    }
   }
 
   /** One line per seated skill, for the level-up hand's footer. */
@@ -734,6 +828,19 @@ export class App {
       this._lastHp = this.playerState.hp;
       // The verdict borrows the hp span, so a live update would stamp it out.
       if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide());
+    }
+
+    // 自动施法: every seat left on auto fires itself at the nearest enemy,
+    // once its own cooldown allows — same freeze/verdict stop as everything
+    // else above, so a level-up hand or a dead run holds it still too.
+    if (this.runMode && !this.upgradeUi.isOpen && this._verdict.value === 'playing') {
+      for (const seat of this._autocast) {
+        const element = this.loadout.elementAt(seat);
+        if (!element || (this.cooldowns.get(element) ?? 0) > 0) continue;
+        const i = this.enemySystem.nearestTo(this.character.position.x, this.character.position.z);
+        if (i === -1) continue;
+        this._quickCastToward(element, this.enemySystem.x[i], this.enemySystem.z[i]);
+      }
     }
 
     this.abilities.update(dt);

@@ -227,6 +227,7 @@ export const settings = {
     dodgeDistance: 3, // metres the spacebar dash covers
     dodgeIframes: 0.3,
     dodgeCooldown: 2,
+    autocastDamage: 0.85, // 自动施法: a slot left on auto pays 15% less
     godMode: false, // debug: take no damage, everything else runs
     draftLoadout: true, // run starts with seat 0 only; false = all six (debug)
     // The six abilities on stage in run mode, in slot order:

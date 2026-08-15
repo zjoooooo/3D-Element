@@ -41,13 +41,27 @@ export class CombatSystem {
     this.damageDealt = Object.create(null);
   }
 
-  _amp(element) {
-    return this.mods ? this.mods.damageMult(element) : 1;
+  /** Damage multiplier for a cast: the run's upgrade layer, times the 15%
+   * autocast tax when the slot fired itself (`ability.autocast`, written on
+   * every cast so a pooled instance never carries a stale flag forward). */
+  _amp(ability) {
+    const base = this.mods ? this.mods.damageMult(ability.element) : 1;
+    return ability.autocast ? base * settings.run.autocastDamage : base;
   }
 
   /** Book a landed hit's nominal damage against its element, if it landed. */
   _book(element, amount, hits) {
-    if (hits) this.damageDealt[element] = (this.damageDealt[element] ?? 0) + amount * hits;
+    if (hits) this.book(element, amount * hits);
+  }
+
+  /**
+   * Add a nominal damage amount straight to an element's ledger. `_book`
+   * above is tick()'s own hit-counting entry point; this is the public door
+   * for a self-resolved ability (fireball) that never runs through tick()
+   * and so has to book its own hits directly (D-M3-8).
+   */
+  book(element, amount) {
+    this.damageDealt[element] = (this.damageDealt[element] ?? 0) + amount;
   }
 
   _castKey(ability) {
@@ -95,7 +109,7 @@ export class CombatSystem {
           if (!travelling && !(landed && from < 1)) break;
           const to = travelling ? ability.u : 1;
           const stepU = Math.max(0.01, c.width / ability.length);
-          const amt = c.damage * this._amp(ability.element);
+          const amt = c.damage * this._amp(ability);
           for (let t = from; ; t += stepU) {
             const u = Math.min(t, to);
             this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
@@ -122,7 +136,7 @@ export class CombatSystem {
           ) {
             this._detonated.add(castId);
             const radius = c.radius ?? settings[ability.element].zoneRadius ?? 2;
-            const amt = c.damage * this._amp(ability.element);
+            const amt = c.damage * this._amp(ability);
             this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
             if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           }
@@ -136,7 +150,7 @@ export class CombatSystem {
             (ability.phase === 'impact' || ability.phase === 'fade') &&
             ability.impactTime + ability.fadeTime < c.burnTime
           ) {
-            if (this._dot(castId, step, c.burnDps * this._amp(ability.element))) {
+            if (this._dot(castId, step, c.burnDps * this._amp(ability))) {
               const amt = this._take(castId);
               this._book(ability.element, amt, this.targets.damage(ability.position, c.radius, amt, wux));
             }
@@ -146,7 +160,7 @@ export class CombatSystem {
 
         case 'lineTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
-          const perSecond = (c.dps * this._amp(ability.element)) / LINE_SAMPLES;
+          const perSecond = (c.dps * this._amp(ability)) / LINE_SAMPLES;
           const amt = perSecond * step;
           for (let s = 1; s <= LINE_SAMPLES; s++) {
             const t = (s / LINE_SAMPLES) * ability.u;
@@ -160,7 +174,7 @@ export class CombatSystem {
         case 'zoneTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const radius = settings[ability.element].zoneRadius ?? 2;
-          const amt = c.dps * this._amp(ability.element) * step;
+          const amt = c.dps * this._amp(ability) * step;
           this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
           if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           break;

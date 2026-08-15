@@ -79,7 +79,9 @@ export class HUD {
       this.cards.set(card.dataset.element, card);
       card.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
-        this.onAbility?.(card.dataset.element);
+        // shiftKey rides along for run mode's autocast toggle; the sandbox
+        // caller ignores the second argument entirely.
+        this.onAbility?.(card.dataset.element, event.shiftKey);
       });
     }
 

@@ -352,7 +352,16 @@ export class FireballAbility extends Ability {
     // multipliers above on purpose: those are the look, this is the hit.
     // ctx.mods is the run's upgrade layer (M2) — App wires it in run mode only
     // (Task 7); the sandbox leaves it undefined, so this stays exactly c.damage.
-    this.ctx.targets.damage(_pos, c.damageRadius, c.damage * (this.ctx.mods?.damageMult(this.element) ?? 1));
+    // this.autocast pays the same 15% tax CombatSystem folds into every other
+    // element (Task 9) — this self-resolved hit was the one path that could
+    // dodge it. The wuxing arg lets it fold the matchup like every other
+    // skill instead of the dead `wuxingOf.fireball` entry (D-M3-8), and the
+    // landed-hit count books it into the run's damage ledger — this path
+    // never told CombatSystem's stats about its damage at all before.
+    const amt =
+      c.damage * (this.ctx.mods?.damageMult(this.element) ?? 1) * (this.autocast ? settings.run.autocastDamage : 1);
+    const hits = this.ctx.targets.damage(_pos, c.damageRadius, amt, settings.combat.wuxingOf[this.element] ?? -1);
+    this.ctx.stats?.book?.(this.element, amt * hits);
 
     this.ctx.shake.add(
       c.impactShake * g.explosionIntensity * g.cameraShake,

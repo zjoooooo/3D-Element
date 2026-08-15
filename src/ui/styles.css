@@ -278,6 +278,19 @@ body {
   color: var(--ui-text-dim);
 }
 
+/* 自动施法: a small dot marks a seat left fighting on its own (Shift+slot
+   or Shift+click toggles it). .ability-card is already position:relative. */
+.ability-card--auto::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #58aaff;
+}
+
 .hud__panel {
   position: absolute;
   padding: 12px 14px;
