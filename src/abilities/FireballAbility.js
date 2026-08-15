@@ -211,9 +211,11 @@ export class FireballAbility extends Ability {
     if (dt > 0) this._velocity.subVectors(this.position, this._previous).divideScalar(dt);
 
     this._trailFx(dt);
-    this._previous.copy(this.position);
 
+    // The fuse walks _previous → position, so the strike check has to run
+    // before this frame's position is folded into _previous.
     if (c.hitStop && this._struckSomething()) return;
+    this._previous.copy(this.position);
 
     // A small ball of fire lights the ground it passes over more than it lights
     // itself; the light already rides `position`, so this only keeps it warm.
@@ -235,14 +237,28 @@ export class FireballAbility extends Ability {
    */
   _struckSomething() {
     if (this.u >= 1) return false;
-    if (!this.ctx.targets.hits(this.position, this.config.size)) return false;
 
-    this.length = Math.max(0.1, this.front);
-    this.u = 1;
-    this.phase = AbilityPhase.IMPACT;
-    this.impactTime = 0;
-    this.onImpact();
-    return true;
+    // The fuse used to test only the frame's end point, but at 34 m/s a
+    // low-fps frame moves the ball further than the fuse reaches and it flies
+    // clean through a body. Walk the stretch covered since last frame instead;
+    // `_previous` still holds where the ball was.
+    const size = this.config.size;
+    const travelled = _step.subVectors(this.position, this._previous).length();
+    const steps = Math.min(8, Math.max(1, Math.ceil(travelled / Math.max(0.2, size))));
+    for (let s = 1; s <= steps; s++) {
+      _pos.lerpVectors(this._previous, this.position, s / steps);
+      if (!this.ctx.targets.hits(_pos, size)) continue;
+
+      // Burst where it was struck, not where the frame would have carried it.
+      this.position.copy(_pos);
+      this.length = Math.max(0.1, this.front - travelled * (1 - s / steps));
+      this.u = 1;
+      this.phase = AbilityPhase.IMPACT;
+      this.impactTime = 0;
+      this.onImpact();
+      return true;
+    }
+    return false;
   }
 
   onImpact() {

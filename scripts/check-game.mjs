@@ -152,6 +152,14 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.equal(deaths, 1);
   assert.equal(enemies.count, 0);
 
+  // Bodies have reach: a probe that misses the centre but clips the capsule's
+  // radius still hits — the fireball's narrow fuse depends on this.
+  enemies.clear();
+  enemies.spawnAt(0, 0, 0);
+  const body = settings.enemies.swarm.radius;
+  assert.ok(enemies.hits({ x: 0.3 + body, z: 0 }, 0.4), 'enemies: clipping the body is a hit');
+  assert.ok(!enemies.hits({ x: 0.5 + body, z: 0 }, 0.4), 'enemies: past the body is a miss');
+
   // Hit readouts: every landed hit reports once (damage figures hang off
   // this), and a dedup'd repeat stays silent.
   enemies.clear();

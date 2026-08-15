@@ -152,6 +152,10 @@ export class App {
       // screen edge in a run — styles.css keys off this class; hovering the
       // exposed sliver (or G / H as ever) brings a panel back.
       document.body.classList.add('run-mode');
+      // The run's field is the arena, not the sandbox's 90m roam: spawns clamp
+      // onto the arena ring, so a runner who can leave it outruns the entire
+      // horde into unlit void. (settings.run.arenaRadius documents this pairing.)
+      settings.character.roamRadius = settings.run.arenaRadius;
       const rng = createRng((Date.now() % 0xffffffff) >>> 0);
       this.gameClock = new GameClock(settings.run.tickRate);
       this.enemySystem = new EnemySystem(rng);

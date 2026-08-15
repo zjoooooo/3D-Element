@@ -161,20 +161,26 @@ export class EnemySystem {
   }
 
   /* ---- Targets contract ------------------------------------------------ */
+  // Every test is sphere-vs-sphere, the dummies' own semantics: the body's
+  // radius counts toward the reach, so clipping the edge of a capsule is a
+  // hit. A pure point test made the fireball's 0.4m fuse fly clean through
+  // 0.45m-wide bodies unless it struck dead centre.
 
   hits(point, radius) {
+    const reach = radius + settings.enemies.swarm.radius;
     for (let i = 0; i < this.count; i++) {
-      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) < radius) return true;
+      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) < reach) return true;
     }
     return false;
   }
 
   damage(point, radius, amount) {
+    const reach = radius + settings.enemies.swarm.radius;
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const dx = this.x[i] - point.x;
       const dz = this.z[i] - point.z;
-      if (Math.hypot(dx, dz) >= radius) continue;
+      if (Math.hypot(dx, dz) >= reach) continue;
       hits++;
       this.flash[i] = 1;
       const d = Math.hypot(dx, dz) || 1;
@@ -188,11 +194,12 @@ export class EnemySystem {
   }
 
   damageOnce(castId, point, radius, amount) {
+    const reach = radius + settings.enemies.swarm.radius;
     let seen = this._hitMemory.get(castId);
     if (!seen) this._hitMemory.set(castId, (seen = new Set()));
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
-      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= radius) continue;
+      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
       if (seen.has(this.id[i])) continue;
       seen.add(this.id[i]);
       hits++;
@@ -205,8 +212,9 @@ export class EnemySystem {
   }
 
   slow(point, radius, factor, duration) {
+    const reach = radius + settings.enemies.swarm.radius;
     for (let i = 0; i < this.count; i++) {
-      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= radius) continue;
+      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
       this.slowed[i] = Math.max(this.slowed[i], factor);
       this.slowT[i] = Math.max(this.slowT[i], duration);
     }
