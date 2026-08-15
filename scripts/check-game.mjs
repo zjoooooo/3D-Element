@@ -1125,6 +1125,48 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  marks & debuffs');
 }
 
+/* ---- combat depth hooks: quench, fusion and the fire-dot aura ---- */
+{
+  const seen = [];
+  const combat = new CombatSystem(
+    { damage: (p, r, amt) => (seen.push(amt), 1), damageOnce: () => 0, slow: () => {} },
+    { damageMult: () => 1, dotMult: () => 1.3 }
+  );
+  // Fire-wuxing burn rides dotMult; the detonation itself is amount-based and
+  // pinned in Task 3 — here we pin the burn tick.
+  const meteor = {
+    element: 'meteor', phase: 'fade', impactTime: 0, fadeTime: 0.1, u: 1,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 4
+  };
+  for (let t = 0; t < 120; t++) combat.tick(1 / 60, [meteor]);
+  // A fresh instance that only ever sees 'fade' still detonates once on first
+  // sight (existing T3 behaviour, pinned above under "combat: the shape table
+  // drives targets calls") — filter that one-off amount out so the sum
+  // isolates the burn the way the comment above says it should.
+  const total = seen
+    .filter((amt) => amt !== settings.combat.meteor.damage)
+    .reduce((s, v) => s + v, 0);
+  const want = settings.combat.meteor.burnDps * 1.3 * 2; // 2 seconds of boosted burn
+  assert.ok(Math.abs(total - want) < want * 0.1, `combat: fire resonance boosts the burn (${total.toFixed(1)}/${want.toFixed(1)})`);
+
+  // Quench and fusion multipliers fold into _amp via cast flags.
+  const combat2 = new CombatSystem(
+    { damage: () => 0, damageOnce: (id, p, r, amt) => (seen2.push(amt), 0), slow: () => {} },
+    null
+  );
+  const seen2 = [];
+  const cast = {
+    element: 'ice', phase: 'travel', u: 0.5, quenched: true, fusionMult: 1.2,
+    position: { x: 1, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 4
+  };
+  combat2.tick(1 / 60, [cast]);
+  assert.ok(
+    Math.abs(seen2[0] - settings.combat.ice.damage * 1.5 * 1.2) < 1e-9,
+    'combat: quench ×1.5 and fusion ×1.2 stack in _amp'
+  );
+  console.log('ok  combat depth hooks');
+}
+
 /* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

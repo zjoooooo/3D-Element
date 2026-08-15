@@ -43,10 +43,14 @@ export class CombatSystem {
 
   /** Damage multiplier for a cast: the run's upgrade layer, times the 15%
    * autocast tax when the slot fired itself (`ability.autocast`, written on
-   * every cast so a pooled instance never carries a stale flag forward). */
+   * every cast so a pooled instance never carries a stale flag forward),
+   * times 1.5 for a quenched cast (`ability.quenched`, App writes it at cast
+   * time — consuming the charge is App's job, this just honors the flag) and
+   * the cast's own fusion multiplier (`ability.fusionMult`, 1 when unfused). */
   _amp(ability) {
     const base = this.mods ? this.mods.damageMult(ability.element) : 1;
-    return ability.autocast ? base * settings.run.autocastDamage : base;
+    const taxed = ability.autocast ? base * settings.run.autocastDamage : base;
+    return taxed * (ability.quenched ? 1.5 : 1) * (ability.fusionMult ?? 1);
   }
 
   /** Book a landed hit's nominal damage against its element, if it landed. */
@@ -150,7 +154,11 @@ export class CombatSystem {
             (ability.phase === 'impact' || ability.phase === 'fade') &&
             ability.impactTime + ability.fadeTime < c.burnTime
           ) {
-            if (this._dot(castId, step, c.burnDps * this._amp(ability))) {
+            // Fire resonance (T5's dotMult) rides the burn only — 火, wux 3 —
+            // and degrades to ×1 both in the sandbox (mods null) and against
+            // a pre-T5 Modifiers that doesn't carry dotMult yet.
+            const resonance = wux === 3 ? this.mods?.dotMult?.() ?? 1 : 1;
+            if (this._dot(castId, step, c.burnDps * this._amp(ability) * resonance)) {
               const amt = this._take(castId);
               this._book(ability.element, amt, this.targets.damage(ability.position, c.radius, amt, wux));
             }
