@@ -20,6 +20,9 @@ export const BEHAVIORS = ['swarm', 'ranged', 'tank'];
 const CELL = 1.2; // metres per grid cell, ≈ separation distance
 const GRID = 96; // cells per axis, covers the arena with margin
 const HALF = (GRID * CELL) / 2;
+// Reaction queue: entries are (markWux, wux, x, z, amount), five floats each.
+// 32 detonations is far above anything one damage()/damageOnce() call produces.
+const REACTION_QUEUE_CAP = 32;
 
 export class EnemySystem {
   constructor(rng) {
@@ -68,6 +71,20 @@ export class EnemySystem {
     this.onFire = null;
     /** Assigned by whoever wants reaction events: (markWux, triggerWux, x, z, amount). */
     this.onReaction = null;
+    /**
+     * onReaction can call straight back into damage()/damageOnce() (助燃's
+     * splash does exactly this via RunManager). Firing it synchronously from
+     * inside _applyWux used to hand that reentrant call the still-in-progress
+     * outer loop's arrays mid-iteration — a kill in there can swap-remove an
+     * enemy out from under the outer loop's cached index (spec bug: a wood
+     * mark detonated by a fire hit corrupts the outer damage() pass). Fix:
+     * _applyWux queues the five call args here instead of calling out; the
+     * queue is drained by _flushReactions() once the loop that filled it has
+     * fully resolved. Flat and preallocated — zero alloc on the hot path.
+     */
+    this._reactionQueue = new Float32Array(REACTION_QUEUE_CAP * 5);
+    this._reactionFlush = new Float32Array(REACTION_QUEUE_CAP * 5); // see _flushReactions
+    this._reactionCount = 0;
 
     /** element/behavior of the strongest contact this tick — reused scratch, zero-alloc. */
     this.lastContact = { element: 0, behavior: 0 };
@@ -256,6 +273,7 @@ export class EnemySystem {
       this.kbZ[i] += (dz / d) * kb;
       this._applyWux(i, amount, wuxing);
     }
+    this._flushReactions();
     return hits;
   }
 
@@ -272,6 +290,7 @@ export class EnemySystem {
       this.flash[i] = 1;
       this._applyWux(i, amount, wuxing);
     }
+    this._flushReactions();
     // ponytail: memory grows one Set per cast; RunManager clears finished casts.
     return hits;
   }
@@ -315,7 +334,7 @@ export class EnemySystem {
         // pre-matchup amount so it doesn't inherit that multiplier too.
         const bonus = amount * settings.marks.reactionMult * this.tuning.reactionMult;
         this.onHit?.(this.x[i], this.z[i], bonus);
-        this.onReaction?.(old, wuxing, this.x[i], this.z[i], amount);
+        this._queueReaction(old, wuxing, this.x[i], this.z[i], amount);
         this.mark[i] = 255;
         if ((this.hp[i] -= bonus) <= 0) {
           this._kill(i);
@@ -328,6 +347,47 @@ export class EnemySystem {
     }
     this.onHit?.(this.x[i], this.z[i], dealt);
     if ((this.hp[i] -= dealt) <= 0) this._kill(i);
+  }
+
+  /** Record a detonation's side effect instead of firing it mid-loop (see the field comment on _reactionQueue above). */
+  _queueReaction(markWux, wux, x, z, amount) {
+    if (this._reactionCount >= REACTION_QUEUE_CAP) return; // ponytail: fixed-cap queue, overflow drops the reaction rather than growing/crashing — raise REACTION_QUEUE_CAP if a single call ever legitimately detonates more than 32 marks
+    const base = this._reactionCount++ * 5;
+    this._reactionQueue[base] = markWux;
+    this._reactionQueue[base + 1] = wux;
+    this._reactionQueue[base + 2] = x;
+    this._reactionQueue[base + 3] = z;
+    this._reactionQueue[base + 4] = amount;
+  }
+
+  /**
+   * Runs once the calling damage()/damageOnce() loop has fully resolved.
+   * Snapshot-then-reset-then-iterate, in that order: onReaction can itself
+   * re-enter damage() (助燃's splash), which appends fresh entries to
+   * _reactionQueue and calls this same method again at its own end. Reading
+   * straight out of _reactionQueue while iterating would hand that reentrant
+   * flush a live buffer to overwrite mid-read, so the pending entries are
+   * copied to a second preallocated buffer, and the count reset to 0, before
+   * a single callback fires. (In practice the reentrant splash always deals
+   * untyped damage — wuxing -1 — so it can never itself queue a reaction, and
+   * its own flush is a same-call no-op; the copy makes that safe by
+   * construction instead of relying on that invariant holding forever.)
+   */
+  _flushReactions() {
+    const n = this._reactionCount;
+    if (n === 0) return;
+    this._reactionFlush.set(this._reactionQueue.subarray(0, n * 5));
+    this._reactionCount = 0;
+    for (let k = 0; k < n; k++) {
+      const b = k * 5;
+      this.onReaction?.(
+        this._reactionFlush[b],
+        this._reactionFlush[b + 1],
+        this._reactionFlush[b + 2],
+        this._reactionFlush[b + 3],
+        this._reactionFlush[b + 4]
+      );
+    }
   }
 
   /** 克中 debuff channel, keyed by the attacker's wuxing (spec §4.6 三通道). */
@@ -398,6 +458,7 @@ export class EnemySystem {
   clear() {
     this.count = 0;
     this._hitMemory.clear();
+    this._reactionCount = 0;
   }
 }
 

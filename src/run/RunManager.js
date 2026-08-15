@@ -203,7 +203,10 @@ export class RunManager {
       default:
         break; // not one of the five wuxing indices — nothing to route
     }
-    combat.book(wuxingRep(wux), amount * m.reactionMult * enemies.tuning.reactionMult);
+    // No skill casts as 土 (wux 4) yet (M6), so wuxingRep(4) has no ledger
+    // entry to credit — skip the booking, not the reaction effect above.
+    const rep = wuxingRep(wux);
+    if (rep !== undefined) combat.book(rep, amount * m.reactionMult * enemies.tuning.reactionMult);
   }
 
   /**

@@ -1215,13 +1215,16 @@ import { RunManager } from '../src/run/RunManager.js';
   enemies.onReaction(2, 1, 0, 0, 10);
   assert.equal(player.hp, 50 + settings.marks.nourishHeal, 'react: 滋养 heals');
 
-  // 火→土 烧结 drops a bonus gem; 土→金 arms the quench; booking happens every time.
+  // 火→土 烧结 drops a bonus gem; 土→金 arms the quench.
   const gems = pickups.count;
   enemies.onReaction(3, 4, 1, 1, 10);
   assert.equal(pickups.count, gems + settings.marks.sinterGems, 'react: 烧结 pays a gem');
   enemies.onReaction(4, 0, 0, 0, 10);
   assert.ok(mods.consumeQuench('beam'), 'react: 淬炼 arms the latch');
-  assert.ok(booked.length >= 3, 'react: every detonation is booked');
+  // Booking credits whichever skill first casts as the triggering wuxing —
+  // 土 (wux 4, the 火→土 call just above) has no skill casting as earth yet
+  // (M6), so that one detonation is the deliberate skip among these three.
+  assert.equal(booked.length, 2, 'react: detonations book under their ledger rep, skipping wux 4 (no rep yet)');
 
   // Wood resonance turns kills into drops of life.
   mods.computeResonance([1, 1]);
@@ -1237,6 +1240,46 @@ import { RunManager } from '../src/run/RunManager.js';
   player.alive = false;
   player.heal(10);
   assert.equal(player.hp, player.maxHp, 'heal: the dead stay dead');
+
+  // Reentrancy proof (live path): onReaction firing mid-loop used to let a
+  // splash swap-remove enemies out from under damage()'s own in-progress
+  // loop (task-6 Concern 1). Fresh EnemySystem wired with a splashing-back
+  // onReaction directly — the block above proves ROUTING; this proves
+  // EnemySystem itself stays correct under the reentrant call routing
+  // produces. Three wood enemies (fire vs wood is neutral — BEATS[3]=0≠1,
+  // BEATS[1]=4≠3 — so no matchup multiplier muddies the arithmetic), spaced
+  // past the direct hits' radius but inside the splash's: only the middle
+  // one is ever hit directly, and only the frail one dies to the splash.
+  const re = new EnemySystem(createRng(7));
+  re.onReaction = (mw, w, x, z, amt) => re.damage({ x, z }, 2, 50, -1);
+  const left = re.spawnAt(-1.6, 0, 0, 1);
+  const frail = re.spawnAt(1.6, 0, 0, 1);
+  const mid = re.spawnAt(0, 0, 0, 1);
+  re.hp[left] = 1000;
+  re.hp[frail] = 1;
+  re.hp[mid] = 1000;
+  const frailId = re.id[frail];
+  const midId = re.id[mid];
+
+  re.damage({ x: 0, z: 0 }, 1, 10, 1); // wood-marks mid only (left/frail sit past this radius)
+  re.damage({ x: 0, z: 0 }, 1, 10, 3); // fire-hits mid: detonates, splash flushes after the loop's done
+
+  // Swap-remove can relocate a survivor, so find enemies by id, not index.
+  const findLive = (id) => {
+    for (let k = 0; k < re.count; k++) if (re.id[k] === id) return k;
+    return -1;
+  };
+  assert.equal(findLive(frailId), -1, 'reentrancy: the splash actually killed the frail neighbour');
+  assert.equal(re.count, 2, 'reentrancy: exactly one death — no phantom kills, no lost survivors');
+  const midNow = findLive(midId);
+  assert.ok(midNow !== -1, 'reentrancy: the detonated enemy survives and stays trackable');
+  // mark hit + fire hit + its 1.5x bonus + its own splash (it stands where it detonated).
+  const expectedMidHp = 1000 - 10 - 10 - 10 * settings.marks.reactionMult - 50;
+  assert.ok(
+    Math.abs(re.hp[midNow] - expectedMidHp) < 1e-6,
+    'reentrancy: hit + detonation + its own splash land exactly once, none lost to a swapped-out slot'
+  );
+  assert.equal(re.hp[left], 1000 - 50, 'reentrancy: an untouched neighbour still takes exactly its one splash hit');
   console.log('ok  reaction routing');
 }
 
