@@ -679,7 +679,7 @@ export class App {
           this._echoing = false;
         }
       }
-      if (!frozen && this.run.active && this.run.pendingLevels > 0) {
+      if (!frozen && this.run.active && this._verdict.value === 'playing' && this.run.pendingLevels > 0) {
         this.run.pendingLevels--;
         const hand = this.upgradePool.draw(this.pickups.level);
         this.upgradeUi.open(hand, {
@@ -689,6 +689,7 @@ export class App {
       }
       if (this._verdict.value !== 'playing' && this.run.active) {
         this.run.stop();
+        this._echoAt = null; // a pending echo must not fire over the death screen
         this.runHud.showVerdict(this._verdict.value === 'won' ? '生存达成 — 回车重开' : '倒下了 — 回车重开');
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
