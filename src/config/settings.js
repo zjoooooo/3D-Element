@@ -248,7 +248,9 @@ export const settings = {
     cooldownFloor: 0.6, // ...never past the spec's 40% total reduction cap
     scavengerPerLevel: 0.1,
     echoPerLevel: 0.04, // 12% at max, spec's number
-    skillLevelMax: 5
+    skillLevelMax: 5,
+    passiveWeights: { upgrade: 3, newActive: 2, passive: 1 }, // draw weights
+    milestones: [5, 10, 15] // levels that guarantee a new-active card
   },
 
   /** Per-behaviour enemy stats. HP scales with the minute (spec anchor 3). */

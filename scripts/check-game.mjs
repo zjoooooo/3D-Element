@@ -13,6 +13,7 @@ import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
+import { UpgradePool } from '../src/run/UpgradePool.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
@@ -460,6 +461,56 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.ok(!loadout.hasEmpty());
   settings.run.draftLoadout = saved;
   console.log('ok  loadout');
+}
+
+/* ---- upgrade pool: deterministic, distinct, weighted, milestone-aware ---- */
+{
+  const saved = settings.run.draftLoadout;
+  settings.run.draftLoadout = true;
+  const make = (seed) => {
+    const loadout = new Loadout();
+    loadout.reset();
+    const mods = new Modifiers();
+    return { pool: new UpgradePool(createRng(seed), loadout, mods), loadout, mods };
+  };
+
+  // Same seed, same cards — the daily-seed contract reaches the card row.
+  const a = make(11).pool.draw(2);
+  const b = make(11).pool.draw(2);
+  assert.deepEqual(a.map((c) => c.kind + (c.element ?? c.passive)),
+    b.map((c) => c.kind + (c.element ?? c.passive)), 'pool: seeded draws replay');
+
+  // Distinct cards, at most three, every card actionable.
+  const { pool, loadout } = make(23);
+  for (let round = 0; round < 50; round++) {
+    const cards = pool.draw(2);
+    assert.ok(cards.length >= 1 && cards.length <= 3);
+    const keys = cards.map((c) => c.kind + (c.element ?? c.passive));
+    assert.equal(new Set(keys).size, keys.length, 'pool: no duplicate cards in a hand');
+    for (const card of cards) {
+      if (card.kind === 'upgrade') assert.ok(!loadout.isMaxed(card.element));
+      if (card.kind === 'new') assert.ok(!loadout.has(card.element) && loadout.hasEmpty());
+      assert.ok(card.title.length > 0 && card.body.length > 0, 'pool: cards carry copy');
+    }
+  }
+
+  // Milestone levels guarantee a new-active card while seats remain.
+  const m = make(31);
+  const milestone = m.pool.draw(settings.upgrades.milestones[0]);
+  assert.ok(milestone.some((c) => c.kind === 'new'), 'pool: milestone forces a new active');
+
+  // Exhaustion: everything maxed and seated → empty hand (skip-heal path).
+  const x = make(41);
+  for (const element of ELEMENTS) x.loadout.acquire(element);
+  for (const element of x.loadout.equippedList()) {
+    while (!x.loadout.isMaxed(element)) x.loadout.upgrade(element);
+  }
+  for (const id of Object.keys(PASSIVES)) {
+    while (x.mods.bumpPassive(id)) { /* to max */ }
+  }
+  assert.equal(x.pool.draw(20).length, 0, 'pool: a full build draws nothing');
+  settings.run.draftLoadout = saved;
+  console.log('ok  upgrade pool');
 }
 
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
