@@ -242,6 +242,7 @@ export const settings = {
    */
   upgrades: {
     damagePerLevel: 0.25, // each skill level past 1 adds this to the multiplier
+    skipHeal: 0.1, // declining all three cards heals this fraction of max hp
     swiftPerLevel: 0.08,
     vitalityPerLevel: 0.1,
     focusPerLevel: 0.94, // multiplicative CD factor per focus level...
