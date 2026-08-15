@@ -11,6 +11,20 @@ import { settings } from '../config/settings.js';
 const TELEGRAPH_TIME = 0.5; // seconds a spawn ring shows before the enemy lands
 /** takeDamage source for a projectile hit — no element (bolts carry no wuxing), ranged behavior. */
 const PROJECTILE_SOURCE = { element: -1, behavior: 1 };
+/** Reused {x,z} target for a detonation's splash/slow — _react never allocates. */
+const _reactPt = { x: 0, z: 0 };
+
+/**
+ * The skill ledger books by element id, not by wuxing — a detonation only
+ * knows which wuxing triggered it, so credit the first configured skill that
+ * casts as that wuxing (settings.combat.wuxingOf's first match). A
+ * top-3-readout approximation, same spirit as the rest of the ledger (spec's
+ * own concession): no skill casts as wuxing 4 (土) yet, so a 土-triggered
+ * detonation books under `undefined` until an earth skill lands (M6).
+ */
+function wuxingRep(wux) {
+  return Object.entries(settings.combat.wuxingOf).find(([, v]) => v === wux)?.[0];
+}
 
 export class RunManager {
   constructor(systems) {
@@ -38,8 +52,14 @@ export class RunManager {
       } else {
         this.s.pickups.dropAt(x, z, this.elapsed / 60);
       }
+      // 木共鸣: every kill drips a little life back (spec §4.8), regardless
+      // of that kill's own wuxing. `?.` because two pre-M4 headless fakes
+      // still construct RunManager without a modifiers collaborator — they
+      // never arm a reaction either, so this is the only spot that needs it.
+      if (this.s.modifiers?.resonates(1)) this.s.player.heal(settings.resonance.woodKillHeal);
     };
     this.s.enemies.onFire = (x, z, dx, dz) => this.s.projectiles.spawn(x, z, dx, dz);
+    this.s.enemies.onReaction = (markWux, wux, x, z, amount) => this._react(markWux, wux, x, z, amount);
     this.s.pickups.onShard = (element) => this.onShardHand?.(element);
 
     // Casts hand back their hit memory the moment the manager retires them —
@@ -150,6 +170,40 @@ export class RunManager {
     this.pendingLevels += this.s.pickups.tick(step, playerPos);
 
     return 'playing';
+  }
+
+  /**
+   * A detonation's own hp damage is already settled inside EnemySystem; this
+   * only routes its five neighbour-system side effects (spec §4.6) and books
+   * the nominal damage. The five sheng pairs are disjoint, so `markWux` alone
+   * picks the branch — `wux` (the triggering hit's own wuxing) is only
+   * needed for the ledger credit below.
+   */
+  _react(markWux, wux, x, z, amount) {
+    const { enemies, pickups, player, modifiers, combat } = this.s;
+    const m = settings.marks;
+    _reactPt.x = x;
+    _reactPt.z = z;
+    switch (markWux) {
+      case 1: // 木→火 助燃: a splash of untyped damage around the victim
+        enemies.damage(_reactPt, m.assistSplash.radius, amount * m.assistSplash.share, -1);
+        break;
+      case 3: // 火→土 烧结: bonus green gems
+        for (let n = 0; n < m.sinterGems; n++) pickups.dropAt(x, z, this.elapsed / 60);
+        break;
+      case 4: // 土→金 淬炼: arm the next metal cast
+        modifiers.armQuench();
+        break;
+      case 0: // 金→水 凝露: a slow field around the victim
+        enemies.slow(_reactPt, m.dewSlow.radius, m.dewSlow.factor, m.dewSlow.duration);
+        break;
+      case 2: // 水→木 滋养: heal the player
+        player.heal(m.nourishHeal);
+        break;
+      default:
+        break; // not one of the five wuxing indices — nothing to route
+    }
+    combat.book(wuxingRep(wux), amount * m.reactionMult * enemies.tuning.reactionMult);
   }
 
   /**

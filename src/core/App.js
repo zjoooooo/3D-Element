@@ -201,6 +201,7 @@ export class App {
         pickups: this.pickups,
         combat: this.combat,
         player: this.playerState,
+        modifiers: this.modifiers,
         targets: this.targets,
         abilities: this.abilities,
         tides: this.tideSchedule,
@@ -242,6 +243,7 @@ export class App {
       this.loadout.reset();
       this.modifiers.reset();
       this.run.start();
+      this._refreshResonance();
     }
 
     /* ---- character ---- */
@@ -430,6 +432,7 @@ export class App {
           this._syncBadges();
           this._echoAt = null;
           this.run.start();
+          this._refreshResonance();
         }
         break;
       case 'toggleHelp':
@@ -603,6 +606,23 @@ export class App {
     }
   }
 
+  /**
+   * Recompute the loadout's wuxing spread and push the resulting auras onto
+   * the horde's tuning knobs (spec §4.8). Call after anything that changes
+   * the loadout: every run start, and every acquire that seats a new skill.
+   * A fused seat will contribute two wuxing entries — T8/T9's job; today
+   * every seat is a plain element, one wuxing apiece.
+   */
+  _refreshResonance() {
+    const wuxingList = this.loadout.equippedList().map((element) => settings.combat.wuxingOf[element]);
+    this.modifiers.computeResonance(wuxingList);
+    const tuning = this.enemySystem.tuning;
+    tuning.kbMult = this.modifiers.resonates(4) ? settings.resonance.earthKnockback : 1;
+    tuning.slowDurMult = this.modifiers.resonates(2) ? settings.resonance.waterSlowDur : 1;
+    tuning.advantage = this.modifiers.resonates(0) ? settings.resonance.metalAdvantage : 0;
+    tuning.reactionMult = this.modifiers.cycleActive() ? settings.resonance.cycleReaction : 1;
+  }
+
   /** One line per seated skill, for the level-up hand's footer and the verdict's build recap. */
   _buildSummaryLines() {
     return this.loadout.seats
@@ -645,6 +665,7 @@ export class App {
     } else if (card.kind === 'new') {
       this.loadout.acquire(card.element);
       this._syncRunHudLabels();
+      this._refreshResonance();
     } else if (card.kind === 'passive') {
       this.modifiers.bumpPassive(card.passive);
       if (card.passive === 'vitality') {

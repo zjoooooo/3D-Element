@@ -35,6 +35,13 @@ export class PlayerState {
     return true;
   }
 
+  /** Reaction/resonance heals route through here (spec §4.6/§4.8) — a corpse
+   * doesn't drink, and healing never overfills past maxHp. */
+  heal(amount) {
+    if (!this.alive) return;
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+  }
+
   tryDodge() {
     if (!this.alive || this.dodgeCooldown > 0) return false;
     this.dodgeCooldown = settings.run.dodgeCooldown;

@@ -1191,6 +1191,55 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  resonance & quench');
 }
 
+/* ---- reaction routing reaches every neighbour system ---- */
+{
+  const rng = createRng(41);
+  const enemies = new EnemySystem(rng);
+  const pickups = new PickupSystem();
+  const player = new PlayerState();
+  const mods = new Modifiers();
+  const booked = [];
+  const run = new RunManager({
+    enemies, pickups, player, rng,
+    modifiers: mods,
+    tides: new TideSchedule(createRng(41)),
+    projectiles: new EnemyProjectiles(),
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {}, book: (el, amt) => booked.push([el, amt]) },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null }
+  });
+  run.start();
+
+  // 水→木 滋养 heals through the router.
+  player.hp = 50;
+  enemies.onReaction(2, 1, 0, 0, 10);
+  assert.equal(player.hp, 50 + settings.marks.nourishHeal, 'react: 滋养 heals');
+
+  // 火→土 烧结 drops a bonus gem; 土→金 arms the quench; booking happens every time.
+  const gems = pickups.count;
+  enemies.onReaction(3, 4, 1, 1, 10);
+  assert.equal(pickups.count, gems + settings.marks.sinterGems, 'react: 烧结 pays a gem');
+  enemies.onReaction(4, 0, 0, 0, 10);
+  assert.ok(mods.consumeQuench('beam'), 'react: 淬炼 arms the latch');
+  assert.ok(booked.length >= 3, 'react: every detonation is booked');
+
+  // Wood resonance turns kills into drops of life.
+  mods.computeResonance([1, 1]);
+  player.hp = 50;
+  const v = enemies.spawnAt(0, 0, 0);
+  enemies.damage({ x: 0, z: 0 }, 1, 1e9, -1);
+  assert.equal(player.hp, 50 + settings.resonance.woodKillHeal, 'react: wood resonance heals on kill');
+
+  // heal never raises the dead nor overfills.
+  player.hp = player.maxHp;
+  player.heal(10);
+  assert.equal(player.hp, player.maxHp, 'heal: clamps at max');
+  player.alive = false;
+  player.heal(10);
+  assert.equal(player.hp, player.maxHp, 'heal: the dead stay dead');
+  console.log('ok  reaction routing');
+}
+
 /* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));
