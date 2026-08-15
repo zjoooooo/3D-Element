@@ -18,6 +18,7 @@ import { EnemySystem } from '../run/EnemySystem.js';
 import { EnemyRenderer } from '../run/EnemyRenderer.js';
 import { EnemyProjectiles } from '../run/EnemyProjectiles.js';
 import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
+import { sequenceRefund } from '../run/sequence.js';
 import { CombatSystem } from '../run/CombatSystem.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
@@ -177,6 +178,8 @@ export class App {
       this.loadout = new Loadout();
       /** Seats currently left to fight on their own (自动施法), run state — cleared on restart. */
       this._autocast = new Set();
+      this._lastCastWux = -1;
+      this._lastCastAt = -Infinity;
       this.upgradePool = new UpgradePool(rng, this.loadout, this.modifiers);
       this.upgradeUi = new UpgradeUi();
       this.upgradeUi.onChoice = (result) => this._onUpgradeChoice(result);
@@ -431,6 +434,8 @@ export class App {
           this._autocast.clear();
           this._syncBadges();
           this._echoAt = null;
+          this._lastCastWux = -1;
+          this._lastCastAt = -Infinity;
           this.run.start();
           this._refreshResonance();
         }
@@ -507,6 +512,16 @@ export class App {
     if (ability) ability.autocast = false;
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
+
+    if (this.runMode) {
+      const wux = settings.combat.wuxingOf[element] ?? -1;
+      if (sequenceRefund(this._lastCastWux, this._lastCastAt, wux, this.run.elapsed)) {
+        this.cooldowns.set(element, this.cooldowns.get(element) * settings.sequence.refund);
+        this.hud.showToast('相生轮转');
+      }
+      this._lastCastWux = wux;
+      this._lastCastAt = this.run.elapsed;
+    }
 
     // 施法回响: a run-mode cast has a chance to fire itself once more.
     if (this.runMode && !this._echoing && this.runRng() < this.modifiers.echoChance()) {

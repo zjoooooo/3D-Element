@@ -23,6 +23,7 @@ import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { RunManager } from '../src/run/RunManager.js';
+import { sequenceRefund } from '../src/run/sequence.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1311,6 +1312,15 @@ import { RunManager } from '../src/run/RunManager.js';
   // 60Hz leaves 16.6ms per frame for everything; the horde may take 2.
   assert.ok(ms < 2, `stress: enemy tick averages ${ms.toFixed(2)}ms at cap (budget 2ms)`);
   console.log(`ok  stress (${ms.toFixed(2)}ms/tick @ 300 (210 swarm/60 ranged/30 tank, shots live))`);
+}
+
+/* ---- the generating chain refunds inside its window ---- */
+{
+  assert.ok(sequenceRefund(1, 10, 3, 12), 'sequence: 木→火 within 4s refunds');
+  assert.ok(!sequenceRefund(1, 10, 3, 15), 'sequence: the window closes');
+  assert.ok(!sequenceRefund(3, 10, 1, 12), 'sequence: the cycle has direction');
+  assert.ok(!sequenceRefund(-1, 0, 3, 1), 'sequence: no chain from nothing');
+  console.log('ok  sequence chain');
 }
 
 console.log('\nevery game-logic check passed');
