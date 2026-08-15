@@ -17,7 +17,7 @@ import { createRng } from '../run/rng.js';
 import { EnemySystem } from '../run/EnemySystem.js';
 import { EnemyRenderer } from '../run/EnemyRenderer.js';
 import { EnemyProjectiles } from '../run/EnemyProjectiles.js';
-import { TideSchedule, WUXING_LABEL } from '../run/TideSchedule.js';
+import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
 import { CombatSystem } from '../run/CombatSystem.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
@@ -25,6 +25,7 @@ import { Modifiers } from '../run/Modifiers.js';
 import { Loadout } from '../run/Loadout.js';
 import { UpgradePool } from '../run/UpgradePool.js';
 import { UpgradeUi } from '../run/UpgradeUi.js';
+import { VerdictPanel } from '../run/VerdictPanel.js';
 import { RunManager } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
@@ -51,7 +52,7 @@ import { PostProcessing } from '../postprocessing/PostProcessing.js';
 import { HUD, LoadingScreen } from '../ui/HUD.js';
 import { Editor } from '../ui/Editor.js';
 
-import { settings, ELEMENTS, CastShape, castShapeOf } from '../config/settings.js';
+import { settings, ELEMENTS, ELEMENT_META, CastShape, castShapeOf } from '../config/settings.js';
 
 const HDR_URL = './hdri/spruit_sunrise.hdr';
 
@@ -179,6 +180,7 @@ export class App {
       this.upgradePool = new UpgradePool(rng, this.loadout, this.modifiers);
       this.upgradeUi = new UpgradeUi();
       this.upgradeUi.onChoice = (result) => this._onUpgradeChoice(result);
+      this.verdictPanel = new VerdictPanel();
       this.pickups.mods = this.modifiers;
       // FireballAbility reads ctx.mods?.damageMult() straight from the ability
       // context; every other element's damage rides CombatSystem below instead.
@@ -228,6 +230,12 @@ export class App {
       // once here so advance() never allocates per frame.
       this._verdict = { value: 'playing' };
       this._runTick = (step) => {
+        // A hand (level-up or shard) can open mid-tick, inside this very
+        // call (onShardHand fires synchronously from pickups.tick()). Bail
+        // on every further sub-tick this same advance() call — queued time
+        // for the rest of this frame's dt evaporates, exactly as it does
+        // whenever a frame starts already frozen (advance() never runs then).
+        if (this.upgradeUi.isOpen) return;
         this._verdict.value = this.run.tick(step, this.character.position);
       };
       this._lastHp = settings.run.playerHp;
@@ -271,6 +279,26 @@ export class App {
     if (this.runMode) {
       this._syncRunHudLabels();
       this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}潮来临`);
+      // A shard only ever offers its own wuxing (spec 残章定向手). Reuses the
+      // same upgradeUi instance — and so the same freeze gate — as a level-up
+      // hand; an empty offer (no ability of that wuxing exists yet) falls back
+      // to the level-up hand's own skip-heal. Structurally can't fire once the
+      // run has stopped: RunManager.tick() bails at the top on `!this.active`
+      // before it ever reaches the pickup loop that calls this.
+      this.run.onShardHand = (element) => {
+        // Death wins the tick (M2 5bbdda5): contact/projectile damage lands
+        // before pickups.tick() runs within the same RunManager.tick() call,
+        // so a shard collected in the tick that kills the player must not
+        // open a hand over a dead run.
+        if (!this.playerState.alive) return;
+        const hand = this.upgradePool.draw(this.pickups.level, this.pickups.level, element);
+        if (!hand.length) {
+          this._skipHeal();
+          this.hud.showToast('残章逸散');
+        } else {
+          this.upgradeUi.open(hand, { rerolls: 0, summary: this._buildSummaryLines().join('　') });
+        }
+      };
 
       // The side panels fold away entirely during a run; these two arrow tabs
       // (and G / H as ever) bring them back.
@@ -392,6 +420,7 @@ export class App {
       case 'restart':
         if (this.runMode && !this.run.active) {
           this.clearEffects();
+          this.verdictPanel.hide();
           // A fresh run starts with every ability ready.
           for (const element of this.cooldowns.keys()) this.cooldowns.set(element, 0);
           this.loadout.reset();
@@ -574,14 +603,23 @@ export class App {
     }
   }
 
-  /** One line per seated skill, for the level-up hand's footer. */
-  _buildSummary() {
-    const parts = this.loadout.seats
+  /** One line per seated skill, for the level-up hand's footer and the verdict's build recap. */
+  _buildSummaryLines() {
+    return this.loadout.seats
       .map((element, seat) =>
-        element ? `${RUN_SLOT_KEYS[seat]} ${element} Lv${this.loadout.levelOf(element)}` : null
+        element
+          ? `${RUN_SLOT_KEYS[seat]} ${ELEMENT_META[element]?.label ?? element} Lv${this.loadout.levelOf(element)}`
+          : null
       )
       .filter(Boolean);
-    return parts.join('　');
+  }
+
+  /** Decline-all-three's reward: heal a fraction of max hp (shared by the level-up hand's skip and an empty shard hand). */
+  _skipHeal() {
+    this.playerState.hp = Math.min(
+      this.playerState.maxHp,
+      this.playerState.hp + this.playerState.maxHp * settings.upgrades.skipHeal
+    );
   }
 
   /** Wire a level-up hand's answer back into the loadout/modifier layer. */
@@ -591,16 +629,13 @@ export class App {
       const hand = this.upgradePool.draw(this.pickups.level);
       this.upgradeUi.open(hand, {
         rerolls: hand.length ? Math.max(0, this._rerollsLeft) : 0,
-        summary: this._buildSummary()
+        summary: this._buildSummaryLines().join('　')
       });
       return;
     }
     this._rerollsLeft = null;
     if (result.action === 'skip') {
-      this.playerState.hp = Math.min(
-        this.playerState.maxHp,
-        this.playerState.hp + this.playerState.maxHp * settings.upgrades.skipHeal
-      );
+      this._skipHeal();
       return;
     }
     const card = result.card;
@@ -794,7 +829,12 @@ export class App {
           this._echoing = false;
         }
       }
-      if (!frozen && this.run.active && this._verdict.value === 'playing' && this.run.pendingLevels > 0) {
+      // Fresh read, not the frame-start `frozen`: a shard hand can have opened
+      // synchronously inside the advance() call just above (onShardHand fires
+      // mid-tick), and this branch must not clobber it. pendingLevels itself
+      // stays queued when skipped here — untouched until a later, unfrozen
+      // frame finds isOpen false again and this same check fires for real.
+      if (!this.upgradeUi.isOpen && this.run.active && this._verdict.value === 'playing' && this.run.pendingLevels > 0) {
         // A tick that banks more than one level (a burst of xp) leaves
         // pickups.level already sitting on the destination — the levels in
         // between never get their own hand. sinceLevel carries that span back
@@ -807,13 +847,39 @@ export class App {
         );
         this.upgradeUi.open(hand, {
           rerolls: hand.length ? this.modifiers.passiveLevel('reroll') : 0,
-          summary: this._buildSummary()
+          summary: this._buildSummaryLines().join('　')
         });
       }
       if (this._verdict.value !== 'playing' && this.run.active) {
         this.run.stop();
         this._echoAt = null; // a pending echo must not fire over the death screen
-        this.runHud.showVerdict(this._verdict.value === 'won' ? '生存达成 — 回车重开' : '倒下了 — 回车重开');
+        const won = this._verdict.value === 'won';
+        // Who hit last, and — unless it was the killing blow — what beats them.
+        const killer = this.playerState.lastHitBy;
+        let deathLine = null;
+        if (!won && killer) {
+          if (killer.element < 0) {
+            deathLine = '死于：吐息者的弹幕——它们怕近身';
+          } else {
+            const beats = WUXING_LABEL[BEATS.indexOf(killer.element)];
+            deathLine =
+              `死于：${WUXING_LABEL[killer.element]}系${['涌兽', '吐息者', '磐兽'][killer.behavior]}` +
+              `——${beats}系对${WUXING_LABEL[killer.element]}系有 1.25× 克制`;
+          }
+        }
+        const topSkills = Object.entries(this.combat.damageDealt)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([el, amt]) => [ELEMENT_META[el]?.label ?? el, amt]);
+        this.verdictPanel.show({
+          won,
+          elapsed: this.run.elapsed,
+          kills: this.run.kills,
+          level: this.pickups.level,
+          buildLines: this._buildSummaryLines(),
+          topSkills,
+          deathLine
+        });
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
@@ -893,6 +959,7 @@ export class App {
       this.scene.remove(this.pickups.points);
       this.scene.remove(this.enemyProjectiles.points);
       this.upgradeUi?.dispose();
+      this.verdictPanel?.dispose();
     }
     this.input.dispose();
     this.aim.dispose();

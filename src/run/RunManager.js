@@ -9,6 +9,8 @@ import { settings } from '../config/settings.js';
  * casts release their hit memory) is knotted here and nowhere else.
  */
 const TELEGRAPH_TIME = 0.5; // seconds a spawn ring shows before the enemy lands
+/** takeDamage source for a projectile hit — no element (bolts carry no wuxing), ranged behavior. */
+const PROJECTILE_SOURCE = { element: -1, behavior: 1 };
 
 export class RunManager {
   constructor(systems) {
@@ -132,11 +134,15 @@ export class RunManager {
 
     // Projectiles bite through the same mercy window as contact.
     const shot = this.s.projectiles.tick(step, playerPos);
-    if (shot > 0) this.s.player.takeDamage(shot);
+    if (shot > 0) this.s.player.takeDamage(shot, PROJECTILE_SOURCE);
 
     // March, bite, collect.
     const contact = this.s.enemies.tick(step, playerPos, minute);
-    if (contact > 0) this.s.player.takeDamage(contact);
+    // Passes enemies.lastContact by reference (no copy — it's the zero-alloc
+    // scratch object), so player.lastHitBy aliases it. Safe only because a
+    // lethal hit here flips player.alive false, and tick()'s own top-of-call
+    // guard then refuses to run enemies.tick() again and mutate it further.
+    if (contact > 0) this.s.player.takeDamage(contact, this.s.enemies.lastContact);
     this.s.player.tick(step);
     this.s.combat.tick(step, this.s.abilities.active);
     this.pendingLevels += this.s.pickups.tick(step, playerPos);

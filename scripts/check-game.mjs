@@ -976,6 +976,31 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  autocast tax');
 }
 
+/* ---- verdict data & shard hands ---- */
+{
+  // The player books who hit them last.
+  const player = new PlayerState();
+  player.takeDamage(10, { element: 2, behavior: 0 });
+  assert.deepEqual(player.lastHitBy, { element: 2, behavior: 0 }, 'verdict: last hit is booked');
+  player.reset();
+  assert.equal(player.lastHitBy, null, 'verdict: reset forgets the killer');
+
+  // A shard hand only deals its own wuxing.
+  const loadout = new Loadout();
+  settings.run.draftLoadout = true;
+  loadout.reset(); // seat 0 = ice (water, wuxing 2)
+  const pool = new UpgradePool(createRng(14), loadout, new Modifiers());
+  const hand = pool.draw(3, 3, 2); // water shard
+  assert.ok(hand.length > 0, 'shard: water offers exist (ice upgrade / glacier new)');
+  for (const card of hand) {
+    assert.ok(card.kind !== 'passive', 'shard: passives sit out directed hands');
+    assert.equal(settings.combat.wuxingOf[card.element], 2, 'shard: every card is water');
+  }
+  const none = pool.draw(3, 3, 4); // earth: no earth abilities exist yet
+  assert.equal(none.length, 0, 'shard: an empty wuxing returns an empty hand');
+  console.log('ok  verdict & shards');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

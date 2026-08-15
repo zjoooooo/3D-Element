@@ -58,6 +58,9 @@ export class EnemySystem {
     this.onHit = null;
     /** Assigned by whoever wants ranged fire events (projectile spawns). */
     this.onFire = null;
+
+    /** element/behavior of the strongest contact this tick — reused scratch, zero-alloc. */
+    this.lastContact = { element: 0, behavior: 0 };
   }
 
   spawnAt(x, z, minute, element = 0, behavior = 0, elite = 0) {
@@ -140,7 +143,11 @@ export class EnemySystem {
 
       if (!holding && d < kind.radius + 0.5) {
         const dmg = kind.contactDamage * (this.elite[i] ? c.elites.damageMult : 1);
-        contact = Math.max(contact, dmg);
+        if (dmg > contact) {
+          contact = dmg;
+          this.lastContact.element = this.element[i];
+          this.lastContact.behavior = this.behavior[i];
+        }
       }
     }
     return contact;

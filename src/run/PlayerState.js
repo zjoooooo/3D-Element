@@ -19,12 +19,15 @@ export class PlayerState {
     this.alive = true;
     this.iframes = 0;
     this.dodgeCooldown = 0;
+    /** {element, behavior} of whoever landed the last hit — the verdict's death line. */
+    this.lastHitBy = null;
   }
 
-  takeDamage(amount) {
+  takeDamage(amount, source = null) {
     if (!this.alive || this.iframes > 0 || settings.run.godMode) return false;
     this.hp -= amount;
     this.iframes = settings.run.iframes;
+    this.lastHitBy = source;
     if (this.hp <= 0) {
       this.hp = 0;
       this.alive = false;

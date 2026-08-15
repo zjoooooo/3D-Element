@@ -703,3 +703,22 @@ body {
   font-size: 12px;
 }
 .upgrade-ui__summary { font-size: 12px; opacity: 0.6; }
+
+/* Verdict panel — grey-box; the real card art is milestone 5. */
+.verdict {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(4, 7, 12, 0.82);
+  color: #e8eef6;
+  font: 500 15px/1.6 system-ui, sans-serif;
+  text-align: center;
+  z-index: 40;
+}
+.verdict h2 { font-size: 30px; letter-spacing: 0.2em; }
+.verdict__death { color: #ff8a76; }
+.verdict__hint { opacity: 0.6; }

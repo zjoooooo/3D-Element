@@ -20,7 +20,7 @@ export class UpgradePool {
     this.modifiers = modifiers;
   }
 
-  draw(level, sinceLevel = level) {
+  draw(level, sinceLevel = level, onlyWuxing = null) {
     const w = settings.upgrades.passiveWeights;
     const candidates = [];
 
@@ -58,6 +58,18 @@ export class UpgradePool {
           body: `${meta.name} Lv${this.modifiers.passiveLevel(id) + 1}`
         }
       });
+    }
+
+    // A shard's directed hand (spec 残章): only the shard's own wuxing may
+    // appear, and a passive never carries an element, so it sits out entirely.
+    if (onlyWuxing !== null) {
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        const card = candidates[i].card;
+        const keep =
+          card.kind !== 'passive' &&
+          settings.combat.wuxingOf[card.element] === onlyWuxing;
+        if (!keep) candidates.splice(i, 1);
+      }
     }
 
     const hand = [];
