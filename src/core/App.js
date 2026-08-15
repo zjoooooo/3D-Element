@@ -808,13 +808,22 @@ export class App {
       // do not slow down because the VFX time scale was turned down, and the
       // renderer interpolates between the last two ticks with the leftover.
       this._verdict.value = 'playing';
+      // Not sticky — this reset (and a stopped run.tick()'s own 'playing'
+      // return) means a cached read is 'playing' again one frame after death
+      // or victory; "is the verdict screen up" is only truthfully answered
+      // downstream by !run.active.
       // A level-up hand is a full stop: the clock (and with it the echo timer)
       // holds dead still behind it until a card is chosen. dt and _steer,
       // gated where they live, freeze the character and VFX the same way.
       const frozen = this.upgradeUi.isOpen;
       if (!frozen) {
         this._runAlpha = this.gameClock.advance(raw, this._runTick);
-        if (this._echoAt && (this._echoAt.t -= raw) <= 0) {
+        // Fresh read, not the frame-start `frozen`: advance() above can open
+        // a shard hand synchronously (onShardHand fires mid-tick), and an
+        // echo must not cast into a hand that opened this very frame. The
+        // short-circuit also holds the timer's own decrement here, same as
+        // the freeze holds everything else.
+        if (!this.upgradeUi.isOpen && this._echoAt && (this._echoAt.t -= raw) <= 0) {
           const { element } = this._echoAt;
           this._echoAt = null;
           this._echoing = true;
@@ -898,8 +907,10 @@ export class App {
 
     // 自动施法: every seat left on auto fires itself at the nearest enemy,
     // once its own cooldown allows — same freeze/verdict stop as everything
-    // else above, so a level-up hand or a dead run holds it still too.
-    if (this.runMode && !this.upgradeUi.isOpen && this._verdict.value === 'playing') {
+    // else above. run.active is the real "run over" signal: _verdict.value
+    // resets to 'playing' every frame, so checking only that would leave a
+    // dead run firing seats at the frozen horde forever.
+    if (this.runMode && !this.upgradeUi.isOpen && this.run.active && this._verdict.value === 'playing') {
       for (const seat of this._autocast) {
         const element = this.loadout.elementAt(seat);
         if (!element || (this.cooldowns.get(element) ?? 0) > 0) continue;
