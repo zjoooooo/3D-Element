@@ -542,28 +542,79 @@ body {
   z-index: 30;
 }
 
-/* In a run the sandbox panels get out of the way: slid to their screen edge
-   with a sliver left showing, hover slides one back out. G / H still toggle. */
+/* In a run the sandbox panels fold away entirely; the arrow tabs (App builds
+   them in run mode) or the G / H keys bring one back. */
 .run-mode .lil-gui.autoPlace {
-  transform: translateX(calc(100% - 16px));
+  transform: translateX(calc(100% + 24px));
   transition: transform 0.25s ease;
 }
 
-.run-mode .lil-gui.autoPlace:hover,
-.run-mode .lil-gui.autoPlace:focus-within {
+.run-mode.editor-open .lil-gui.autoPlace {
   transform: none;
 }
 
 .run-mode .hud__help {
-  transform: translateX(calc(-100% + 16px));
+  transform: translateX(calc(-100% - 32px));
   transition: transform 0.25s ease, opacity 0.3s ease;
 }
 
-.run-mode .hud__help:hover {
+.run-mode.help-open .hud__help {
   transform: none;
+}
+
+.run-tab {
+  position: fixed;
+  top: 50%;
+  width: 24px;
+  height: 52px;
+  margin-top: -26px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #dfe8f2;
+  background: rgba(12, 16, 22, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font: 600 15px/1 var(--ui-font);
+  cursor: pointer;
+  z-index: 45;
+}
+
+.run-tab--left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 9px 9px 0;
+}
+
+.run-tab--right {
+  right: 0;
+  border-right: 0;
+  border-radius: 9px 0 0 9px;
 }
 
 /* The keys legend up top is sandbox coaching — the run HUD replaces it. */
 .run-mode .hud__title {
   display: none;
+}
+
+/* An ability the loadout leaves out sits the run out. */
+.run-mode .ability-card.is-offstage {
+  opacity: 0.3;
+  filter: grayscale(0.7);
+}
+
+/* The red bar is the primary hp read; the number rides beside it. */
+.run-hud__bar {
+  width: 150px;
+  height: 12px;
+  align-self: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.run-hud__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ff5f52, #d92c20);
+  transition: width 0.15s ease;
 }

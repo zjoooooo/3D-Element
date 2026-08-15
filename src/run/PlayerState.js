@@ -14,6 +14,8 @@ export class PlayerState {
 
   reset() {
     this.hp = settings.run.playerHp;
+    /** What the hp bar measures against; upgrades may grow it in M2. */
+    this.maxHp = settings.run.playerHp;
     this.alive = true;
     this.iframes = 0;
     this.dodgeCooldown = 0;

@@ -22,6 +22,7 @@ import { PlayerState } from '../run/PlayerState.js';
 import { RunManager } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
+import { getColor } from '../utils/color.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
 import { CharacterController } from '../animation/CharacterController.js';
@@ -33,7 +34,7 @@ import { ParticleEngine } from '../particles/ParticleEngine.js';
 import { LightPool } from '../effects/LightPool.js';
 import { DecalSystem } from '../effects/GroundDecals.js';
 import { FissureSystem } from '../effects/GroundFissures.js';
-import { BurstSystem } from '../effects/BurstSphere.js';
+import { BurstSystem, BurstMode } from '../effects/BurstSphere.js';
 import { CameraShake } from '../effects/CameraShake.js';
 import { ScreenFlash } from '../effects/ScreenFlash.js';
 
@@ -48,6 +49,10 @@ import { settings, ELEMENTS } from '../config/settings.js';
 const HDR_URL = './hdri/spruit_sunrise.hdr';
 
 const UP = new Vector3(0, 1, 0);
+const _deathPos = new Vector3();
+
+/** Run-mode key badge per loadout slot, in `settings.run.loadout` order. */
+const RUN_SLOT_KEYS = ['LMB', 'RMB', 'Q', 'E', 'R', 'T'];
 
 /**
  * Run mode's keyboard half of the loadout. The six on-stage abilities sit in
@@ -169,12 +174,24 @@ export class App {
       // reads as "no damage" against enemies that carry no health bar.
       this.damageNumbers = new DamageNumbers(canvas, this.camera);
       this.enemySystem.onHit = (x, z, amount) => this.damageNumbers.spawn(x, z, amount);
+      // A death gets a small grey pop on top of RunManager's gem/kill wiring —
+      // pure look, layered over the callback it already installed. The real
+      // per-element shatter is M3's job.
+      const runDeath = this.enemySystem.onDeath;
+      this.enemySystem.onDeath = (x, z, element) => {
+        runDeath(x, z, element);
+        _deathPos.set(x, 0.7, z);
+        this.bursts.spawn(BurstMode.AIR, _deathPos, {
+          radius: 0.3, endRadius: 1.2, life: 0.35, intensity: 0.55, opacity: 0.65
+        });
+      };
       // Frame-loop scratch: the verdict box and the tick closure are minted
       // once here so advance() never allocates per frame.
       this._verdict = { value: 'playing' };
       this._runTick = (step) => {
         this._verdict.value = this.run.tick(step, this.character.position);
       };
+      this._lastHp = settings.run.playerHp;
       this.run.start();
     }
 
@@ -209,6 +226,35 @@ export class App {
           });
       }
     });
+
+    if (this.runMode) {
+      // The ability cards must wear the run's keys, or pressing E highlights a
+      // card that still says R and the input reads as scrambled. Off-stage
+      // abilities (whatever the loadout leaves out) dim.
+      // ponytail: static labels; rebinding a slot in the editor mid-run keeps
+      // the old badge until reload — wire the editor's onChange if that stings.
+      const labels = {};
+      settings.run.loadout.forEach((element, slot) => (labels[element] = RUN_SLOT_KEYS[slot]));
+      this.hud.setRunKeys(labels);
+
+      // The side panels fold away entirely during a run; these two arrow tabs
+      // (and G / H as ever) bring them back.
+      this._panelTabs = [];
+      for (const [side, cls, openLabel, closedLabel] of [
+        ['left', 'help-open', '‹', '›'],
+        ['right', 'editor-open', '›', '‹']
+      ]) {
+        const tab = document.createElement('button');
+        tab.className = `run-tab run-tab--${side}`;
+        tab.textContent = closedLabel;
+        tab.addEventListener('click', () => {
+          const open = document.body.classList.toggle(cls);
+          tab.textContent = open ? openLabel : closedLabel;
+        });
+        document.body.appendChild(tab);
+        this._panelTabs.push(tab);
+      }
+    }
 
     this._bindEvents();
     this.selectAbility(ELEMENTS[0], { silent: true });
@@ -518,6 +564,12 @@ export class App {
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
       this.pickups.sync();
+      // Taking a bite flashes the screen red — the bar alone is easy to miss
+      // mid-fight. Restart raises hp, which correctly stays silent here.
+      if (this.playerState.hp < this._lastHp) {
+        this.flash.trigger(getColor('#ff3226'), 0.22);
+      }
+      this._lastHp = this.playerState.hp;
       // The verdict borrows the hp span, so a live update would stamp it out.
       if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups);
     }
@@ -566,6 +618,7 @@ export class App {
     if (this.runMode) {
       this.runHud.dispose();
       this.damageNumbers.dispose();
+      for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
       this.scene.remove(this.pickups.points);
     }
