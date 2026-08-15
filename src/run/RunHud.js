@@ -1,3 +1,5 @@
+import { WUXING_LABEL } from './TideSchedule.js';
+
 /**
  * M1's grey readouts: hp, clock, kills, level. The real HUD — glass bottles,
  * orbs, tide banners — is milestone 5; this exists so the grey box is
@@ -10,7 +12,8 @@ export class RunHud {
     this.root.innerHTML =
       '<span class="run-hud__bar"><i data-fill></i></span>' +
       '<span data-k="hp"></span><span data-k="time"></span>' +
-      '<span data-k="kills"></span><span data-k="level"></span>';
+      '<span data-k="kills"></span><span data-k="level"></span>' +
+      '<span data-k="tide"></span>';
     parent.appendChild(this.root);
     this._fields = Object.fromEntries(
       [...this.root.querySelectorAll('[data-k]')].map((el) => [el.dataset.k, el])
@@ -20,7 +23,7 @@ export class RunHud {
     this._lastPct = -1;
   }
 
-  update(player, run, pickups) {
+  update(player, run, pickups, tideInfo) {
     // The red bar is the read; the number backs it up. Max HP comes in on the
     // player rather than from settings so this stays a dumb display.
     const pct = Math.round((player.hp / (player.maxHp || 100)) * 100);
@@ -33,6 +36,7 @@ export class RunHud {
     this._set('time', `${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`);
     this._set('kills', `击杀 ${run.kills}`);
     this._set('level', `Lv ${pickups.level}`);
+    this._set('tide', `${WUXING_LABEL[tideInfo.element]}潮 ${Math.ceil(tideInfo.timeLeft)}s · 下潮 ${WUXING_LABEL[tideInfo.nextElement]}`);
   }
 
   _set(key, text) {

@@ -360,6 +360,8 @@ import { RunManager } from '../src/run/RunManager.js';
   const player = new PlayerState();
   const run = new RunManager({
     enemies, pickups, player, rng,
+    tides: new TideSchedule(createRng(7)),
+    projectiles: new EnemyProjectiles(),
     combat: { tick: () => {}, release: () => -1 },
     targets: { register: () => {} },
     abilities: { active: [] }
@@ -584,6 +586,8 @@ import { RunManager } from '../src/run/RunManager.js';
   const player2 = new PlayerState();
   const rm = new RunManager({
     enemies: enemies2, pickups: pickups2, player: player2, rng: rng2,
+    tides: new TideSchedule(createRng(11)),
+    projectiles: new EnemyProjectiles(),
     combat: { tick: () => {}, release: () => -1 },
     targets: { register: () => {} },
     abilities: { active: [], onRetire: null }
@@ -871,6 +875,68 @@ import { RunManager } from '../src/run/RunManager.js';
   combatStats.resetStats();
   assert.ok(!combatStats.damageDealt.ice, 'stats: reset wipes the ledger');
   console.log('ok  matchups & stats');
+}
+
+/* ---- run cadence: composition, elites, rain, shard hand ---- */
+{
+  const rng = createRng(31);
+  const enemies = new EnemySystem(rng);
+  const pickups = new PickupSystem();
+  const player = new PlayerState();
+  const tides = new TideSchedule(createRng(31));
+  const shots = new EnemyProjectiles();
+  const run = new RunManager({
+    enemies, pickups, player, rng, tides, projectiles: shots,
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null }
+  });
+  run.start();
+
+  // Two and a half simulated minutes: spawns lean the tide's colour ~bias
+  // share. A pinned player position would normally die to real contact
+  // (D3's precedent) long before either eliteAt mark — godMode holds it off.
+  settings.run.godMode = true;
+  for (let t = 0; t < 60 * 150; t++) run.tick(1 / 60, { x: 0, z: 0 });
+  settings.run.godMode = false;
+  let tideColoured = 0;
+  for (let i = 0; i < enemies.count; i++) {
+    if (enemies.element[i] === tides.order[0]) tideColoured++;
+  }
+  // Minute 2.5 is inside tide one; mixed colours exist but the tide dominates.
+  assert.ok(
+    tideColoured > enemies.count * 0.5,
+    `cadence: tide colour dominates (${tideColoured}/${enemies.count})`
+  );
+
+  // Elites: tide one (0-180s) is past both eliteAt marks (72s, 135s) by 150s.
+  assert.equal(run._elitesSpawned, 2, 'cadence: both mid-tide elites scheduled');
+
+  // tide() forwards TideSchedule's live read, not a frozen snapshot — pin its
+  // fields against independently computed expectations (never deepEqual it
+  // against tides.tideAt(...) directly: both return the SAME reused scratch
+  // object, so that would compare it to itself and could never fail). Must
+  // run before the run.elapsed jump below, while elapsed is still ~150.
+  const liveTide = run.tide();
+  assert.equal(liveTide.element, tides.order[0], 'cadence: tide() forwards the live tide');
+  assert.ok(
+    Math.abs(liveTide.timeLeft - (settings.tides.length - run.elapsed)) < 1e-6,
+    'cadence: tide() reads the manager\'s own live elapsed, not a stale snapshot'
+  );
+
+  // Tide turn: crossing 180s rains gold near the player.
+  const gemsBefore = pickups.count;
+  run.elapsed = settings.tides.length - 0.01;
+  run.tick(1 / 60, { x: 0, z: 0 });
+  assert.ok(pickups.count >= gemsBefore + settings.tides.goldRain.count - 1, 'cadence: the turn rains gold');
+
+  // An elite corpse drops blue + shard.
+  enemies.clear();
+  enemies.spawnAt(1, 0, 5, 3, 0, 1);
+  const before = pickups.count;
+  enemies.damage({ x: 1, z: 0 }, 1, 1e9);
+  assert.equal(pickups.count, before + 2, 'cadence: elite drops blue gem and shard');
+  console.log('ok  run cadence');
 }
 
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */

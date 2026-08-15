@@ -16,6 +16,8 @@ import { GameClock } from '../run/GameClock.js';
 import { createRng } from '../run/rng.js';
 import { EnemySystem } from '../run/EnemySystem.js';
 import { EnemyRenderer } from '../run/EnemyRenderer.js';
+import { EnemyProjectiles } from '../run/EnemyProjectiles.js';
+import { TideSchedule, WUXING_LABEL } from '../run/TideSchedule.js';
 import { CombatSystem } from '../run/CombatSystem.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
@@ -181,6 +183,12 @@ export class App {
       this.abilities.ctx.mods = this.modifiers;
       this.combat = new CombatSystem(this.targets, this.modifiers);
       this.targets.register(this.enemySystem);
+      // One schedule per page load, seeded off the same run rng — a restart
+      // calls run.start() (elapsed back to 0) but never reshuffles this, so
+      // every run this session replays the same tide order.
+      this.tideSchedule = new TideSchedule(rng);
+      this.enemyProjectiles = new EnemyProjectiles();
+      this.scene.add(this.enemyProjectiles.points);
       this.run = new RunManager({
         enemies: this.enemySystem,
         pickups: this.pickups,
@@ -188,6 +196,8 @@ export class App {
         player: this.playerState,
         targets: this.targets,
         abilities: this.abilities,
+        tides: this.tideSchedule,
+        projectiles: this.enemyProjectiles,
         rng
       });
       this.runHud = new RunHud();
@@ -255,6 +265,7 @@ export class App {
 
     if (this.runMode) {
       this._syncRunHudLabels();
+      this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}潮来临`);
 
       // The side panels fold away entirely during a run; these two arrow tabs
       // (and G / H as ever) bring them back.
@@ -714,6 +725,7 @@ export class App {
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
       this.threatArrows.update(this.enemySystem, this.character.position);
       this.pickups.sync();
+      this.enemyProjectiles.sync();
       // Taking a bite flashes the screen red — the bar alone is easy to miss
       // mid-fight. Restart raises hp, which correctly stays silent here.
       if (this.playerState.hp < this._lastHp) {
@@ -721,7 +733,7 @@ export class App {
       }
       this._lastHp = this.playerState.hp;
       // The verdict borrows the hp span, so a live update would stamp it out.
-      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups);
+      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide());
     }
 
     this.abilities.update(dt);
@@ -772,6 +784,7 @@ export class App {
       for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
       this.scene.remove(this.pickups.points);
+      this.scene.remove(this.enemyProjectiles.points);
       this.upgradeUi?.dispose();
     }
     this.input.dispose();

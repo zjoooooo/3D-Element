@@ -19,11 +19,26 @@ export class RunManager {
     this.telegraphs = [];
     this._spawnDebt = 0;
     this.pendingLevels = 0;
+    // Mid-tide elite scheduler: how many of this tide's eliteAt marks have
+    // already queued a spawn, and which tide index that count belongs to.
+    this._elitesSpawned = 0;
+    this._lastTideIndex = 0;
+    /** Fired the tick a new tide opens, with the incoming element. */
+    this.onTideTurn = null;
+    /** Fired when a shard is picked up (element index) — App opens a directional hand. */
+    this.onShardHand = null;
 
     this.s.enemies.onDeath = (x, z, element, elite) => {
       this.kills++;
-      this.s.pickups.dropAt(x, z, this.elapsed / 60);
+      if (elite) {
+        this.s.pickups.dropAt(x, z, this.elapsed / 60, 1);
+        this.s.pickups.dropShard(x, z, element);
+      } else {
+        this.s.pickups.dropAt(x, z, this.elapsed / 60);
+      }
     };
+    this.s.enemies.onFire = (x, z, dx, dz) => this.s.projectiles.spawn(x, z, dx, dz);
+    this.s.pickups.onShard = (element) => this.onShardHand?.(element);
 
     // Casts hand back their hit memory the moment the manager retires them —
     // scanning `active` misses them (the manager splices finished casts out
@@ -41,13 +56,22 @@ export class RunManager {
     this.telegraphs.length = 0;
     this._spawnDebt = 0;
     this.pendingLevels = 0;
+    this._elitesSpawned = 0;
+    this._lastTideIndex = 0;
     this.s.enemies.clear();
     this.s.pickups.clear();
     this.s.player.reset();
+    this.s.projectiles.clear();
+    this.s.combat.resetStats?.();
   }
 
   stop() {
     this.active = false;
+  }
+
+  /** Which tide `elapsed` sits in — forwards TideSchedule's reused scratch object. */
+  tide() {
+    return this.s.tides.tideAt(this.elapsed);
   }
 
   tick(step, playerPos) {
@@ -66,16 +90,49 @@ export class RunManager {
       this._queueSpawn(playerPos);
     }
 
-    // Telegraphs count up; expired ones become enemies.
+    // Telegraphs count up; expired ones become enemies, carrying whatever
+    // element/behaviour/elite flag they were queued with.
     for (let i = this.telegraphs.length - 1; i >= 0; i--) {
       const tg = this.telegraphs[i];
       tg.t += step / TELEGRAPH_TIME;
       if (tg.t >= 1) {
-        this.s.enemies.spawnAt(tg.x, tg.z, minute);
+        this.s.enemies.spawnAt(tg.x, tg.z, minute, tg.element, tg.behavior, tg.elite);
         this.telegraphs[i] = this.telegraphs[this.telegraphs.length - 1];
         this.telegraphs.pop();
       }
     }
+
+    // Scratch-object hazard: tides.tideAt() and tides.rollElement() share one
+    // reused scratch object (rollElement calls tideAt internally), so a held
+    // reference can look mutated by an unrelated later call. Read once here
+    // and copy the primitives out immediately — nothing below may hold this
+    // object across the _queueSpawn(playerPos) call above (already ran) or
+    // the elite _queueSpawn below (which skips rollElement by passing an
+    // explicit element/behavior), so these locals stay valid all tick.
+    const tideNow = this.s.tides.tideAt(this.elapsed);
+    const tideIndex = tideNow.index;
+    const tideElement = tideNow.element;
+    const tideProgress = tideNow.progress;
+
+    // Tide turn: the tick that crosses into a new tide rains gold on the
+    // player and resets the mid-tide elite scheduler.
+    if (tideIndex !== this._lastTideIndex) {
+      this._lastTideIndex = tideIndex;
+      this._elitesSpawned = 0;
+      this.s.pickups.rainAt(playerPos.x, playerPos.z, this.s.rng);
+      this.onTideTurn?.(tideElement);
+    }
+
+    // Mid-tide elites: one per eliteAt mark this tide's progress has crossed.
+    const marks = settings.tides.eliteAt;
+    if (this._elitesSpawned < marks.length && tideProgress >= marks[this._elitesSpawned]) {
+      this._elitesSpawned++;
+      this._queueSpawn(playerPos, tideElement, 0, 1);
+    }
+
+    // Projectiles bite through the same mercy window as contact.
+    const shot = this.s.projectiles.tick(step, playerPos);
+    if (shot > 0) this.s.player.takeDamage(shot);
 
     // March, bite, collect.
     const contact = this.s.enemies.tick(step, playerPos, minute);
@@ -87,7 +144,12 @@ export class RunManager {
     return 'playing';
   }
 
-  _queueSpawn(playerPos) {
+  /**
+   * Queue a telegraphed spawn. `element`/`behavior` default to the tide's
+   * own composition roll and the minute's behaviour mix; elites (and any
+   * other caller with an opinion) pass both explicitly to skip the roll.
+   */
+  _queueSpawn(playerPos, element = null, behavior = null, elite = 0) {
     const angle = this.s.rng() * Math.PI * 2;
     const r = settings.run.spawnRadius;
     const x = playerPos.x + Math.cos(angle) * r;
@@ -97,6 +159,18 @@ export class RunManager {
     // Clamp the ring onto the arena so edge-hugging never starves spawns.
     const cx = d > a ? (x / d) * a : x;
     const cz = d > a ? (z / d) * a : z;
-    this.telegraphs.push({ x: cx, z: cz, t: 0 });
+
+    const spawnElement = element ?? this.s.tides.rollElement(this.s.rng, this.elapsed);
+    let spawnBehavior = behavior;
+    if (spawnBehavior === null) {
+      const minute = this.elapsed / 60;
+      const mix = settings.enemies.mix;
+      const roll = this.s.rng();
+      spawnBehavior = 0;
+      if (minute >= mix.tankFrom && roll < mix.tankShare) spawnBehavior = 2;
+      else if (minute >= mix.rangedFrom && roll < mix.tankShare + mix.rangedShare) spawnBehavior = 1;
+    }
+
+    this.telegraphs.push({ x: cx, z: cz, t: 0, element: spawnElement, behavior: spawnBehavior, elite });
   }
 }

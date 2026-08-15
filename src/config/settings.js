@@ -240,7 +240,8 @@ export const settings = {
   tides: {
     length: 180, // seconds per tide; 5 tides fill the 15-minute run
     bias: 0.7, // share of spawns that carry the tide's element
-    goldRain: { count: 30, value: 5, radius: 6 } // tide-end gem shower
+    goldRain: { count: 30, value: 5, radius: 6 }, // tide-end gem shower
+    eliteAt: [0.4, 0.75] // tide progress marks the elites spawn at
   },
 
   /**
@@ -269,6 +270,8 @@ export const settings = {
     swarm: { speed: 3.2, radius: 0.45, contactDamage: 8, hpMult: 1, mass: 1 },
     ranged: { speed: 2.4, radius: 0.5, contactDamage: 6, hpMult: 2, mass: 0.8, holdRange: 8, fireEvery: 2.4 },
     tank: { speed: 1.4, radius: 0.7, contactDamage: 20, hpMult: 6, mass: 4 },
+    /** Behaviour mix by minute: shares ramp in as the run ages (sim's 70/20/10). */
+    mix: { rangedFrom: 1.5, rangedShare: 0.2, tankFrom: 3, tankShare: 0.1 },
     projectile: { speed: 7, radius: 0.3, damage: 12, life: 3 },
     // gemValue: xp a blue gem (kind 1) carries; its magnet is settings.run.gemBlueMagnet.
     elites: { hpMult: 40, scale: 1.6, damageMult: 1.5, gemValue: 15 },
