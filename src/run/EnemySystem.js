@@ -1,6 +1,9 @@
 // src/run/EnemySystem.js
 import { settings } from '../config/settings.js';
 
+/** Behaviour template ids — indexes both `this.behavior[i]` and `settings.enemies`. */
+export const BEHAVIORS = ['swarm', 'ranged', 'tank'];
+
 /**
  * The horde, as flat arrays (spec §5).
  *
@@ -36,6 +39,9 @@ export class EnemySystem {
     this.kbX = new Float32Array(cap);
     this.kbZ = new Float32Array(cap);
     this.element = new Uint8Array(cap);
+    this.behavior = new Uint8Array(cap); // BEHAVIORS index: 0 swarm / 1 ranged / 2 tank
+    this.elite = new Uint8Array(cap); // 0 normal / 1 elite (Task 5 consumes; spawn only marks it)
+    this.fireT = new Float32Array(cap); // ranged fire cooldown
     this.id = new Float64Array(cap);
 
     // Uniform grid: head index per cell + linked "next" per enemy.
@@ -51,19 +57,23 @@ export class EnemySystem {
     this.onHit = null;
   }
 
-  spawnAt(x, z, minute) {
+  spawnAt(x, z, minute, element = 0, behavior = 0, elite = 0) {
     if (this.count >= this.x.length) return -1;
     const i = this.count++;
     const c = settings.enemies;
+    const kind = c[BEHAVIORS[behavior]];
     this.x[i] = this.prevX[i] = x;
     this.z[i] = this.prevZ[i] = z;
-    this.hp[i] = c.hpBase * (1 + c.hpPerMinute * minute) * c.swarm.hpMult;
+    this.hp[i] = c.hpBase * (1 + c.hpPerMinute * minute) * kind.hpMult;
     this.slowed[i] = 0;
     this.slowT[i] = 0;
     this.flash[i] = 0;
     this.kbX[i] = 0;
     this.kbZ[i] = 0;
-    this.element[i] = 0; // M1: swarm only; tides colour this in M3
+    this.element[i] = element;
+    this.behavior[i] = behavior;
+    this.elite[i] = elite; // ×hpMult stacking lands in Task 5; spawn only marks it
+    this.fireT[i] = 0;
     this.id[i] = this._nextId++;
     return i;
   }
@@ -77,8 +87,6 @@ export class EnemySystem {
    */
   tick(step, player, minute) {
     const c = settings.enemies;
-    const speed = c.swarm.speed;
-    const contactR = c.swarm.radius + 0.5; // + player capsule radius
     let contact = 0;
 
     this._rebuildGrid();
@@ -92,7 +100,9 @@ export class EnemySystem {
       let dz = player.z - this.z[i];
       const d = Math.hypot(dx, dz);
       const dist = d || 1; // the || 1 guards normalisation; contact uses raw d
-      const v = speed * (1 - this.slowed[i]);
+      const kind = c[BEHAVIORS[this.behavior[i]]];
+      const holding = this.behavior[i] === 1 && d < kind.holdRange; // ranged parks at range, never bites
+      const v = holding ? 0 : kind.speed * (1 - this.slowed[i]);
       dx = (dx / dist) * v;
       dz = (dz / dist) * v;
 
@@ -112,7 +122,7 @@ export class EnemySystem {
       if ((this.slowT[i] -= step) <= 0) this.slowed[i] = 0;
       this.flash[i] = Math.max(0, this.flash[i] - step * 6);
 
-      if (d < contactR) contact = Math.max(contact, c.swarm.contactDamage);
+      if (!holding && d < kind.radius + 0.5) contact = Math.max(contact, kind.contactDamage);
     }
     return contact;
   }
@@ -167,24 +177,24 @@ export class EnemySystem {
   // 0.45m-wide bodies unless it struck dead centre.
 
   hits(point, radius) {
-    const reach = radius + settings.enemies.swarm.radius;
     for (let i = 0; i < this.count; i++) {
+      const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
       if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) < reach) return true;
     }
     return false;
   }
 
   damage(point, radius, amount) {
-    const reach = radius + settings.enemies.swarm.radius;
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
+      const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
       const dx = this.x[i] - point.x;
       const dz = this.z[i] - point.z;
-      if (Math.hypot(dx, dz) >= reach) continue;
+      if (Math.hypot(dx, dz) >= radius + kind.radius) continue;
       hits++;
       this.flash[i] = 1;
       const d = Math.hypot(dx, dz) || 1;
-      const kb = settings.enemies.knockback / settings.enemies.swarm.mass;
+      const kb = settings.enemies.knockback / kind.mass;
       this.kbX[i] += (dx / d) * kb;
       this.kbZ[i] += (dz / d) * kb;
       this.onHit?.(this.x[i], this.z[i], amount);
@@ -194,11 +204,11 @@ export class EnemySystem {
   }
 
   damageOnce(castId, point, radius, amount) {
-    const reach = radius + settings.enemies.swarm.radius;
     let seen = this._hitMemory.get(castId);
     if (!seen) this._hitMemory.set(castId, (seen = new Set()));
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
+      const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
       if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
       if (seen.has(this.id[i])) continue;
       seen.add(this.id[i]);
@@ -212,12 +222,26 @@ export class EnemySystem {
   }
 
   slow(point, radius, factor, duration) {
-    const reach = radius + settings.enemies.swarm.radius;
     for (let i = 0; i < this.count; i++) {
+      const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
       if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
       this.slowed[i] = Math.max(this.slowed[i], factor);
       this.slowT[i] = Math.max(this.slowT[i], duration);
     }
+  }
+
+  /** Index of the closest live enemy to (x, z); -1 when the field is empty. */
+  nearestTo(x, z) {
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < this.count; i++) {
+      const d = Math.hypot(this.x[i] - x, this.z[i] - z);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   releaseCast(castId) {
@@ -230,7 +254,7 @@ export class EnemySystem {
     if (i === last) return;
     for (const a of [
       this.x, this.z, this.prevX, this.prevZ, this.hp, this.slowed, this.slowT,
-      this.flash, this.kbX, this.kbZ, this.element, this.id
+      this.flash, this.kbX, this.kbZ, this.element, this.behavior, this.elite, this.fireT, this.id
     ]) {
       a[i] = a[last];
     }

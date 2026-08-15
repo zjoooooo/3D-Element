@@ -694,6 +694,63 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  tide schedule');
 }
 
+/* ---- behaviours: ranged holds range, tank shrugs knockback, nearest query ---- */
+{
+  const enemies = new EnemySystem(createRng(2));
+
+  // Ranged: spawn inside holdRange → must not close further (and never bites).
+  const r = enemies.spawnAt(4, 0, 0, 0, 1);
+  for (let t = 0; t < 60; t++) enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
+  assert.ok(
+    Math.hypot(enemies.x[r], enemies.z[r]) > 3.5,
+    'behaviours: ranged holds its distance'
+  );
+
+  // Tank vs swarm knockback: same hit, the tank barely moves.
+  enemies.clear();
+  const s = enemies.spawnAt(2, 0, 0, 0, 0);
+  const k = enemies.spawnAt(-2, 0, 0, 0, 2);
+  enemies.damage({ x: 2, z: 0.01 }, 0.5, 1);
+  enemies.damage({ x: -2, z: 0.01 }, 0.5, 1);
+  assert.ok(
+    Math.abs(enemies.kbZ[s]) > Math.abs(enemies.kbZ[k]) * 2,
+    'behaviours: mass divides the shove'
+  );
+
+  // Element byte and elite byte survive the spawn signature.
+  enemies.clear();
+  const e = enemies.spawnAt(0, 0, 5, 3, 2, 1);
+  assert.equal(enemies.element[e], 3);
+  assert.equal(enemies.behavior[e], 2);
+  assert.equal(enemies.elite[e], 1);
+
+  // Nearest query.
+  enemies.clear();
+  assert.equal(enemies.nearestTo(0, 0), -1, 'behaviours: empty horde has no nearest');
+  enemies.spawnAt(5, 0, 0);
+  const near = enemies.spawnAt(1, 1, 0);
+  assert.equal(enemies.nearestTo(0, 0), near, 'behaviours: nearest picks the closer body');
+
+  // Reach must key off each enemy's own radius, not a hardcoded swarm one: a
+  // probe at tank-radius + 0.55 clears the tank (0.5+0.7=1.2) but would miss a
+  // swarm-radius revert (0.5+0.45=0.95) — hits/slow/damageOnce must each
+  // resolve reach per enemy, same as damage already does.
+  enemies.clear();
+  const tk = enemies.spawnAt(3, 0, 0, 0, 2);
+  const probe = { x: 4.05, z: 0 }; // tank sits at (3,0); distance 1.05
+  assert.ok(enemies.hits(probe, 0.5), 'behaviours: hits uses the tank radius, not swarm');
+  enemies.slow(probe, 0.5, 0.4, 1);
+  assert.ok(
+    Math.abs(enemies.slowed[tk] - 0.4) < 1e-6, // slowed[] is a Float32Array — exact === would flake on rounding
+    'behaviours: slow uses the tank radius, not swarm'
+  );
+  const hpBefore = enemies.hp[tk];
+  enemies.damageOnce(77, probe, 0.5, 5);
+  assert.equal(hpBefore - enemies.hp[tk], 5, 'behaviours: damageOnce uses the tank radius, not swarm');
+
+  console.log('ok  behaviours');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

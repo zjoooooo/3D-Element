@@ -265,7 +265,8 @@ export const settings = {
     hpBase: 20, // swarm HP at minute 0 — one Frost Lance, by design
     hpPerMinute: 0.16, // fractional HP growth per minute
     swarm: { speed: 3.2, radius: 0.45, contactDamage: 8, hpMult: 1, mass: 1 },
-    // ranged/tank land in M3 with the tide schedule; swarm alone carries M1
+    ranged: { speed: 2.4, radius: 0.5, contactDamage: 6, hpMult: 2, mass: 0.8, holdRange: 8 },
+    tank: { speed: 1.4, radius: 0.7, contactDamage: 20, hpMult: 6, mass: 4 },
     separation: 1.1, // metres of personal space the grid push maintains
     knockback: 4, // impulse metres/second per hit
     knockbackDecay: 6 // s⁻¹ exponential decay on that impulse
