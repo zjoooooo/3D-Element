@@ -1167,6 +1167,30 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  combat depth hooks');
 }
 
+/* ---- resonance maths and the quench latch ---- */
+{
+  const mods = new Modifiers();
+  mods.computeResonance([2, 2, 0]); // two water, one metal
+  assert.ok(mods.resonates(2), 'resonance: two water actives resonate');
+  assert.ok(!mods.resonates(0), 'resonance: a single metal does not');
+  assert.ok(!mods.cycleActive());
+  assert.equal(mods.dotMult(), 1, 'resonance: no fire pair, no dot aura');
+  mods.computeResonance([3, 3]);
+  assert.equal(mods.dotMult(), settings.resonance.fireDot);
+  mods.computeResonance([0, 1, 2, 3, 4]);
+  assert.ok(mods.cycleActive(), 'resonance: one of each closes the cycle');
+
+  assert.ok(!mods.consumeQuench('beam'), 'quench: unarmed consumes nothing');
+  mods.armQuench();
+  assert.ok(!mods.consumeQuench('ice'), 'quench: water does not spend the metal latch');
+  assert.ok(mods.consumeQuench('beam'), 'quench: the next metal cast spends it');
+  assert.ok(!mods.consumeQuench('beam'), 'quench: spent is spent');
+  mods.armQuench();
+  mods.reset();
+  assert.ok(!mods.consumeQuench('beam'), 'quench: reset clears the latch');
+  console.log('ok  resonance & quench');
+}
+
 /* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

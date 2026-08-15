@@ -25,6 +25,8 @@ export class Modifiers {
   reset() {
     this._damage = Object.create(null); // element -> added multiplier
     this._passives = Object.create(null); // id -> level
+    this._resonance = [0, 0, 0, 0, 0]; // wuxing index -> active count
+    this._quench = false; // armed until the next metal cast spends it
   }
 
   bumpDamage(element) {
@@ -67,5 +69,40 @@ export class Modifiers {
 
   echoChance() {
     return settings.upgrades.echoPerLevel * this.passiveLevel('echo');
+  }
+
+  /** Recount actives per wuxing (spec §4.8). App calls after start/acquire/fuse;
+   * wuxingList is the on-loadout skills' wuxing — a fused slot contributes two,
+   * already expanded by the caller. */
+  computeResonance(wuxingList) {
+    this._resonance = [0, 0, 0, 0, 0];
+    for (const wux of wuxingList) this._resonance[wux]++;
+  }
+
+  /** True once a wuxing's active count clears the resonance threshold. */
+  resonates(wuxing) {
+    return this._resonance[wuxing] >= settings.resonance.threshold;
+  }
+
+  /** 周天: every wuxing represented at least once. */
+  cycleActive() {
+    return this._resonance.every((count) => count >= 1);
+  }
+
+  /** Fire resonance rides the burn tick — CombatSystem reads this via mods?.dotMult?.(). */
+  dotMult() {
+    return this.resonates(3) ? settings.resonance.fireDot : 1;
+  }
+
+  /** Arms the next metal cast to land quenched (App consumes and sets ability.quenched). */
+  armQuench() {
+    this._quench = true;
+  }
+
+  /** Spends the latch only on a metal cast (wuxingOf[element] === 0); anything else passes through unarmed. */
+  consumeQuench(element) {
+    if (!this._quench || settings.combat.wuxingOf[element] !== 0) return false;
+    this._quench = false;
+    return true;
   }
 }
