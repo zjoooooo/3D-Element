@@ -19,6 +19,7 @@ import { EnemyRenderer } from '../run/EnemyRenderer.js';
 import { EnemyProjectiles } from '../run/EnemyProjectiles.js';
 import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
 import { sequenceRefund } from '../run/sequence.js';
+import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
 import { CombatSystem } from '../run/CombatSystem.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
@@ -70,6 +71,24 @@ const RUN_SLOT_KEYS = ['LMB', 'RMB', 'Q', 'E', 'R', 'T'];
  * seat (F, V, X) sit the run out.
  */
 const RUN_KEY_SLOTS = { 0: 2, 1: 3, 2: 4, 6: 5 };
+
+/** A fusion id's display name (spec §4.7 table), resolved off its parents' wuxing. */
+function fusionName(id) {
+  const [a, b] = fusionParents(id);
+  return FUSIONS[fusionKey(settings.combat.wuxingOf[a], settings.combat.wuxingOf[b])]?.name ?? id;
+}
+
+/**
+ * A cast's wuxing for sequence-chain and mark purposes (spec §4.7 挂印取子系):
+ * a fusion counts as its generated half, not its generating one —
+ * `eligibleFusions()` only ever fuses `(a, b)` with `a` generating `b`, so
+ * `fusionParents(id)[1]` always is it. A plain element just reads its own.
+ */
+function fusionWux(element) {
+  return isFusionId(element)
+    ? settings.combat.wuxingOf[fusionParents(element)[1]]
+    : settings.combat.wuxingOf[element] ?? -1;
+}
 
 /**
  * Application root: owns every subsystem and the frame loop.
@@ -366,7 +385,10 @@ export class App {
     // there toggles that seat's autocast instead (mirrors Shift+digit).
     this.hud.onAbility = (element, shiftKey) => {
       if (!this.runMode) { this.armAbility(element); return; }
-      if (shiftKey) this._toggleAutocast(this.loadout.seats.indexOf(element));
+      // _seatOf, not a raw seats.indexOf: a fused seat's card is keyed by
+      // its generating parent's element, not by anything literally sitting
+      // in the loadout array any more.
+      if (shiftKey) this._toggleAutocast(this._seatOf(element));
     };
   }
 
@@ -495,9 +517,26 @@ export class App {
     this._syncBadges();
   }
 
-  /** Run mode's casting verb: no arm/confirm dance, straight from the pointer. */
+  /**
+   * Run mode's casting verb: no arm/confirm dance, straight from the pointer.
+   * A fusion seat (spec §4.7) resolves one shared ground point off whichever
+   * parent reaches further — `_quickCastToward` already knows how to fire a
+   * fused pair from a target point, so this just hands off to it, tagged as
+   * a manual (non-autocast) cast.
+   */
   _quickCast(element) {
-    if (!element || !ELEMENTS.includes(element)) return;
+    if (!element) return;
+    if (isFusionId(element)) {
+      if ((this.cooldowns.get(element) ?? 0) > 0) return;
+      const [a, b] = fusionParents(element);
+      this.aim.setElement(settings[a].range >= settings[b].range ? a : b);
+      this.aim._resolve();
+      const tx = this.aim.origin.x + this.aim.direction.x * this.aim.distance;
+      const tz = this.aim.origin.z + this.aim.direction.z * this.aim.distance;
+      this._quickCastToward(element, tx, tz, false);
+      return;
+    }
+    if (!ELEMENTS.includes(element)) return;
     if ((this.cooldowns.get(element) ?? 0) > 0) return;
     if (element !== this.element) this.selectAbility(element, { silent: true });
     this.aim.quickCast();
@@ -510,7 +549,7 @@ export class App {
    * its cooldown, or chains silently break (M4 Task 7 review).
    */
   _applySequence(element) {
-    const wux = settings.combat.wuxingOf[element] ?? -1;
+    const wux = fusionWux(element);
     if (sequenceRefund(this._lastCastWux, this._lastCastAt, wux, this.run.elapsed)) {
       this.cooldowns.set(element, this.cooldowns.get(element) * settings.sequence.refund);
       this.hud.showToast('相生轮转');
@@ -566,8 +605,17 @@ export class App {
    * sails past whatever it was actually aimed at), and the same floor
    * `_resolve()` applies to every aimed distance so a cast can never be
    * asked to land closer than the ability's own minimum.
+   *
+   * A fusion seat (spec §4.7) fires both parents at this same point,
+   * back-to-back, each independently clamped to its own range — the run's
+   * fusion budget (scaled by the fusion's own level) rides as
+   * `ability.fusionMult`, and the cooldown/sequence/echo bookkeeping below
+   * happens once, on the fusion id, never on either parent's own key.
+   * `autocast` tells apart a background seat's own cast (the only caller
+   * until this task) from `_quickCast`'s manual fusion hand-off, which
+   * resolves a pointer-aimed target point and forwards here as `false`.
    */
-  _quickCastToward(element, tx, tz) {
+  _quickCastToward(element, tx, tz, autocast = true) {
     if (!element || (this.cooldowns.get(element) ?? 0) > 0) return;
 
     const origin = this.character.position;
@@ -577,16 +625,31 @@ export class App {
     if (rawDist < 1e-6) return; // degenerate: target sits exactly on the caster
     const direction = { x: dx / rawDist, y: 0, z: dz / rawDist };
 
-    const c = settings[element];
-    const zoned = castShapeOf(element) === CastShape.ZONE;
-    const distance =
-      zoned || settings.combat[element]?.kind === 'burst'
-        ? MathUtils.clamp(rawDist, Math.max(0.2, c.minRange), Math.max(0.4, c.range))
-        : Math.max(0.4, c.range);
+    let castAnim;
+    if (isFusionId(element)) {
+      const [a, b] = fusionParents(element);
+      const fusionMult =
+        settings.fusion.budget * (1 + settings.fusion.levelMult * (this.loadout.levelOf(element) - 1));
+      for (const part of [a, b]) {
+        const ability = this.abilities.cast(origin, direction, this._quickCastDistance(part, rawDist), part);
+        if (ability) {
+          ability.autocast = autocast;
+          ability.fusionMult = fusionMult;
+        }
+      }
+      this.cooldowns.set(
+        element,
+        Math.max(0, Math.max(settings[a].cooldown, settings[b].cooldown) * this.modifiers.cooldownMult())
+      );
+      castAnim = settings[a].castAnim;
+    } else {
+      const c = settings[element];
+      const ability = this.abilities.cast(origin, direction, this._quickCastDistance(element, rawDist), element);
+      if (ability) ability.autocast = autocast;
+      this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
+      castAnim = c.castAnim;
+    }
 
-    const ability = this.abilities.cast(origin, direction, distance, element);
-    if (ability) ability.autocast = true;
-    this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
     // Autocast is only ever invoked from the runMode-gated loop in frame(),
     // so this.run always exists here — no `if (this.runMode)` gate needed
     // (same assumption _cast's cdMult/echo lines below already make).
@@ -599,8 +662,20 @@ export class App {
     }
 
     this.character.setFacing(Math.atan2(direction.x, direction.z));
-    this.character.playCast(c.castAnim);
+    this.character.playCast(castAnim);
     this.character.castLunge();
+  }
+
+  /** Shared by both branches above: one element's distance for a
+   * target-point cast — full range for a line shape that isn't burst-kind,
+   * the target's own distance (clamped to `[minRange, range]`) for a zone
+   * shape or a burst-kind line (meteor). */
+  _quickCastDistance(element, rawDist) {
+    const c = settings[element];
+    const zoned = castShapeOf(element) === CastShape.ZONE;
+    return zoned || settings.combat[element]?.kind === 'burst'
+      ? MathUtils.clamp(rawDist, Math.max(0.2, c.minRange), Math.max(0.4, c.range))
+      : Math.max(0.4, c.range);
   }
 
   /**
@@ -608,27 +683,60 @@ export class App {
    * card that still says R and the input reads as scrambled. Off-stage
    * abilities (whatever the loadout leaves out) dim. Repeatable — unlike the
    * one-time forEach this replaced, `Loadout.seats` changes over a run's
-   * life, so construction, every `acquire`, and restart all call this again.
+   * life, so construction, every `acquire`/`fuse`, and restart all call this
+   * again.
+   *
+   * A fused seat (spec §4.7) has no card of its own — the HUD is built one
+   * card per real `ELEMENTS` entry, so it borrows its generating parent's:
+   * that card keeps its own key (the seat didn't move) but wears the
+   * fusion's name and a gold border; the other parent's card gets no label
+   * at all and dims off-stage like any other freed seat. Every card's label
+   * text and fusion class are rewritten every call (not just added), so a
+   * restart's plain `loadout.reset()` un-fuses the display too.
    * ponytail: doesn't chase editor mid-run edits to settings.run.loadout —
    * wire the editor's onChange if that stings.
    */
   _syncRunHudLabels() {
     const labels = {};
+    const fused = {}; // generating parent (real element) -> its fusion's display name
     this.loadout.seats.forEach((element, seat) => {
-      if (element) labels[element] = RUN_SLOT_KEYS[seat];
+      if (!element) return;
+      if (isFusionId(element)) {
+        const [a] = fusionParents(element);
+        labels[a] = RUN_SLOT_KEYS[seat];
+        fused[a] = fusionName(element);
+      } else {
+        labels[element] = RUN_SLOT_KEYS[seat];
+      }
     });
     this.hud.setRunKeys(labels);
+    for (const [plain, card] of this.hud.cards) {
+      card.classList.toggle('ability-card--fusion', plain in fused);
+      card.querySelector('.ability-card__label').textContent = fused[plain] ?? ELEMENT_META[plain]?.label ?? plain;
+    }
+  }
+
+  /**
+   * Which loadout seat a real element's HUD card currently answers to. Direct
+   * for a plainly-seated element; for one absorbed as a fusion's generating
+   * half (its card is reused, per `_syncRunHudLabels` above), the seat that
+   * holds the fusion instead. -1 if the element isn't backing any seat.
+   */
+  _seatOf(element) {
+    const direct = this.loadout.seats.indexOf(element);
+    if (direct !== -1) return direct;
+    return this.loadout.seats.findIndex((seat) => isFusionId(seat) && fusionParents(seat)[0] === element);
   }
 
   /**
    * Blue-dot every badge whose seat has autocast armed; bare otherwise.
    * Walks every HUD card (not just seated ones) so a skill that loses its
-   * seat — draftLoadout un-drafting it on restart — drops a stale dot
-   * instead of keeping one no toggle can reach any more.
+   * seat — draftLoadout un-drafting it on restart, or fusing it away — drops
+   * a stale dot instead of keeping one no toggle can reach any more.
    */
   _syncBadges() {
     for (const [element, card] of this.hud.cards) {
-      const seat = this.loadout.seats.indexOf(element);
+      const seat = this._seatOf(element);
       card.classList.toggle('ability-card--auto', seat !== -1 && this._autocast.has(seat));
     }
   }
@@ -636,12 +744,16 @@ export class App {
   /**
    * Recompute the loadout's wuxing spread and push the resulting auras onto
    * the horde's tuning knobs (spec §4.8). Call after anything that changes
-   * the loadout: every run start, and every acquire that seats a new skill.
-   * A fused seat will contribute two wuxing entries — T8/T9's job; today
-   * every seat is a plain element, one wuxing apiece.
+   * the loadout: every run start, and every acquire or fuse that changes a
+   * seat. A fused seat contributes both parents' wuxing (spec §4.7) — the
+   * merge is a seating convenience, not a loss of either half's presence.
    */
   _refreshResonance() {
-    const wuxingList = this.loadout.equippedList().map((element) => settings.combat.wuxingOf[element]);
+    const wuxingList = this.loadout.equippedList().flatMap((element) =>
+      isFusionId(element)
+        ? fusionParents(element).map((parent) => settings.combat.wuxingOf[parent])
+        : [settings.combat.wuxingOf[element]]
+    );
     this.modifiers.computeResonance(wuxingList);
     const tuning = this.enemySystem.tuning;
     tuning.kbMult = this.modifiers.resonates(4) ? settings.resonance.earthKnockback : 1;
@@ -650,14 +762,22 @@ export class App {
     tuning.reactionMult = this.modifiers.cycleActive() ? settings.resonance.cycleReaction : 1;
   }
 
-  /** One line per seated skill, for the level-up hand's footer and the verdict's build recap. */
+  /** One line per seated skill, for the level-up hand's footer and the
+   * verdict's build recap. A fused seat names the fusion and both parents:
+   * `R 回春雷泽 Lv2（Frost Lance+Storm Lance）`. */
   _buildSummaryLines() {
     return this.loadout.seats
-      .map((element, seat) =>
-        element
-          ? `${RUN_SLOT_KEYS[seat]} ${ELEMENT_META[element]?.label ?? element} Lv${this.loadout.levelOf(element)}`
-          : null
-      )
+      .map((element, seat) => {
+        if (!element) return null;
+        const key = RUN_SLOT_KEYS[seat];
+        const level = this.loadout.levelOf(element);
+        if (isFusionId(element)) {
+          const [a, b] = fusionParents(element);
+          const parents = `${ELEMENT_META[a]?.label ?? a}+${ELEMENT_META[b]?.label ?? b}`;
+          return `${key} ${fusionName(element)} Lv${level}（${parents}）`;
+        }
+        return `${key} ${ELEMENT_META[element]?.label ?? element} Lv${level}`;
+      })
       .filter(Boolean);
   }
 
@@ -693,6 +813,18 @@ export class App {
       this.loadout.acquire(card.element);
       this._syncRunHudLabels();
       this._refreshResonance();
+    } else if (card.kind === 'fusion') {
+      // The freed parent's seat index, captured before fuse() clears it —
+      // an autocast flag left on it would otherwise sit there inert until
+      // some future acquire happened to land in that exact seat and
+      // silently inherit it (M1 勘误-shape staleness this project already
+      // guards against elsewhere).
+      const freedSeat = this.loadout.seats.indexOf(card.b);
+      this.loadout.fuse(card.a, card.b);
+      this._autocast.delete(freedSeat);
+      this._syncRunHudLabels();
+      this._refreshResonance();
+      this._syncBadges();
     } else if (card.kind === 'passive') {
       this.modifiers.bumpPassive(card.passive);
       if (card.passive === 'vitality') {
@@ -995,6 +1127,21 @@ export class App {
     /* ---- readouts ---- */
     for (const element of ELEMENTS) {
       this.hud.setCooldown(element, this.cooldowns.get(element) ?? 0, settings[element].cooldown);
+    }
+    if (this.runMode) {
+      // A fused seat has no card of its own (see _syncRunHudLabels) — its
+      // ring rides the generating parent's card instead, overwriting
+      // whatever the loop above just wrote for that parent's own (now
+      // unused) cooldown key.
+      for (const seatElement of this.loadout.seats) {
+        if (!isFusionId(seatElement)) continue;
+        const [a, b] = fusionParents(seatElement);
+        this.hud.setCooldown(
+          a,
+          this.cooldowns.get(seatElement) ?? 0,
+          Math.max(settings[a].cooldown, settings[b].cooldown)
+        );
+      }
     }
     this.hud.setArmed(this.aim.isArmed);
     this.hud.update(raw, () => ({

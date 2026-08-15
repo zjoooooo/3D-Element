@@ -291,6 +291,17 @@ body {
   background: #58aaff;
 }
 
+/* 融合 (spec §4.7): a fused seat borrows its generating parent's card,
+   renamed by App and gold-bordered — the merged pair reads as one seat.
+   Compound selector so this ties `.ability-card.is-active`'s specificity
+   (0,2,0) rather than losing to it outright — a fused card can carry both
+   classes at once (is-active is a leftover of whichever plain element was
+   last manually selected before the fuse), and the gold border should win. */
+.ability-card.ability-card--fusion {
+  border-color: #e8c766;
+  box-shadow: 0 0 10px rgba(232, 199, 102, 0.35);
+}
+
 .hud__panel {
   position: absolute;
   padding: 12px 14px;
