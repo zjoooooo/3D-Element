@@ -350,7 +350,9 @@ export class FireballAbility extends Ability {
 
     // What it actually does to anything standing there. Kept clear of the global
     // multipliers above on purpose: those are the look, this is the hit.
-    this.ctx.targets.damage(_pos, c.damageRadius, c.damage);
+    // ctx.mods is the run's upgrade layer (M2) — App wires it in run mode only
+    // (Task 7); the sandbox leaves it undefined, so this stays exactly c.damage.
+    this.ctx.targets.damage(_pos, c.damageRadius, c.damage * (this.ctx.mods?.damageMult(this.element) ?? 1));
 
     this.ctx.shake.add(
       c.impactShake * g.explosionIntensity * g.cameraShake,

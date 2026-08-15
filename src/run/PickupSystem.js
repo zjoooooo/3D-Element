@@ -20,6 +20,8 @@ export class PickupSystem {
     this.value = new Float32Array(CAP);
     this.xp = 0;
     this.level = 0;
+    // Run upgrade layer; null in the sandbox — xp then passes through unscaled.
+    this.mods = null;
 
     const geometry = new BufferGeometry();
     this._positions = new Float32Array(CAP * 3);
@@ -52,7 +54,7 @@ export class PickupSystem {
       const dz = player.z - this.z[i];
       const d = Math.hypot(dx, dz);
       if (d < 0.5) {
-        this.xp += this.value[i];
+        this.xp += this.value[i] * (this.mods ? this.mods.xpMult() : 1);
         const last = --this.count;
         this.x[i] = this.x[last];
         this.z[i] = this.z[last];

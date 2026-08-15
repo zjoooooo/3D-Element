@@ -17,8 +17,10 @@ import { settings } from '../config/settings.js';
 const LINE_SAMPLES = 3;
 
 export class CombatSystem {
-  constructor(targets) {
+  constructor(targets, modifiers = null) {
     this.targets = targets;
+    /** Damage multipliers from the run's upgrade layer; null in the sandbox. */
+    this.mods = modifiers;
     this._castIds = new WeakMap();
     this._nextCast = 1;
     // Both keyed by numeric castId, so plain Map/Set — a WeakMap rejects
@@ -27,6 +29,10 @@ export class CombatSystem {
     this._detonated = new Set(); // castIds whose burst already went off
     this._sweptU = new Map(); // per-cast u the sweep has been sampled up to
     this._p = { x: 0, z: 0 }; // scratch point, reused — no allocs per tick
+  }
+
+  _amp(element) {
+    return this.mods ? this.mods.damageMult(element) : 1;
   }
 
   _castKey(ability) {
@@ -77,7 +83,7 @@ export class CombatSystem {
             const u = Math.min(t, to);
             this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * u;
-            this.targets.damageOnce(castId, this._p, c.width, c.damage);
+            this.targets.damageOnce(castId, this._p, c.width, c.damage * this._amp(ability.element));
             if (u >= to) break;
           }
           this._sweptU.set(castId, to);
@@ -99,7 +105,7 @@ export class CombatSystem {
           ) {
             this._detonated.add(castId);
             const radius = c.radius ?? settings[ability.element].zoneRadius ?? 2;
-            this.targets.damage(ability.position, radius, c.damage);
+            this.targets.damage(ability.position, radius, c.damage * this._amp(ability.element));
             if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           }
           // Meteor's lava keeps burning through the fade, but the lava stops
@@ -112,7 +118,7 @@ export class CombatSystem {
             (ability.phase === 'impact' || ability.phase === 'fade') &&
             ability.impactTime + ability.fadeTime < c.burnTime
           ) {
-            if (this._dot(castId, step, c.burnDps)) {
+            if (this._dot(castId, step, c.burnDps * this._amp(ability.element))) {
               this.targets.damage(ability.position, c.radius, this._take(castId));
             }
           }
@@ -121,7 +127,7 @@ export class CombatSystem {
 
         case 'lineTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
-          const perSecond = c.dps / LINE_SAMPLES;
+          const perSecond = (c.dps * this._amp(ability.element)) / LINE_SAMPLES;
           for (let s = 1; s <= LINE_SAMPLES; s++) {
             const t = (s / LINE_SAMPLES) * ability.u;
             this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
@@ -134,7 +140,7 @@ export class CombatSystem {
         case 'zoneTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const radius = settings[ability.element].zoneRadius ?? 2;
-          this.targets.damage(ability.position, radius, c.dps * step);
+          this.targets.damage(ability.position, radius, c.dps * this._amp(ability.element) * step);
           if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           break;
         }

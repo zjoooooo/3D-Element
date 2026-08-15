@@ -513,6 +513,38 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  upgrade pool');
 }
 
+/* ---- modifier plumbing: damage and xp actually scale ---- */
+{
+  const hits = [];
+  const fakeTargets = {
+    damageOnce: (id, p, r, amount) => (hits.push(amount), 1),
+    damage: (p, r, amount) => (hits.push(amount), 1),
+    slow: () => {}
+  };
+  const mods = new Modifiers();
+  mods.bumpDamage('ice'); // ice ×1.25
+  const combat = new CombatSystem(fakeTargets, mods);
+  const ice = {
+    element: 'ice', phase: 'travel', age: 0.2, impactTime: 0, fadeTime: 0,
+    position: { x: 1, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 8, u: 0.2
+  };
+  combat.tick(1 / 60, [ice]);
+  const base = settings.combat.ice.damage;
+  assert.ok(hits.some((amount) => Math.abs(amount - base * 1.25) < 1e-6),
+    'combat: sweep damage rides the modifier');
+
+  const pickups = new PickupSystem();
+  const scavenger = new Modifiers();
+  scavenger.bumpPassive('scavenger');
+  pickups.mods = scavenger;
+  pickups.dropAt(0.1, 0, 0);
+  pickups.tick(1 / 60, { x: 0, z: 0 });
+  assert.ok(Math.abs(pickups.xp - settings.run.gemBase * 1.1) < 1e-6,
+    'pickups: xp rides the scavenger multiplier');
+  console.log('ok  modifier plumbing');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

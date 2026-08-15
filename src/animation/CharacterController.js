@@ -546,11 +546,11 @@ export class CharacterController {
    * @param {Vector3} direction on XZ, length 0..1
    * @param {number} dt
    */
-  move(direction, dt) {
+  move(direction, dt, speedScale = 1) {
     const c = settings.character;
     const throttle = Math.min(1, Math.hypot(direction.x, direction.z));
 
-    this._desiredVelocity.set(direction.x, 0, direction.z).multiplyScalar(c.walkSpeed);
+    this._desiredVelocity.set(direction.x, 0, direction.z).multiplyScalar(c.walkSpeed * speedScale);
 
     // Two eases rather than one: holding a key ramps the body up, letting go
     // plants it. Which applies is just whether anything is being asked for.
