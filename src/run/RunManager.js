@@ -18,6 +18,7 @@ export class RunManager {
     this.kills = 0;
     this.telegraphs = [];
     this._spawnDebt = 0;
+    this.pendingLevels = 0;
 
     this.s.enemies.onDeath = (x, z) => {
       this.kills++;
@@ -39,6 +40,7 @@ export class RunManager {
     this.kills = 0;
     this.telegraphs.length = 0;
     this._spawnDebt = 0;
+    this.pendingLevels = 0;
     this.s.enemies.clear();
     this.s.pickups.clear();
     this.s.player.reset();
@@ -80,7 +82,7 @@ export class RunManager {
     if (contact > 0) this.s.player.takeDamage(contact);
     this.s.player.tick(step);
     this.s.combat.tick(step, this.s.abilities.active);
-    this.s.pickups.tick(step, playerPos);
+    this.pendingLevels += this.s.pickups.tick(step, playerPos);
 
     return 'playing';
   }

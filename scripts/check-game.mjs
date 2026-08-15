@@ -392,6 +392,15 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.deepEqual(seen, [7], 'run: retiring a cast releases its hit memory');
   delete run.s.enemies.releaseCast; // real method back for later assertions
 
+  // Level-ups queue on the manager instead of vanishing.
+  run.start();
+  run.tick(1 / 60, { x: 0, z: 0 });
+  pickups.xp = pickups.xpNeed(1) + pickups.xpNeed(2) + 1; // enough for two levels
+  run.tick(1 / 60, { x: 0, z: 0 });
+  assert.ok(run.pendingLevels >= 2, `run: level-ups queue (got ${run.pendingLevels})`);
+  run.start();
+  assert.equal(run.pendingLevels, 0, 'run: restart clears the queue');
+
   // Verdicts.
   player.hp = 0;
   player.alive = false;
