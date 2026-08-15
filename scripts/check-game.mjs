@@ -789,6 +789,51 @@ import { sequenceRefund } from '../src/run/sequence.js';
     enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
   }
   assert.ok(fired >= 1, 'projectiles: a holding spitter fires on its cadence');
+
+  // I1 (M4 final review): a weakened spitter's bolt must carry its reduced
+  // per-shot dmg all the way to EnemyProjectiles. Two links, pinned
+  // separately — a real RunManager can't be built headless in isolation, so
+  // this is the "bind a probe" + "build the minimal manager" alternative.
+  const wantWeakDmg = settings.enemies.projectile.damage * (1 - settings.combat.debuffs.weak.amount);
+
+  // Link 1, the emitter: EnemySystem.tick's onFire hook itself must emit the
+  // reduced dmg as its 5th arg once 熄灭 (water overcoming fire) lands.
+  const weak = new EnemySystem(createRng(4));
+  weak.spawnAt(5, 0, 0, 3, 1); // fire-elemental (wux 3) ranged spitter, in holding range
+  weak.damage({ x: 5, z: 0 }, 1, 1, 2); // water (wux 2) overcomes fire: latches 熄灭
+  let firedDmg = null;
+  weak.onFire = (x, z, dx, dz, dmg) => { if (firedDmg === null) firedDmg = dmg; };
+  weak.tick(1 / 60, { x: 0, z: 0 }, 0); // fireT starts at 0: fires this very tick
+  assert.ok(
+    firedDmg !== null && Math.abs(firedDmg - wantWeakDmg) < 1e-9,
+    `projectiles: 熄灭 reduces the emitted bolt dmg to ${wantWeakDmg} (got ${firedDmg})`
+  );
+
+  // Link 2, the forwarding: RunManager's real onFire binding (not a test
+  // stub) must carry that same 5th arg through to projectiles.spawn — this
+  // is the exact line that used to drop it.
+  const shots2 = new EnemyProjectiles();
+  const enemies2 = new EnemySystem(createRng(4));
+  const run2 = new RunManager({
+    enemies: enemies2, pickups: new PickupSystem(), player: new PlayerState(),
+    rng: createRng(4), tides: new TideSchedule(createRng(4)), projectiles: shots2,
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null }
+  });
+  run2.start();
+  enemies2.spawnAt(5, 0, 0, 3, 1);
+  enemies2.damage({ x: 5, z: 0 }, 1, 1, 2);
+  enemies2.tick(1 / 60, { x: 0, z: 0 }, 0);
+  assert.equal(shots2.count, 1, 'projectiles: the weakened bolt reached EnemyProjectiles via RunManager');
+  // shots2.dmg is a Float32Array (storage, not the check, is lossy) — 1e-4
+  // clears that rounding with room to spare while still catching a wrong
+  // multiplier.
+  assert.ok(
+    Math.abs(shots2.dmg[0] - wantWeakDmg) < 1e-4,
+    `projectiles: RunManager.onFire forwards the reduced dmg (want ${wantWeakDmg}, got ${shots2.dmg[0]})`
+  );
+
   console.log('ok  enemy projectiles');
 }
 
@@ -1362,6 +1407,20 @@ import { sequenceRefund } from '../src/run/sequence.js';
   assert.ok(loadout.hasEmpty(), 'fusion: the second seat is freed');
   assert.equal(loadout.levelOf(id), 1);
   assert.ok(!loadout.has('ice') && !loadout.has('thunder'), 'fusion: parents leave the board');
+
+  // I4 (M4 final review): the freed seat must not let either fused-away
+  // parent re-enter the pool as a 'new' card — they still back the live
+  // fusion. Level 5 is a milestone (settings.upgrades.milestones), which
+  // forces a 'new' card into the hand whenever one is a legal candidate, so
+  // this draw is deterministic rather than relying on the weighted roll.
+  const postFuseHand = pool.draw(5);
+  assert.ok(
+    postFuseHand
+      .filter((c) => c.kind === 'new')
+      .every((c) => c.element !== 'ice' && c.element !== 'thunder'),
+    'fusion: fused-away parents never re-enter the new-active pool'
+  );
+
   assert.ok(loadout.upgrade(id) && loadout.levelOf(id) === 2, 'fusion: the spell levels');
   for (let n = 0; n < 5; n++) loadout.upgrade(id);
   assert.equal(loadout.levelOf(id), settings.fusion.maxLevel, 'fusion: capped at its own max');

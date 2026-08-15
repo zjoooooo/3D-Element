@@ -1,6 +1,6 @@
 import { settings } from '../config/settings.js';
 import { FEEDS } from './TideSchedule.js';
-import { FUSIONS, fusionKey, fusionId, isFusionId } from './fusions.js';
+import { FUSIONS, fusionKey, fusionId, isFusionId, fusionParents } from './fusions.js';
 
 /**
  * Who is on stage this run (spec §6).
@@ -48,6 +48,12 @@ export class Loadout {
 
   has(element) {
     return this.seats.includes(element);
+  }
+
+  /** True when `element`'s own seat is empty only because a fusion swallowed
+   * it (spec §4.7) — it's still spoken for and must not re-offer as new. */
+  isFusedParent(element) {
+    return this.seats.some((id) => isFusionId(id) && fusionParents(id).includes(element));
   }
 
   acquire(element) {

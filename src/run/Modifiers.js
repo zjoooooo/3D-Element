@@ -94,7 +94,10 @@ export class Modifiers {
     return this.resonates(3) ? settings.resonance.fireDot : 1;
   }
 
-  /** Arms the next metal cast to land quenched (App consumes and sets ability.quenched). */
+  /** Arms the next metal cast to land quenched. Spent via consumeQuench() at
+   * every App cast write-site (_cast, _quickCastToward's plain and fusion
+   * branches), which stamps the result onto ability.quenched itself (M4 I3 —
+   * this comment used to claim that wiring existed before App actually did). */
   armQuench() {
     this._quench = true;
   }

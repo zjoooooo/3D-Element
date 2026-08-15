@@ -368,10 +368,14 @@ export class EnemySystem {
    * straight out of _reactionQueue while iterating would hand that reentrant
    * flush a live buffer to overwrite mid-read, so the pending entries are
    * copied to a second preallocated buffer, and the count reset to 0, before
-   * a single callback fires. (In practice the reentrant splash always deals
-   * untyped damage — wuxing -1 — so it can never itself queue a reaction, and
-   * its own flush is a same-call no-op; the copy makes that safe by
-   * construction instead of relying on that invariant holding forever.)
+   * a single callback fires. This is safe today for one reason only: every
+   * current reaction deals untyped damage (wuxing -1), which _applyWux can
+   * never queue a reaction off, so a reentrant flush is always a same-call
+   * no-op — not "safe regardless of nesting depth." A future typed-damage
+   * reaction would still clobber this shared _reactionFlush buffer mid-
+   * iteration of an outer flush (the copy only guards _reactionQueue against
+   * concurrent refill, not this buffer against a second writer), and this
+   * scheme would need revisiting before one ships.
    */
   _flushReactions() {
     const n = this._reactionCount;

@@ -40,7 +40,7 @@ export class UpgradePool {
 
     if (this.loadout.hasEmpty()) {
       for (const element of ELEMENTS) {
-        if (this.loadout.has(element)) continue;
+        if (this.loadout.has(element) || this.loadout.isFusedParent(element)) continue;
         candidates.push({
           weight: w.newActive,
           card: { kind: 'new', element, title: '新技能', body: '进入下一个空位' }

@@ -570,7 +570,15 @@ export class App {
     // Written on every cast through here (sandbox, manual run cast, echo) so
     // a pooled instance never carries an autocast tax over from a previous
     // life (M1 勘误 same shape) — only `_quickCastToward` ever writes true.
-    if (ability) ability.autocast = false;
+    // fusionMult/quenched ride the same rule (M4 final review I2/I3): a
+    // pooled instance keeps its expandos across lives, so every cast writes
+    // every field rather than trusting a stale one to be falsy/1 already.
+    // `this.runMode ?` guards sandbox, where `this.modifiers` never exists.
+    if (ability) {
+      ability.autocast = false;
+      ability.fusionMult = 1;
+      ability.quenched = this.runMode ? this.modifiers.consumeQuench(element) : false;
+    }
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
@@ -636,11 +644,17 @@ export class App {
       const [a, b] = fusionParents(element);
       const fusionMult =
         settings.fusion.budget * (1 + settings.fusion.levelMult * (this.loadout.levelOf(element) - 1));
+      // 淬炼 spends once per fused cast action, not once per parent (I3): b is
+      // the generated half (spec §4.7 挂印取子系), so wuxingOf[b] is exactly
+      // fusionWux(element) — consumeQuench(b) is the fusion's own metal-
+      // identity check and its spend in one call. Stamped onto both parents.
+      const quenched = this.runMode ? this.modifiers.consumeQuench(b) : false;
       for (const part of [a, b]) {
         const ability = this.abilities.cast(origin, direction, this._quickCastDistance(part, rawDist), part);
         if (ability) {
           ability.autocast = autocast;
           ability.fusionMult = fusionMult;
+          ability.quenched = quenched;
         }
       }
       this.cooldowns.set(
@@ -651,7 +665,11 @@ export class App {
     } else {
       const c = settings[element];
       const ability = this.abilities.cast(origin, direction, this._quickCastDistance(element, rawDist), element);
-      if (ability) ability.autocast = autocast;
+      if (ability) {
+        ability.autocast = autocast;
+        ability.fusionMult = 1;
+        ability.quenched = this.runMode ? this.modifiers.consumeQuench(element) : false;
+      }
       this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
       castAnim = c.castAnim;
     }
