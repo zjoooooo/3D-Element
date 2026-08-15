@@ -639,3 +639,54 @@ body {
   filter: drop-shadow(0 0 6px rgba(255, 68, 51, 0.55));
   will-change: transform, opacity;
 }
+
+/* Level-up hand — grey-box; the real card art is milestone 5. */
+.upgrade-ui__dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 10, 0.72);
+  z-index: 40;
+}
+.upgrade-ui__panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 41;
+  color: #e6edf5;
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+.upgrade-ui__head { font-size: 18px; letter-spacing: 0.2em; }
+.upgrade-ui__hand { display: flex; gap: 14px; }
+.upgrade-ui__card {
+  width: 168px;
+  min-height: 150px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(16, 24, 36, 0.92);
+  border: 1px solid rgba(120, 160, 210, 0.35);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.upgrade-ui__card:hover { border-color: rgba(190, 220, 255, 0.8); }
+.upgrade-ui__card b { opacity: 0.5; }
+.upgrade-ui__card em { font-style: normal; font-weight: 700; }
+.upgrade-ui__card span { font-size: 12px; opacity: 0.75; }
+.upgrade-ui__row { display: flex; gap: 10px; }
+.upgrade-ui__minor {
+  padding: 6px 14px;
+  background: rgba(16, 24, 36, 0.8);
+  border: 1px solid rgba(120, 160, 210, 0.25);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+.upgrade-ui__summary { font-size: 12px; opacity: 0.6; }
