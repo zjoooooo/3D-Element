@@ -529,11 +529,17 @@ export class App {
     if (isFusionId(element)) {
       if ((this.cooldowns.get(element) ?? 0) > 0) return;
       const [a, b] = fusionParents(element);
+      const prevAim = this.aim.element;
       this.aim.setElement(settings[a].range >= settings[b].range ? a : b);
       this.aim._resolve();
       const tx = this.aim.origin.x + this.aim.direction.x * this.aim.distance;
       const tz = this.aim.origin.z + this.aim.direction.z * this.aim.distance;
       this._quickCastToward(element, tx, tz, false);
+      // Give the aim back: it was only borrowed to resolve the fusion's shared
+      // target point, and leaving it on the longer-range parent would corrupt
+      // the next plain quick-cast of the selected element (wrong range/shape),
+      // since only `selectAbility` otherwise keeps `aim.element` in sync.
+      this.aim.setElement(prevAim);
       return;
     }
     if (!ELEMENTS.includes(element)) return;
