@@ -227,6 +227,7 @@ export const settings = {
     dodgeIframes: 0.3,
     dodgeCooldown: 2,
     godMode: false, // debug: take no damage, everything else runs
+    draftLoadout: true, // run starts with seat 0 only; false = all six (debug)
     // The six abilities on stage in run mode, in slot order:
     // left mouse, right mouse, Q, E, R, T. Every id must be one of ELEMENTS;
     // whatever is missing sits out the run (M1 has no loadout screen yet — the
@@ -246,7 +247,8 @@ export const settings = {
     focusPerLevel: 0.94, // multiplicative CD factor per focus level...
     cooldownFloor: 0.6, // ...never past the spec's 40% total reduction cap
     scavengerPerLevel: 0.1,
-    echoPerLevel: 0.04 // 12% at max, spec's number
+    echoPerLevel: 0.04, // 12% at max, spec's number
+    skillLevelMax: 5
   },
 
   /** Per-behaviour enemy stats. HP scales with the minute (spec anchor 3). */

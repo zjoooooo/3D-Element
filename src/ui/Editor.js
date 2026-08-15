@@ -234,6 +234,7 @@ export class Editor {
       folder.add(r.loadout, i, ELEMENTS).name(label);
     });
 
+    folder.add(r, 'draftLoadout').name('draft loadout');
     Editor.range(folder, r, 'spawnBase', 0, 300, 1, 'spawn base');
     folder.add(r, 'godMode').name('god mode');
   }

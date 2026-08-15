@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
+import { Loadout } from '../src/run/Loadout.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
@@ -430,6 +431,35 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.equal(mods.passiveLevel('focus'), 0);
   assert.ok(PASSIVES.swift.max === 3 && PASSIVES.reroll.name.length > 0);
   console.log('ok  modifiers');
+}
+
+/* ---- loadout: draft starts with one seat, acquire fills forward ---- */
+{
+  const saved = settings.run.draftLoadout;
+  settings.run.draftLoadout = true;
+  const loadout = new Loadout();
+  loadout.reset();
+  assert.equal(loadout.elementAt(0), settings.run.loadout[0], 'loadout: draft keeps seat 0');
+  assert.equal(loadout.equippedList().length, 1, 'loadout: draft empties the rest');
+  assert.ok(loadout.hasEmpty());
+  assert.equal(loadout.levelOf(settings.run.loadout[0]), 1, 'loadout: starter is level 1');
+
+  assert.equal(loadout.acquire('snare'), 1, 'loadout: acquire fills the first gap');
+  assert.equal(loadout.acquire('snare'), -1, 'loadout: no duplicates');
+  assert.ok(loadout.has('snare') && loadout.levelOf('snare') === 1);
+
+  for (let n = 0; n < settings.upgrades.skillLevelMax - 1; n++) {
+    assert.ok(loadout.upgrade('snare'), `loadout: upgrade ${n + 2} accepted`);
+  }
+  assert.ok(!loadout.upgrade('snare'), 'loadout: cap at skillLevelMax');
+  assert.ok(loadout.isMaxed('snare'));
+
+  settings.run.draftLoadout = false;
+  loadout.reset();
+  assert.equal(loadout.equippedList().length, 6, 'loadout: full mode copies all six');
+  assert.ok(!loadout.hasEmpty());
+  settings.run.draftLoadout = saved;
+  console.log('ok  loadout');
 }
 
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
