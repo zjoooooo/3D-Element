@@ -245,6 +245,41 @@ export const settings = {
     eliteAt: [0.4, 0.75] // tide progress marks the elites spawn at
   },
 
+  /** Elemental marks and the sheng reactions they detonate into (spec §4.6). */
+  marks: {
+    duration: 8, // seconds a mark clings
+    reactionMult: 1.5, // detonation = triggering hit × this (spec anchor 5)
+    assistSplash: { radius: 1.5, share: 0.5 }, // 助燃 木→火: splash around the victim
+    sinterGems: 1, // 烧结 火→土: bonus green gems
+    dewSlow: { radius: 2, factor: 0.4, duration: 1.5 }, // 凝露 金→水
+    nourishHeal: 2 // 滋养 水→木
+  },
+
+  /** Build-wide auras from the loadout's wuxing spread (spec §4.8). */
+  resonance: {
+    threshold: 2, // same-wuxing actives needed
+    metalAdvantage: 1.35, // replaces matchup.advantage while metal resonates
+    woodKillHeal: 1, // hp per kill
+    waterSlowDur: 1.5, // slow duration ×
+    fireDot: 1.3, // fire-wuxing dot damage ×
+    earthKnockback: 1.5, // shove ×
+    cycleReaction: 1.5 // 周天: reaction damage × (dormant until earth skills land)
+  },
+
+  /** Sheng-pair fusion (spec §4.7; composite-cast placeholder until M6). */
+  fusion: {
+    minLevel: 4, // both parents at Lv4+ unlock the gold card
+    budget: 1.2, // each parent's damage × this when cast fused
+    levelMult: 0.25, // + per fusion level past 1
+    maxLevel: 3
+  },
+
+  /** 相生轮转: chain a generating pair within the window (spec §4.8). */
+  sequence: {
+    window: 4, // seconds after cast A that cast B still counts
+    refund: 0.5 // B's cooldown × this
+  },
+
   /**
    * The growth loop's own numbers (spec §4.5 / anchors 4). The modifier layer
    * multiplies these onto the base values above — upgrades never write into
@@ -297,7 +332,13 @@ export const settings = {
     fireball: { kind: 'self' }, // FireballAbility already resolves its own hits
     // 相克 lookup into TideSchedule's BEATS: which wuxing index each skill casts as.
     wuxingOf: { ice: 2, glacier: 2, thunder: 1, snare: 1, meteor: 3, fireball: 3, beam: 0 },
-    matchup: { advantage: 1.25, disadvantage: 0.8 } // spec §1 克制/被克
+    matchup: { advantage: 1.25, disadvantage: 0.8 }, // spec §1 克制/被克
+    debuffs: {
+      vuln: { amount: 0.15, duration: 4 }, // 断枝/破土
+      vulnStrong: { amount: 0.25, duration: 4 }, // 熔甲（无暴击系统，降档强易伤）
+      weak: { amount: 0.3, duration: 4 }, // 熄灭：接触/弹道 −30%
+      slowAmp: { mult: 2, duration: 4 } // 淤塞：所受减速翻倍
+    }
   },
 
   /* ------------------------------------------------------------------ */

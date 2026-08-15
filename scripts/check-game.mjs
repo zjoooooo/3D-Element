@@ -1028,6 +1028,20 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  m4 ground');
 }
 
+/* ---- m4 numbers exist and hold their shape ---- */
+{
+  assert.ok(settings.marks.duration > 0 && settings.marks.reactionMult > 1);
+  const d = settings.combat.debuffs;
+  assert.ok(d.vuln.amount > 0 && d.vulnStrong.amount > d.vuln.amount, 'debuffs: 熔甲 outbites 断枝');
+  assert.ok(d.weak.amount > 0 && d.weak.amount < 1);
+  assert.ok(d.slowAmp.mult > 1);
+  assert.ok(settings.resonance.threshold >= 2);
+  assert.ok(settings.resonance.metalAdvantage > settings.combat.matchup.advantage);
+  assert.ok(settings.fusion.minLevel <= settings.upgrades.skillLevelMax, 'fusion: reachable before max');
+  assert.ok(settings.sequence.refund < 1);
+  console.log('ok  m4 numbers');
+}
+
 /* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));
