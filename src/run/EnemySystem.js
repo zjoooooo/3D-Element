@@ -55,6 +55,8 @@ export class EnemySystem {
     this.onDeath = null;
     /** Assigned by whoever wants hit readouts (damage figures). */
     this.onHit = null;
+    /** Assigned by whoever wants ranged fire events (projectile spawns). */
+    this.onFire = null;
   }
 
   spawnAt(x, z, minute, element = 0, behavior = 0, elite = 0) {
@@ -102,6 +104,19 @@ export class EnemySystem {
       const dist = d || 1; // the || 1 guards normalisation; contact uses raw d
       const kind = c[BEHAVIORS[this.behavior[i]]];
       const holding = this.behavior[i] === 1 && d < kind.holdRange; // ranged parks at range, never bites
+
+      // Fire cadence: cools down every tick a ranged enemy is alive, closing
+      // or holding alike, so a spitter that's still walking in doesn't get
+      // stuck with a full wait the instant it arrives. It only pulls the
+      // trigger while holding.
+      if (this.behavior[i] === 1) {
+        this.fireT[i] -= step;
+        if (holding && this.fireT[i] <= 0) {
+          this.fireT[i] = kind.fireEvery;
+          this.onFire?.(this.x[i], this.z[i], (player.x - this.x[i]) / dist, (player.z - this.z[i]) / dist);
+        }
+      }
+
       const v = holding ? 0 : kind.speed * (1 - this.slowed[i]);
       dx = (dx / dist) * v;
       dz = (dz / dist) * v;

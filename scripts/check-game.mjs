@@ -18,6 +18,7 @@ import { UpgradePool } from '../src/run/UpgradePool.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
+import { EnemyProjectiles } from '../src/run/EnemyProjectiles.js';
 import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
@@ -749,6 +750,33 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.equal(hpBefore - enemies.hp[tk], 5, 'behaviours: damageOnce uses the tank radius, not swarm');
 
   console.log('ok  behaviours');
+}
+
+/* ---- enemy projectiles: fly, hit, expire ---- */
+{
+  const shots = new EnemyProjectiles();
+  shots.spawn(-5, 0, 1, 0); // flying +x toward the player at origin
+  let dealt = 0;
+  for (let t = 0; t < 120; t++) dealt += shots.tick(1 / 60, { x: 0, z: 0 });
+  assert.equal(dealt, settings.enemies.projectile.damage, 'projectiles: a straight shot lands once');
+  assert.equal(shots.count, 0, 'projectiles: a landed shot is gone');
+
+  shots.spawn(0, 0, 0, 1); // flying away — must expire by lifetime
+  for (let t = 0; t < 60 * settings.enemies.projectile.life + 5; t++) {
+    shots.tick(1 / 60, { x: 99, z: 99 });
+  }
+  assert.equal(shots.count, 0, 'projectiles: lifetime reaps the strays');
+
+  // The ranged enemy pulls the trigger through its hook while holding range.
+  const enemies = new EnemySystem(createRng(4));
+  let fired = 0;
+  enemies.onFire = () => fired++;
+  enemies.spawnAt(5, 0, 0, 0, 1);
+  for (let t = 0; t < 60 * settings.enemies.ranged.fireEvery + 5; t++) {
+    enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
+  }
+  assert.ok(fired >= 1, 'projectiles: a holding spitter fires on its cadence');
+  console.log('ok  enemy projectiles');
 }
 
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
