@@ -235,6 +235,12 @@ export const settings = {
     loadout: ['ice', 'fireball', 'thunder', 'meteor', 'beam', 'glacier']
   },
 
+  /** The five 3-minute tides (spec §7). Order shuffles per run, seeded. */
+  tides: {
+    length: 180, // seconds per tide; 5 tides fill the 15-minute run
+    bias: 0.7 // share of spawns that carry the tide's element
+  },
+
   /**
    * The growth loop's own numbers (spec §4.5 / anchors 4). The modifier layer
    * multiplies these onto the base values above — upgrades never write into

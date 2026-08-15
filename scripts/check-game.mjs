@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS } from '../src/config/settings.js';
+import { TideSchedule, WUXING, BEATS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
 import { UpgradePool } from '../src/run/UpgradePool.js';
@@ -651,6 +652,46 @@ import { RunManager } from '../src/run/RunManager.js';
     'combat: zoneTick damage rides the modifier amp'
   );
   console.log('ok  m2 ledger pins');
+}
+
+/* ---- tides: a seeded permutation driving 3-minute windows ---- */
+{
+  const t1 = new TideSchedule(createRng(9));
+  const t2 = new TideSchedule(createRng(9));
+  assert.deepEqual(t1.order, t2.order, 'tides: same seed, same order');
+  assert.deepEqual([...t1.order].sort(), [0, 1, 2, 3, 4], 'tides: all five, exactly once');
+
+  // Check first tide immediately, before second call overwrites the scratch object.
+  const first = t1.tideAt(0);
+  assert.equal(first.element, t1.order[0]);
+  assert.equal(first.nextElement, t1.order[1], 'tides: next element previews');
+  assert.ok(first.timeLeft > 179 && first.timeLeft <= 180);
+
+  // Check second tide.
+  const second = t1.tideAt(settings.tides.length + 1);
+  assert.equal(second.index, 1, 'tides: 181s sits in tide two');
+
+  // Zero-alloc: tideAt reuses one scratch object (hot-path constraint).
+  assert.equal(t1.tideAt(0), t1.tideAt(50), 'tides: tideAt reuses one scratch object');
+
+  // Check final tide.
+  const last = t1.tideAt(899);
+  assert.equal(last.index, 4, 'tides: the final second is still tide five');
+
+  // Bias: over many rolls the tide element dominates at ~bias share.
+  const rollRng = createRng(21);
+  let tideHits = 0;
+  for (let n = 0; n < 1000; n++) {
+    if (t1.rollElement(rollRng, 0) === t1.order[0]) tideHits++;
+  }
+  assert.ok(tideHits > 600 && tideHits < 800, `tides: bias ≈70% (got ${tideHits}/1000)`);
+
+  // The wuxing cycle: five entries, a permutation, and 金克木 as spot check.
+  assert.equal(BEATS.length, 5);
+  assert.deepEqual([...BEATS].sort(), [0, 1, 2, 3, 4]);
+  assert.equal(BEATS[0], 1, 'wuxing: metal beats wood');
+  assert.equal(WUXING.length, 5);
+  console.log('ok  tide schedule');
 }
 
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
