@@ -181,9 +181,11 @@ Open the URL with `#run` to launch the M1 grey-box: an arena where abilities fac
 
 **Space** dodges; **Enter** restarts after victory or defeat. The loadout — which ability sits in each of the six slots — is live-rebindable in the editor's Run folder without restarting.
 
-The HUD is four numbers: health, elapsed time, kill count, and level. Enemies are capsules and pickups are coloured dots — all placeholder geometry for M1. Real character bodies and a full HUD land in M2+.
+A run drafts its build (M2): with `draft loadout` on (the default, togglable in the editor's Run folder), you start with slot 1 only and earn the rest. Each level-up freezes the whole world — enemies, spells, movement, VFX — and deals up to three cards: press **1/2/3** (or click) to take a new ability, a +25 % damage level for a seated one, or a generic passive (疾行 move speed, 淬体 max health, 凝神 cooldowns, 拾荒 experience, 施法回响 echo casts, 时来运转 rerolls). **4** declines the hand and heals 10 % of max health; 时来运转 adds a reroll button with per-hand charges. Levels 5/10/15 always offer a new ability while a slot is open. Upgrades live in a per-run modifier layer — the editor's numbers in `settings.js` are never written, so the next run and the sandbox always start factory-fresh.
 
-To validate the game loop headless, run `npm run check:game` — nine blocks of logic tests plus the 300-enemy stress gate (measures tick time at full spawn cap; must stay under 2 ms/tick).
+The HUD is four numbers: health, elapsed time, kill count, and level. Enemies are capsules and pickups are coloured dots — placeholder geometry until M5's real dressing.
+
+To validate the game loop headless, run `npm run check:game` — thirteen blocks of logic tests plus the 300-enemy stress gate (measures tick time at full spawn cap; must stay under 2 ms/tick).
 
 ---
 
