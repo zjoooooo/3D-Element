@@ -22,7 +22,16 @@ export class EnemyRenderer {
     const cap = settings.run.enemyCap;
     const geometry = new CapsuleGeometry(0.35, 0.6, 3, 8);
     geometry.translate(0, 0.65, 0);
-    const material = new MeshStandardMaterial({ roughness: 0.8, metalness: 0.05 });
+    // A smoulder under the tint: the arena is night-dark and a matte capsule
+    // simply vanishes into the floor. Threats read warm (spec §5.7's brightness
+    // hierarchy, grey-box edition) — instance colours only multiply the diffuse,
+    // so the emissive stays uniform across elements.
+    const material = new MeshStandardMaterial({
+      roughness: 0.8,
+      metalness: 0.05,
+      emissive: 0x94261a,
+      emissiveIntensity: 0.5
+    });
 
     this.mesh = new InstancedMesh(geometry, material, cap);
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);

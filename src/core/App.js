@@ -22,6 +22,7 @@ import { PlayerState } from '../run/PlayerState.js';
 import { RunManager } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
+import { ThreatArrows } from '../run/ThreatArrows.js';
 import { getColor } from '../utils/color.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
@@ -174,6 +175,9 @@ export class App {
       // reads as "no damage" against enemies that carry no health bar.
       this.damageNumbers = new DamageNumbers(canvas, this.camera);
       this.enemySystem.onHit = (x, z, amount) => this.damageNumbers.spawn(x, z, amount);
+      // Enemies spawn outside the frame by design; the edge arrows say from
+      // where, so a pack never simply materialises at the screen edge.
+      this.threatArrows = new ThreatArrows(canvas, this.camera);
       // A death gets a small grey pop on top of RunManager's gem/kill wiring —
       // pure look, layered over the callback it already installed. The real
       // per-element shatter is M3's job.
@@ -563,6 +567,7 @@ export class App {
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
+      this.threatArrows.update(this.enemySystem, this.character.position);
       this.pickups.sync();
       // Taking a bite flashes the screen red — the bar alone is easy to miss
       // mid-fight. Restart raises hp, which correctly stays silent here.
@@ -618,6 +623,7 @@ export class App {
     if (this.runMode) {
       this.runHud.dispose();
       this.damageNumbers.dispose();
+      this.threatArrows.dispose();
       for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
       this.scene.remove(this.pickups.points);

@@ -618,3 +618,24 @@ body {
   background: linear-gradient(180deg, #ff5f52, #d92c20);
   transition: width 0.15s ease;
 }
+
+/* Edge arrows pointing at off-screen enemies — one per direction sector. */
+.threat-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 28;
+}
+
+.threat-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 14px solid #ff4433;
+  filter: drop-shadow(0 0 6px rgba(255, 68, 51, 0.55));
+  will-change: transform, opacity;
+}
