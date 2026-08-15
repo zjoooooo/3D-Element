@@ -221,6 +221,7 @@ export const settings = {
     gemBase: 1, // green gem value at minute 0
     gemPerMinute: 0.12, // green gems appreciate as the run ages
     magnetRadius: 2, // metres gems fly to the player from
+    gemBlueMagnet: 999, // elite gems fly from anywhere（spec 全场吸附）
     playerHp: 100,
     iframes: 0.5, // seconds of invulnerability after a hit
     dodgeDistance: 3, // metres the spacebar dash covers
@@ -238,7 +239,8 @@ export const settings = {
   /** The five 3-minute tides (spec §7). Order shuffles per run, seeded. */
   tides: {
     length: 180, // seconds per tide; 5 tides fill the 15-minute run
-    bias: 0.7 // share of spawns that carry the tide's element
+    bias: 0.7, // share of spawns that carry the tide's element
+    goldRain: { count: 30, value: 5, radius: 6 } // tide-end gem shower
   },
 
   /**
@@ -268,8 +270,8 @@ export const settings = {
     ranged: { speed: 2.4, radius: 0.5, contactDamage: 6, hpMult: 2, mass: 0.8, holdRange: 8, fireEvery: 2.4 },
     tank: { speed: 1.4, radius: 0.7, contactDamage: 20, hpMult: 6, mass: 4 },
     projectile: { speed: 7, radius: 0.3, damage: 12, life: 3 },
-    // gemValue lands in Task 6 beside its reader (PickupSystem.dropAt kind 1).
-    elites: { hpMult: 40, scale: 1.6, damageMult: 1.5 },
+    // gemValue: xp a blue gem (kind 1) carries; its magnet is settings.run.gemBlueMagnet.
+    elites: { hpMult: 40, scale: 1.6, damageMult: 1.5, gemValue: 15 },
     separation: 1.1, // metres of personal space the grid push maintains
     knockback: 4, // impulse metres/second per hit
     knockbackDecay: 6 // s⁻¹ exponential decay on that impulse

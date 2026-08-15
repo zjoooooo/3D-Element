@@ -797,6 +797,38 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  elites');
 }
 
+/* ---- gem tiers: blue flies far, gold rains, shards call back ---- */
+{
+  const pickups = new PickupSystem();
+
+  pickups.dropAt(30, 0, 0, 1); // a blue gem far outside the normal magnet
+  for (let t = 0; t < 60 * 6; t++) pickups.tick(1 / 60, { x: 0, z: 0 });
+  assert.equal(pickups.count, 0, 'gems: blue magnets from across the arena');
+  assert.ok(
+    Math.abs(pickups.xp - settings.enemies.elites.gemValue) < 1e-6,
+    'gems: blue carries the elite value'
+  );
+
+  pickups.clear();
+  pickups.rainAt(0, 0, createRng(8));
+  assert.equal(pickups.count, settings.tides.goldRain.count, 'gems: the rain drops its count');
+  let total = 0;
+  for (let i = 0; i < pickups.count; i++) total += pickups.value[i];
+  assert.ok(
+    Math.abs(total - settings.tides.goldRain.count * settings.tides.goldRain.value) < 1e-6,
+    'gems: every raindrop is a gold value'
+  );
+
+  pickups.clear();
+  let shardElement = null;
+  pickups.onShard = (element) => (shardElement = element);
+  pickups.dropShard(0.3, 0, 4);
+  pickups.tick(1 / 60, { x: 0, z: 0 });
+  assert.equal(shardElement, 4, 'gems: a shard reports its element, not xp');
+  assert.equal(pickups.xp, 0, 'gems: shards carry no xp');
+  console.log('ok  gem tiers');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));
