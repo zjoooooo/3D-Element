@@ -1,6 +1,6 @@
 import {
   CapsuleGeometry, Color, DynamicDrawUsage, InstancedBufferAttribute,
-  InstancedMesh, MeshStandardMaterial, Object3D, RingGeometry, MeshBasicMaterial
+  InstancedMesh, Mesh, MeshStandardMaterial, Object3D, RingGeometry, MeshBasicMaterial
 } from 'three';
 import { settings } from '../config/settings.js';
 import { LAYER } from '../core/Layers.js';
@@ -57,6 +57,19 @@ export class EnemyRenderer {
     this.telegraphs.count = 0;
     this.telegraphs.layers.set(LAYER.VFX);
     scene.add(this.telegraphs);
+
+    // The arena's edge, drawn — the roam clamp stops the runner here, and an
+    // invisible wall reads as a bug. A cool band, not a threat red: it is the
+    // field's rim, not something coming for you. Baked at construction; the
+    // real 法阵 arena floor arrives in M5.
+    const rim = settings.run.arenaRadius;
+    this.arenaRing = new Mesh(
+      new RingGeometry(rim - 0.45, rim, 160).rotateX(-Math.PI / 2),
+      new MeshBasicMaterial({ color: 0x6fd0ff, transparent: true, opacity: 0.3, depthWrite: false })
+    );
+    this.arenaRing.position.y = 0.03;
+    this.arenaRing.layers.set(LAYER.VFX);
+    scene.add(this.arenaRing);
   }
 
   /** Draw pending spawn rings; `t` runs 0→1 and scales the ring up. */
@@ -103,5 +116,8 @@ export class EnemyRenderer {
     this.telegraphs.geometry.dispose();
     this.telegraphs.material.dispose();
     this.telegraphs.parent?.remove(this.telegraphs);
+    this.arenaRing.geometry.dispose();
+    this.arenaRing.material.dispose();
+    this.arenaRing.parent?.remove(this.arenaRing);
   }
 }
