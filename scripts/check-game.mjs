@@ -1001,18 +1001,34 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  verdict & shards');
 }
 
-/* ---- stress: a full cap of enemies ticks fast enough headless ---- */
+/* ---- stress: a full cap of enemies (mixed gaits + live shots) ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));
-  for (let n = 0; n < 300; n++) {
-    enemies.spawnAt(Math.cos(n) * 20, Math.sin(n) * 20, 10);
+  const projectiles = new EnemyProjectiles();
+  enemies.onFire = (x, z, dx, dz) => projectiles.spawn(x, z, dx, dz);
+
+  // Same 20m spawn ring as before; behavior is the only thing that changes
+  // per enemy. Ranged bodies land outside their 8m holdRange and close in
+  // over the run, so the mix naturally exercises both the converging and
+  // the holding-and-firing half of their gait — no special-casing needed.
+  const MIX = [[210, 0], [60, 1], [30, 2]]; // swarm / ranged / tank counts
+  let n = 0;
+  for (const [count, behavior] of MIX) {
+    for (let i = 0; i < count; i++, n++) {
+      enemies.spawnAt(Math.cos(n) * 20, Math.sin(n) * 20, 10, 0, behavior);
+    }
   }
+
+  const player = { x: 0, z: 0 }; // a bare position, not PlayerState — nothing here reads godMode
   const t0 = performance.now();
-  for (let t = 0; t < 600; t++) enemies.tick(1 / 60, { x: 0, z: 0 }, 10);
+  for (let t = 0; t < 600; t++) {
+    enemies.tick(1 / 60, player, 10);
+    projectiles.tick(1 / 60, player);
+  }
   const ms = (performance.now() - t0) / 600;
   // 60Hz leaves 16.6ms per frame for everything; the horde may take 2.
   assert.ok(ms < 2, `stress: enemy tick averages ${ms.toFixed(2)}ms at cap (budget 2ms)`);
-  console.log(`ok  stress (${ms.toFixed(2)}ms/tick at 300 enemies)`);
+  console.log(`ok  stress (${ms.toFixed(2)}ms/tick @ 300 (210 swarm/60 ranged/30 tank, shots live))`);
 }
 
 console.log('\nevery game-logic check passed');

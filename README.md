@@ -183,9 +183,13 @@ Open the URL with `#run` to launch the M1 grey-box: an arena where abilities fac
 
 A run drafts its build (M2): with `draft loadout` on (the default, togglable in the editor's Run folder), you start with slot 1 only and earn the rest. Each level-up freezes the whole world — enemies, spells, movement, VFX — and deals up to three cards: press **1/2/3** (or click) to take a new ability, a +25 % damage level for a seated one, or a generic passive (疾行 move speed, 淬体 max health, 凝神 cooldowns, 拾荒 experience, 施法回响 echo casts, 时来运转 rerolls). **4** declines the hand and heals 10 % of max health; 时来运转 adds a reroll button with per-hand charges. Levels 5/10/15 always offer a new ability while a slot is open. Upgrades live in a per-run modifier layer — the editor's numbers in `settings.js` are never written, so the next run and the sandbox always start factory-fresh.
 
+The run rides five three-minute elemental tides (M3): a Fisher–Yates order dealt once per page load, each front leaning 70 % of its spawns toward the tide's own wuxing and closing with a toast and a 30-gem gold rain at your feet. Enemies come in three gaits — 涌兽 swarm in from the start, 吐息者 join at minute 1.5 and hold at 8 m to lob dodgeable red bolts, 磐兽 wade in from minute 3 and barely notice knockback. Two elites spawn per tide, at fixed points in its progress (40 %/75 %), scaled to 40× hp / 1.6× size / 1.5× damage, and drop a blue gem that flies in from anywhere on the field plus a shard locked to their element; picking up a shard opens a hand offering only that wuxing, or — if none exist yet — falls back to the level-up hand's skip-heal. Damage runs through the same wuxing cycle as the passives: an attack lands at 1.25× against the element it beats and 0.8× against the element that beats it. Death or victory opens a verdict screen: survival time, kills, level, the build taken, top three skills by damage dealt, and on death a line naming the killer and which element counters it.
+
+**Shift**+1–6 (or **Shift**+click a loadout badge) arms that seat's autocast — it fires at the nearest enemy off cooldown for a 0.85× damage tax and marks the badge with a blue dot, sitting out while a card hand is open or after death; **Enter** clears it along with the rest of the run state on restart.
+
 The HUD is four numbers: health, elapsed time, kill count, and level. Enemies are capsules and pickups are coloured dots — placeholder geometry until M5's real dressing.
 
-To validate the game loop headless, run `npm run check:game` — thirteen blocks of logic tests plus the 300-enemy stress gate (measures tick time at full spawn cap; must stay under 2 ms/tick).
+To validate the game loop headless, run `npm run check:game` — twenty-two blocks of logic tests plus the mixed-horde stress gate (measures tick time at the 300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
 
 ---
 
