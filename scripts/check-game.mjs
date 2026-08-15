@@ -15,6 +15,7 @@ import { TideSchedule, WUXING, BEATS, FEEDS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
 import { UpgradePool } from '../src/run/UpgradePool.js';
+import { FUSIONS, fusionId, isFusionId, fusionParents } from '../src/run/fusions.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
@@ -513,7 +514,12 @@ import { sequenceRefund } from '../src/run/sequence.js';
   const milestone = m.pool.draw(settings.upgrades.milestones[0]);
   assert.ok(milestone.some((c) => c.kind === 'new'), 'pool: milestone forces a new active');
 
-  // Exhaustion: everything maxed and seated → empty hand (skip-heal path).
+  // Exhaustion: everything maxed and seated leaves nothing generic to offer.
+  // M4: this particular six (ice/thunder/meteor/beam/snare/glacier, all Lv5)
+  // is webbed with ripe sheng pairs, and a ripe fusion is exactly the escape
+  // hatch this dead end exists for — so the hand isn't truly empty, it holds
+  // only the one guaranteed gold card (skip-heal only applies with none of
+  // those either).
   const x = make(41);
   for (const element of ELEMENTS) x.loadout.acquire(element);
   for (const element of x.loadout.equippedList()) {
@@ -522,7 +528,9 @@ import { sequenceRefund } from '../src/run/sequence.js';
   for (const id of Object.keys(PASSIVES)) {
     while (x.mods.bumpPassive(id)) { /* to max */ }
   }
-  assert.equal(x.pool.draw(20).length, 0, 'pool: a full build draws nothing');
+  const exhausted = x.pool.draw(20);
+  assert.equal(exhausted.length, 1, 'pool: a full build offers only its ripe fusion');
+  assert.equal(exhausted[0].kind, 'fusion', 'pool: and nothing but the fusion card');
   settings.run.draftLoadout = saved;
   console.log('ok  upgrade pool');
 }
@@ -1321,6 +1329,44 @@ import { sequenceRefund } from '../src/run/sequence.js';
   assert.ok(!sequenceRefund(3, 10, 1, 12), 'sequence: the cycle has direction');
   assert.ok(!sequenceRefund(-1, 0, 3, 1), 'sequence: no chain from nothing');
   console.log('ok  sequence chain');
+}
+
+/* ---- fusion: eligibility, the merge, the gold card ---- */
+{
+  assert.equal(Object.keys(FUSIONS).length, 5, 'fusion: five pair spells');
+  const loadout = new Loadout();
+  settings.run.draftLoadout = false;
+  loadout.reset(); // all six seated at Lv1
+  assert.equal(loadout.eligibleFusions().length, 0, 'fusion: Lv1 pairs are not ripe');
+
+  // Ripen ice(水) + thunder(木): 水生木 → 回春雷泽.
+  for (let n = 0; n < settings.fusion.minLevel - 1; n++) {
+    loadout.upgrade('ice');
+    loadout.upgrade('thunder');
+  }
+  const eligible = loadout.eligibleFusions();
+  assert.ok(
+    eligible.some((f) => f.a === 'ice' && f.b === 'thunder' && f.name === '回春雷泽'),
+    'fusion: a ripe sheng pair surfaces'
+  );
+
+  // The pool guarantees a gold card while one is ripe.
+  const pool = new UpgradePool(createRng(7), loadout, new Modifiers());
+  const hand = pool.draw(8);
+  assert.ok(hand.some((c) => c.kind === 'fusion'), 'fusion: the gold card is dealt');
+
+  // Fusing merges and frees a seat.
+  const id = loadout.fuse('ice', 'thunder');
+  assert.ok(isFusionId(id) && loadout.has(id), 'fusion: the merged seat holds the spell');
+  assert.deepEqual(fusionParents(id), ['ice', 'thunder']);
+  assert.ok(loadout.hasEmpty(), 'fusion: the second seat is freed');
+  assert.equal(loadout.levelOf(id), 1);
+  assert.ok(!loadout.has('ice') && !loadout.has('thunder'), 'fusion: parents leave the board');
+  assert.ok(loadout.upgrade(id) && loadout.levelOf(id) === 2, 'fusion: the spell levels');
+  for (let n = 0; n < 5; n++) loadout.upgrade(id);
+  assert.equal(loadout.levelOf(id), settings.fusion.maxLevel, 'fusion: capped at its own max');
+  settings.run.draftLoadout = true;
+  console.log('ok  fusion core');
 }
 
 console.log('\nevery game-logic check passed');
