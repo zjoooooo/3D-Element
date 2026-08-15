@@ -277,32 +277,43 @@ export class EnemySystem {
   }
 
   /**
-   * The wuxing half of a hit (spec §4.6): matchup multiplier, the debuff
-   * channel an overcoming hit inflicts, and mark resolution — or, for a hit
-   * cast with no wuxing at all, the one thing it can still profit from: a
-   * lingering vuln. Matchup and vuln deliberately never both apply to the
-   * same hit: elemental swings already get their tax/reward from the
-   * matchup table, so vuln is the reward channel for everything else
-   * (splash, 助燃 follow-ups) instead of stacking on top of it.
-   * Shared by damage() and damageOnce() so neither hit loop forks this.
+   * The wuxing half of a hit (spec §4.6): matchup multiplier, live vuln
+   * amplification, the debuff channel an overcoming hit inflicts, and mark
+   * resolution. Shared by damage() and damageOnce() so neither hit loop
+   * forks this.
+   *
+   * Order is load-bearing. Matchup first. Then any *live* vuln amplifies
+   * this hit's dealt — any wuxing, including none at all, so splash/助燃
+   * follow-ups cast with no wuxing still profit from a vuln an earlier hit
+   * left behind. Only THEN does an overcoming hit apply its own debuff
+   * channel, so the hit that freshly applies vuln never amplifies itself
+   * with it. Mark resolution runs last: a detonating hit keeps the dealt
+   * computed above in full — 克制必生效 (controller ruling, spec 锚5) — the
+   * sheng bonus is a separate, additional payoff off the raw pre-matchup
+   * amount, not a replacement for the triggering hit's own damage.
    */
   _applyWux(i, amount, wuxing) {
     let dealt = amount;
+    let overcoming = false;
     if (wuxing >= 0) {
       const target = this.element[i];
       if (BEATS[wuxing] === target) {
         dealt *= this._advantage();
-        this._applyDebuff(i, wuxing);
+        overcoming = true;
       } else if (BEATS[target] === wuxing) {
         dealt *= this._disadvantage();
       }
+    }
+    if (this.vulnT[i] > 0) dealt *= 1 + this.vulnAmt[i]; // 易伤/熔甲: live vuln bites every hit
+    if (overcoming) this._applyDebuff(i, wuxing);
 
+    if (wuxing >= 0) {
       const old = this.mark[i];
       if (old !== 255 && old !== wuxing && FEEDS[old] === wuxing) {
-        // Detonate: the sheng pair is the payoff, so the triggering hit
-        // itself reverts to its raw amount — no stacked matchup bonus.
+        // Detonate: the sheng bonus stacks on top of the triggering hit's
+        // own (already matchup'd + vuln'd) dealt, computed off the raw
+        // pre-matchup amount so it doesn't inherit that multiplier too.
         const bonus = amount * settings.marks.reactionMult * this.tuning.reactionMult;
-        dealt = amount;
         this.onHit?.(this.x[i], this.z[i], bonus);
         this.onReaction?.(old, wuxing, this.x[i], this.z[i], amount);
         this.mark[i] = 255;
@@ -314,8 +325,6 @@ export class EnemySystem {
         this.mark[i] = wuxing;
         this.markT[i] = settings.marks.duration;
       }
-    } else if (this.vulnT[i] > 0) {
-      dealt *= 1 + this.vulnAmt[i];
     }
     this.onHit?.(this.x[i], this.z[i], dealt);
     if ((this.hp[i] -= dealt) <= 0) this._kill(i);
@@ -347,7 +356,9 @@ export class EnemySystem {
       const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
       if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
       // 淤塞: a standing slowAmp doubles this slow's own factor before it merges.
-      const f = this.slowAmpT[i] > 0 ? Math.min(0.9, factor * settings.combat.debuffs.slowAmp.mult) : factor;
+      const f = this.slowAmpT[i] > 0
+        ? Math.min(settings.combat.debuffs.slowAmp.cap, factor * settings.combat.debuffs.slowAmp.mult)
+        : factor;
       this.slowed[i] = Math.max(this.slowed[i], f);
       this.slowT[i] = Math.max(this.slowT[i], dur);
     }

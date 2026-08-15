@@ -844,6 +844,8 @@ import { RunManager } from '../src/run/RunManager.js';
   enemies.hp[wood] = 1000;
   const before = enemies.hp[wood];
   enemies.damage({ x: 0, z: 0 }, 1, 10, 0);
+  // M4: this overcoming hit also sets vuln on `wood` — but a hit never
+  // amplifies the vuln it applies itself, so this one is still the bare ×1.25.
   assert.ok(
     Math.abs(before - enemies.hp[wood] - 10 * settings.combat.matchup.advantage) < 1e-6,
     'matchup: advantage lands ×1.25'
@@ -852,14 +854,24 @@ import { RunManager } from '../src/run/RunManager.js';
   // wood(1) beats earth(4), so earth attacking wood pays the tax.
   const before2 = enemies.hp[wood];
   enemies.damage({ x: 0, z: 0 }, 1, 10, 4);
+  // M4: the vuln the metal hit above left live now amplifies every hit after
+  // it, matchup or not — ×0.8 disadvantage, then ×1.15 vuln on top.
+  // Tolerance widened from 1e-6: vulnAmt and hp are both Float32Array, and
+  // the compounded matchup×vuln multiply doesn't survive double precision.
   assert.ok(
-    Math.abs(before2 - enemies.hp[wood] - 10 * settings.combat.matchup.disadvantage) < 1e-6,
-    'matchup: disadvantage pays ×0.8'
+    Math.abs(
+      before2 - enemies.hp[wood] - 10 * settings.combat.matchup.disadvantage * (1 + settings.combat.debuffs.vuln.amount)
+    ) < 1e-3,
+    'matchup: disadvantage pays ×0.8, live vuln still amplifies'
   );
-  // Neutral pairs pass through untouched.
+  // Neutral pairs pass through matchup untouched — but that same live vuln
+  // keeps biting (M4): ×1 matchup, then ×1.15 vuln.
   const before3 = enemies.hp[wood];
   enemies.damage({ x: 0, z: 0 }, 1, 10, 2); // water vs wood: water feeds wood in 相生 but no 克 — neutral here
-  assert.ok(Math.abs(before3 - enemies.hp[wood] - 10) < 1e-6, 'matchup: neutral is ×1');
+  assert.ok(
+    Math.abs(before3 - enemies.hp[wood] - 10 * (1 + settings.combat.debuffs.vuln.amount)) < 1e-3,
+    'matchup: neutral is ×1, live vuln still amplifies'
+  );
 
   // CombatSystem books what each element dealt.
   const combatStats = new CombatSystem(
@@ -1056,8 +1068,11 @@ import { RunManager } from '../src/run/RunManager.js';
   const hpBefore = enemies.hp[i];
   enemies.damage({ x: 0, z: 0 }, 1, 10, 3);
   assert.deepEqual(reacted?.slice(0, 2), [1, 3], 'marks: 木→火 detonates 助燃');
-  const expected = 10 + 10 * settings.marks.reactionMult; // hit + detonation
-  assert.ok(Math.abs(hpBefore - enemies.hp[i] - expected) < 1e-6, 'marks: detonation adds ×1.5');
+  // M4 controller ruling (spec 锚5, 克制必生效): the triggering hit keeps its
+  // own matchup — fire(3) beats this metal(0) enemy — the sheng bonus stacks
+  // on top instead of replacing it: 10×1.25 克制 + 10×1.5 引爆.
+  const expected = 10 * settings.combat.matchup.advantage + 10 * settings.marks.reactionMult; // hit + detonation
+  assert.ok(Math.abs(hpBefore - enemies.hp[i] - expected) < 1e-6, 'marks: detonation stacks on the hit\'s own matchup');
   assert.equal(enemies.mark[i], 255, 'marks: detonation consumes the mark');
 
   // Non-generating pair overwrites instead.

@@ -337,7 +337,7 @@ export const settings = {
       vuln: { amount: 0.15, duration: 4 }, // 断枝/破土
       vulnStrong: { amount: 0.25, duration: 4 }, // 熔甲（无暴击系统，降档强易伤）
       weak: { amount: 0.3, duration: 4 }, // 熄灭：接触/弹道 −30%
-      slowAmp: { mult: 2, duration: 4 } // 淤塞：所受减速翻倍
+      slowAmp: { mult: 2, duration: 4, cap: 0.9 } // 淤塞：所受减速翻倍; cap: total slow ceiling
     }
   },
 
