@@ -503,6 +503,22 @@ export class App {
     this.aim.quickCast();
   }
 
+  /**
+   * 相生轮转 (spec §4.8): track the cast chain and refund the cooldown when
+   * this cast follows its generating parent inside the window. Every cast
+   * path — manual, echo, autocast — must pass through here after writing
+   * its cooldown, or chains silently break (M4 Task 7 review).
+   */
+  _applySequence(element) {
+    const wux = settings.combat.wuxingOf[element] ?? -1;
+    if (sequenceRefund(this._lastCastWux, this._lastCastAt, wux, this.run.elapsed)) {
+      this.cooldowns.set(element, this.cooldowns.get(element) * settings.sequence.refund);
+      this.hud.showToast('相生轮转');
+    }
+    this._lastCastWux = wux;
+    this._lastCastAt = this.run.elapsed;
+  }
+
   _cast(origin, direction, distance) {
     const element = this.element;
     const ability = this.abilities.cast(origin, direction, distance, element);
@@ -513,15 +529,7 @@ export class App {
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
-    if (this.runMode) {
-      const wux = settings.combat.wuxingOf[element] ?? -1;
-      if (sequenceRefund(this._lastCastWux, this._lastCastAt, wux, this.run.elapsed)) {
-        this.cooldowns.set(element, this.cooldowns.get(element) * settings.sequence.refund);
-        this.hud.showToast('相生轮转');
-      }
-      this._lastCastWux = wux;
-      this._lastCastAt = this.run.elapsed;
-    }
+    if (this.runMode) this._applySequence(element);
 
     // 施法回响: a run-mode cast has a chance to fire itself once more.
     if (this.runMode && !this._echoing && this.runRng() < this.modifiers.echoChance()) {
@@ -579,6 +587,10 @@ export class App {
     const ability = this.abilities.cast(origin, direction, distance, element);
     if (ability) ability.autocast = true;
     this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
+    // Autocast is only ever invoked from the runMode-gated loop in frame(),
+    // so this.run always exists here — no `if (this.runMode)` gate needed
+    // (same assumption _cast's cdMult/echo lines below already make).
+    this._applySequence(element);
 
     // 施法回响 applies here exactly as it does to a manual cast (spec: any
     // cast can proc it); see `_cast`'s own copy of this same roll.
