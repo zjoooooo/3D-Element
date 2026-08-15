@@ -59,24 +59,29 @@ export class CombatSystem {
 
       switch (c.kind) {
         case 'sweep': {
-          if (ability.phase !== 'travel') break;
           // The front's position only advances on the render frame, so at low
           // fps (or with the live speed/timeScale sliders up) it can jump past
-          // `width` between two observations and a bolt visually crossing an
+          // `width` between two observations and a bolt visibly crossing an
           // enemy deals nothing. Sample the whole segment travelled since the
           // last look instead of the point where the front happens to be —
-          // damageOnce's per-cast dedup makes overlapping samples free.
+          // damageOnce's per-cast dedup makes overlapping samples free. The
+          // phase can also flip to impact between looks, so the landing flushes
+          // whatever tail of the line the travel ticks never got to see.
           const from = this._sweptU.get(castId) ?? 0;
+          const travelling = ability.phase === 'travel';
+          const landed = ability.phase === 'impact' || ability.phase === 'fade';
+          if (!travelling && !(landed && from < 1)) break;
+          const to = travelling ? ability.u : 1;
           const stepU = Math.max(0.01, c.width / ability.length);
           for (let t = from; ; t += stepU) {
-            const u = Math.min(t, ability.u);
+            const u = Math.min(t, to);
             this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * u;
             this.targets.damageOnce(castId, this._p, c.width, c.damage);
-            if (u >= ability.u) break;
+            if (u >= to) break;
           }
-          this._sweptU.set(castId, ability.u);
-          if (c.slowFactor) {
+          this._sweptU.set(castId, to);
+          if (c.slowFactor && travelling) {
             this.targets.slow(ability.position, c.width * 1.5, c.slowFactor, c.slowTime);
           }
           break;

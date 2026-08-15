@@ -47,6 +47,8 @@ export class EnemySystem {
 
     /** Assigned by whoever wants corpses (gems, shards). */
     this.onDeath = null;
+    /** Assigned by whoever wants hit readouts (damage figures). */
+    this.onHit = null;
   }
 
   spawnAt(x, z, minute) {
@@ -179,6 +181,7 @@ export class EnemySystem {
       const kb = settings.enemies.knockback / settings.enemies.swarm.mass;
       this.kbX[i] += (dx / d) * kb;
       this.kbZ[i] += (dz / d) * kb;
+      this.onHit?.(this.x[i], this.z[i], amount);
       if ((this.hp[i] -= amount) <= 0) this._kill(i);
     }
     return hits;
@@ -194,6 +197,7 @@ export class EnemySystem {
       seen.add(this.id[i]);
       hits++;
       this.flash[i] = 1;
+      this.onHit?.(this.x[i], this.z[i], amount);
       if ((this.hp[i] -= amount) <= 0) this._kill(i);
     }
     // ponytail: memory grows one Set per cast; RunManager clears finished casts.

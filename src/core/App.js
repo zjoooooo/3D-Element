@@ -21,6 +21,7 @@ import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
 import { RunManager } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
+import { DamageNumbers } from '../run/DamageNumbers.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
 import { CharacterController } from '../animation/CharacterController.js';
@@ -164,6 +165,10 @@ export class App {
         rng
       });
       this.runHud = new RunHud();
+      // Hits throw a pooled damage figure — without a number, a two-hit kill
+      // reads as "no damage" against enemies that carry no health bar.
+      this.damageNumbers = new DamageNumbers(canvas, this.camera);
+      this.enemySystem.onHit = (x, z, amount) => this.damageNumbers.spawn(x, z, amount);
       // Frame-loop scratch: the verdict box and the tick closure are minted
       // once here so advance() never allocates per frame.
       this._verdict = { value: 'playing' };
@@ -560,6 +565,7 @@ export class App {
     this.stop();
     if (this.runMode) {
       this.runHud.dispose();
+      this.damageNumbers.dispose();
       this.enemyRenderer.dispose();
       this.scene.remove(this.pickups.points);
     }

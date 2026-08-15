@@ -152,6 +152,19 @@ import { RunManager } from '../src/run/RunManager.js';
   assert.equal(deaths, 1);
   assert.equal(enemies.count, 0);
 
+  // Hit readouts: every landed hit reports once (damage figures hang off
+  // this), and a dedup'd repeat stays silent.
+  enemies.clear();
+  enemies.onHit = null;
+  const hitLog = [];
+  enemies.onHit = (x, z, amount) => hitLog.push(amount);
+  enemies.spawnAt(0, 0, 0);
+  enemies.damage({ x: 0, z: 0 }, 1, 3);
+  enemies.damageOnce(41, { x: 0, z: 0 }, 1, 3);
+  enemies.damageOnce(41, { x: 0, z: 0 }, 1, 3); // same cast — no hit, no figure
+  assert.deepEqual(hitLog, [3, 3], 'enemies: each landed hit reports exactly once');
+  enemies.onHit = null;
+
   // Cap: the 301st spawn is refused.
   enemies.clear();
   for (let n = 0; n < 300; n++) assert.ok(enemies.spawnAt(n * 0.1, 0, 0) >= 0);
@@ -201,6 +214,23 @@ import { RunManager } from '../src/run/RunManager.js';
       seen.some((x) => Math.abs(x - 4) <= width),
       'combat: a sweep samples the segment it travelled, not just the front'
     );
+
+    // The phase can flip to impact between looks; the landing must flush the
+    // unseen tail of the line, and flush it once.
+    seen.length = 0;
+    const landedEarly = {
+      element: 'ice', phase: 'impact', age: 0.4, impactTime: 0.02,
+      position: { x: 8, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 8, u: 1 // combat never saw it travel
+    };
+    seg.tick(1 / 60, [landedEarly]);
+    assert.ok(
+      seen.some((x) => Math.abs(x - 7.9) <= width),
+      'combat: landing flushes the tail of the sweep'
+    );
+    const flushed = seen.length;
+    seg.tick(1 / 60, [landedEarly]);
+    assert.equal(seen.length, flushed, 'combat: the tail flush happens once');
   }
 
   // A holding beam ticks dps along the whole line, budgeted per tick.
