@@ -29,10 +29,25 @@ export class CombatSystem {
     this._detonated = new Set(); // castIds whose burst already went off
     this._sweptU = new Map(); // per-cast u the sweep has been sampled up to
     this._p = { x: 0, z: 0 }; // scratch point, reused — no allocs per tick
+    /** This run's per-skill damage ledger (spec §1 results screen top-3).
+     * Nominal amt×hits, booked pre-matchup — the wuxing tax/bonus folds inside
+     * EnemySystem per enemy, so a mixed crowd nets out; the ledger only needs
+     * to rank skills against each other, not settle the run's exact total. */
+    this.damageDealt = Object.create(null);
+  }
+
+  /** Wipe the damage ledger — a fresh run starts counting from zero. */
+  resetStats() {
+    this.damageDealt = Object.create(null);
   }
 
   _amp(element) {
     return this.mods ? this.mods.damageMult(element) : 1;
+  }
+
+  /** Book a landed hit's nominal damage against its element, if it landed. */
+  _book(element, amount, hits) {
+    if (hits) this.damageDealt[element] = (this.damageDealt[element] ?? 0) + amount * hits;
   }
 
   _castKey(ability) {
@@ -62,6 +77,7 @@ export class CombatSystem {
       const c = settings.combat[ability.element];
       if (!c || c.kind === 'self') continue;
       const castId = this._castKey(ability);
+      const wux = settings.combat.wuxingOf[ability.element] ?? -1;
 
       switch (c.kind) {
         case 'sweep': {
@@ -79,11 +95,12 @@ export class CombatSystem {
           if (!travelling && !(landed && from < 1)) break;
           const to = travelling ? ability.u : 1;
           const stepU = Math.max(0.01, c.width / ability.length);
+          const amt = c.damage * this._amp(ability.element);
           for (let t = from; ; t += stepU) {
             const u = Math.min(t, to);
             this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * u;
-            this.targets.damageOnce(castId, this._p, c.width, c.damage * this._amp(ability.element));
+            this._book(ability.element, amt, this.targets.damageOnce(castId, this._p, c.width, amt, wux));
             if (u >= to) break;
           }
           this._sweptU.set(castId, to);
@@ -105,7 +122,8 @@ export class CombatSystem {
           ) {
             this._detonated.add(castId);
             const radius = c.radius ?? settings[ability.element].zoneRadius ?? 2;
-            this.targets.damage(ability.position, radius, c.damage * this._amp(ability.element));
+            const amt = c.damage * this._amp(ability.element);
+            this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
             if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           }
           // Meteor's lava keeps burning through the fade, but the lava stops
@@ -119,7 +137,8 @@ export class CombatSystem {
             ability.impactTime + ability.fadeTime < c.burnTime
           ) {
             if (this._dot(castId, step, c.burnDps * this._amp(ability.element))) {
-              this.targets.damage(ability.position, c.radius, this._take(castId));
+              const amt = this._take(castId);
+              this._book(ability.element, amt, this.targets.damage(ability.position, c.radius, amt, wux));
             }
           }
           break;
@@ -128,11 +147,12 @@ export class CombatSystem {
         case 'lineTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const perSecond = (c.dps * this._amp(ability.element)) / LINE_SAMPLES;
+          const amt = perSecond * step;
           for (let s = 1; s <= LINE_SAMPLES; s++) {
             const t = (s / LINE_SAMPLES) * ability.u;
             this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * t;
-            this.targets.damage(this._p, c.width, perSecond * step);
+            this._book(ability.element, amt, this.targets.damage(this._p, c.width, amt, wux));
           }
           break;
         }
@@ -140,7 +160,8 @@ export class CombatSystem {
         case 'zoneTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const radius = settings[ability.element].zoneRadius ?? 2;
-          this.targets.damage(ability.position, radius, c.dps * this._amp(ability.element) * step);
+          const amt = c.dps * this._amp(ability.element) * step;
+          this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
           if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
           break;
         }

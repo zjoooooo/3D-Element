@@ -1,5 +1,6 @@
 // src/run/EnemySystem.js
 import { settings } from '../config/settings.js';
+import { BEATS } from './TideSchedule.js';
 
 /** Behaviour template ids — indexes both `this.behavior[i]` and `settings.enemies`. */
 export const BEHAVIORS = ['swarm', 'ranged', 'tank'];
@@ -202,7 +203,7 @@ export class EnemySystem {
     return false;
   }
 
-  damage(point, radius, amount) {
+  damage(point, radius, amount, wuxing = -1) {
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
@@ -215,13 +216,19 @@ export class EnemySystem {
       const kb = settings.enemies.knockback / kind.mass;
       this.kbX[i] += (dx / d) * kb;
       this.kbZ[i] += (dz / d) * kb;
-      this.onHit?.(this.x[i], this.z[i], amount);
-      if ((this.hp[i] -= amount) <= 0) this._kill(i);
+      let dealt = amount;
+      if (wuxing >= 0) {
+        const target = this.element[i];
+        if (BEATS[wuxing] === target) dealt *= settings.combat.matchup.advantage;
+        else if (BEATS[target] === wuxing) dealt *= settings.combat.matchup.disadvantage;
+      }
+      this.onHit?.(this.x[i], this.z[i], dealt);
+      if ((this.hp[i] -= dealt) <= 0) this._kill(i);
     }
     return hits;
   }
 
-  damageOnce(castId, point, radius, amount) {
+  damageOnce(castId, point, radius, amount, wuxing = -1) {
     let seen = this._hitMemory.get(castId);
     if (!seen) this._hitMemory.set(castId, (seen = new Set()));
     let hits = 0;
@@ -232,8 +239,14 @@ export class EnemySystem {
       seen.add(this.id[i]);
       hits++;
       this.flash[i] = 1;
-      this.onHit?.(this.x[i], this.z[i], amount);
-      if ((this.hp[i] -= amount) <= 0) this._kill(i);
+      let dealt = amount;
+      if (wuxing >= 0) {
+        const target = this.element[i];
+        if (BEATS[wuxing] === target) dealt *= settings.combat.matchup.advantage;
+        else if (BEATS[target] === wuxing) dealt *= settings.combat.matchup.disadvantage;
+      }
+      this.onHit?.(this.x[i], this.z[i], dealt);
+      if ((this.hp[i] -= dealt) <= 0) this._kill(i);
     }
     // ponytail: memory grows one Set per cast; RunManager clears finished casts.
     return hits;

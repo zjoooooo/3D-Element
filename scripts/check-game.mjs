@@ -829,6 +829,50 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  gem tiers');
 }
 
+/* ---- matchups: the cycle taxes and rewards through the facade ---- */
+{
+  const enemies = new EnemySystem(createRng(12));
+  // metal(0) beats wood(1): a metal hit on a wood enemy lands ×1.25.
+  const wood = enemies.spawnAt(0, 0, 0, 1);
+  // Default spawn hp (20) can't survive the advantage + disadvantage probes
+  // below (12.5 + 8 = 20.5) before the neutral one even runs — top it up so
+  // three sequential hits on the same enemy is actually what gets measured.
+  enemies.hp[wood] = 1000;
+  const before = enemies.hp[wood];
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 0);
+  assert.ok(
+    Math.abs(before - enemies.hp[wood] - 10 * settings.combat.matchup.advantage) < 1e-6,
+    'matchup: advantage lands ×1.25'
+  );
+  // wood beats earth(4): an earth hit on a wood enemy is the disadvantaged one? No —
+  // wood(1) beats earth(4), so earth attacking wood pays the tax.
+  const before2 = enemies.hp[wood];
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 4);
+  assert.ok(
+    Math.abs(before2 - enemies.hp[wood] - 10 * settings.combat.matchup.disadvantage) < 1e-6,
+    'matchup: disadvantage pays ×0.8'
+  );
+  // Neutral pairs pass through untouched.
+  const before3 = enemies.hp[wood];
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 2); // water vs wood: water feeds wood in 相生 but no 克 — neutral here
+  assert.ok(Math.abs(before3 - enemies.hp[wood] - 10) < 1e-6, 'matchup: neutral is ×1');
+
+  // CombatSystem books what each element dealt.
+  const combatStats = new CombatSystem(
+    { damage: () => 1, damageOnce: () => 2, slow: () => {} },
+    null
+  );
+  const sweep = {
+    element: 'ice', phase: 'travel', u: 0.5, position: { x: 1, z: 0 },
+    origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 4
+  };
+  combatStats.tick(1 / 60, [sweep]);
+  assert.ok(combatStats.damageDealt.ice > 0, 'stats: the ledger books ice damage');
+  combatStats.resetStats();
+  assert.ok(!combatStats.damageDealt.ice, 'stats: reset wipes the ledger');
+  console.log('ok  matchups & stats');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

@@ -290,7 +290,10 @@ export const settings = {
     // slowTime: seconds each tick's slow lingers on an enemy
     snare: { kind: 'zoneTick', dps: 28, slowFactor: 0.45, slowTime: 0.4 },
     glacier: { kind: 'burst', damage: 70, slowFactor: 0.6, slowTime: 2.5 },
-    fireball: { kind: 'self' } // FireballAbility already resolves its own hits
+    fireball: { kind: 'self' }, // FireballAbility already resolves its own hits
+    // 相克 lookup into TideSchedule's BEATS: which wuxing index each skill casts as.
+    wuxingOf: { ice: 2, glacier: 2, thunder: 1, snare: 1, meteor: 3, fireball: 3, beam: 0 },
+    matchup: { advantage: 1.25, disadvantage: 0.8 } // spec §1 克制/被克
   },
 
   /* ------------------------------------------------------------------ */

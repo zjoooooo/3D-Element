@@ -22,18 +22,18 @@ export class Targets {
     return false;
   }
 
-  damage(point, radius, amount) {
+  damage(point, radius, amount, wuxing = -1) {
     let total = 0;
-    for (const p of this._populations) total += p.damage(point, radius, amount);
+    for (const p of this._populations) total += p.damage(point, radius, amount, wuxing);
     return total;
   }
 
-  damageOnce(castId, point, radius, amount) {
+  damageOnce(castId, point, radius, amount, wuxing = -1) {
     let total = 0;
     for (const p of this._populations) {
       total += p.damageOnce
-        ? p.damageOnce(castId, point, radius, amount)
-        : p.damage(point, radius, amount);
+        ? p.damageOnce(castId, point, radius, amount, wuxing)
+        : p.damage(point, radius, amount, wuxing);
     }
     return total;
   }
