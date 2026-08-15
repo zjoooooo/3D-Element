@@ -40,7 +40,7 @@ export class EnemySystem {
     this.kbZ = new Float32Array(cap);
     this.element = new Uint8Array(cap);
     this.behavior = new Uint8Array(cap); // BEHAVIORS index: 0 swarm / 1 ranged / 2 tank
-    this.elite = new Uint8Array(cap); // 0 normal / 1 elite (Task 5 consumes; spawn only marks it)
+    this.elite = new Uint8Array(cap); // 0 normal / 1 elite — scales hp/damage, marks the corpse
     this.fireT = new Float32Array(cap); // ranged fire cooldown
     this.id = new Float64Array(cap);
 
@@ -66,7 +66,7 @@ export class EnemySystem {
     const kind = c[BEHAVIORS[behavior]];
     this.x[i] = this.prevX[i] = x;
     this.z[i] = this.prevZ[i] = z;
-    this.hp[i] = c.hpBase * (1 + c.hpPerMinute * minute) * kind.hpMult;
+    this.hp[i] = c.hpBase * (1 + c.hpPerMinute * minute) * kind.hpMult * (elite ? c.elites.hpMult : 1);
     this.slowed[i] = 0;
     this.slowT[i] = 0;
     this.flash[i] = 0;
@@ -74,7 +74,7 @@ export class EnemySystem {
     this.kbZ[i] = 0;
     this.element[i] = element;
     this.behavior[i] = behavior;
-    this.elite[i] = elite; // ×hpMult stacking lands in Task 5; spawn only marks it
+    this.elite[i] = elite;
     this.fireT[i] = 0;
     this.id[i] = this._nextId++;
     return i;
@@ -137,7 +137,10 @@ export class EnemySystem {
       if ((this.slowT[i] -= step) <= 0) this.slowed[i] = 0;
       this.flash[i] = Math.max(0, this.flash[i] - step * 6);
 
-      if (!holding && d < kind.radius + 0.5) contact = Math.max(contact, kind.contactDamage);
+      if (!holding && d < kind.radius + 0.5) {
+        const dmg = kind.contactDamage * (this.elite[i] ? c.elites.damageMult : 1);
+        contact = Math.max(contact, dmg);
+      }
     }
     return contact;
   }
@@ -264,7 +267,7 @@ export class EnemySystem {
   }
 
   _kill(i) {
-    this.onDeath?.(this.x[i], this.z[i], this.element[i]);
+    this.onDeath?.(this.x[i], this.z[i], this.element[i], this.elite[i]);
     const last = --this.count;
     if (i === last) return;
     for (const a of [

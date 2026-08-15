@@ -779,6 +779,24 @@ import { RunManager } from '../src/run/RunManager.js';
   console.log('ok  enemy projectiles');
 }
 
+/* ---- elites: forty lives and a marked corpse ---- */
+{
+  const enemies = new EnemySystem(createRng(6));
+  const normal = enemies.spawnAt(0, 0, 2, 0, 0, 0);
+  const boss = enemies.spawnAt(5, 5, 2, 0, 0, 1);
+  assert.ok(
+    Math.abs(enemies.hp[boss] / enemies.hp[normal] - settings.enemies.elites.hpMult) < 1e-6,
+    'elites: hp multiplies by the elite factor'
+  );
+  let marked = null;
+  enemies.onDeath = (x, z, element, elite) => (marked = elite);
+  enemies.damage({ x: 0, z: 0 }, 0.5, 1e9); // kills the normal at origin only
+  assert.equal(marked, 0, 'elites: a normal corpse reports elite=0');
+  enemies.damage({ x: 5, z: 5 }, 0.5, 1e9);
+  assert.equal(marked, 1, 'elites: an elite corpse says so');
+  console.log('ok  elites');
+}
+
 /* ---- stress: a full cap of enemies ticks fast enough headless ---- */
 {
   const enemies = new EnemySystem(createRng(3));

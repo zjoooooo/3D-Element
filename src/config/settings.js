@@ -268,6 +268,8 @@ export const settings = {
     ranged: { speed: 2.4, radius: 0.5, contactDamage: 6, hpMult: 2, mass: 0.8, holdRange: 8, fireEvery: 2.4 },
     tank: { speed: 1.4, radius: 0.7, contactDamage: 20, hpMult: 6, mass: 4 },
     projectile: { speed: 7, radius: 0.3, damage: 12, life: 3 },
+    // gemValue lands in Task 6 beside its reader (PickupSystem.dropAt kind 1).
+    elites: { hpMult: 40, scale: 1.6, damageMult: 1.5 },
     separation: 1.1, // metres of personal space the grid push maintains
     knockback: 4, // impulse metres/second per hit
     knockbackDecay: 6 // s⁻¹ exponential decay on that impulse

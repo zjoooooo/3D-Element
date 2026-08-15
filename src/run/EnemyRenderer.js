@@ -95,12 +95,15 @@ export class EnemyRenderer {
       const z = enemies.prevZ[i] + (enemies.z[i] - enemies.prevZ[i]) * alpha;
       // Hit reaction: flash whitens the tint and pops the scale (spec §5.5).
       const pop = 1 + enemies.flash[i] * 0.15;
+      const scale = pop * (enemies.elite[i] ? settings.enemies.elites.scale : 1);
       this._proxy.position.set(x, 0, z);
-      this._proxy.scale.set(pop, pop, pop);
+      this._proxy.scale.set(scale, scale, scale);
       this._proxy.updateMatrix();
       this.mesh.setMatrixAt(i, this._proxy.matrix);
 
       this._color.setHex(ELEMENT_TINTS[enemies.element[i]]);
+      // Elite: brighten toward white first, then the hit flash lerps again on top.
+      if (enemies.elite[i]) this._color.lerp(this._white, 0.35);
       this._color.lerp(this._white, enemies.flash[i]);
       this.mesh.setColorAt(i, this._color);
     }

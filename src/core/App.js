@@ -202,8 +202,8 @@ export class App {
       // pure look, layered over the callback it already installed. The real
       // per-element shatter is M3's job.
       const runDeath = this.enemySystem.onDeath;
-      this.enemySystem.onDeath = (x, z, element) => {
-        runDeath(x, z, element);
+      this.enemySystem.onDeath = (x, z, element, elite) => {
+        runDeath(x, z, element, elite);
         _deathPos.set(x, 0.7, z);
         this.bursts.spawn(BurstMode.AIR, _deathPos, {
           radius: 0.3, endRadius: 1.2, life: 0.35, intensity: 0.55, opacity: 0.65

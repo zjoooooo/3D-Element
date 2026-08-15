@@ -20,7 +20,7 @@ export class RunManager {
     this._spawnDebt = 0;
     this.pendingLevels = 0;
 
-    this.s.enemies.onDeath = (x, z) => {
+    this.s.enemies.onDeath = (x, z, element, elite) => {
       this.kills++;
       this.s.pickups.dropAt(x, z, this.elapsed / 60);
     };
