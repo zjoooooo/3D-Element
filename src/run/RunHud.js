@@ -1,4 +1,5 @@
 import { WUXING_LABEL } from './TideSchedule.js';
+import { t } from '../ui/strings.js';
 
 /**
  * M1's grey readouts: hp, clock, kills, level. The real HUD — glass bottles,
@@ -31,12 +32,15 @@ export class RunHud {
       this._lastPct = pct;
       this._fill.style.width = `${Math.max(0, pct)}%`;
     }
-    this._set('hp', `HP ${Math.ceil(player.hp)}`);
+    this._set('hp', `${t('run.hp')} ${Math.ceil(player.hp)}`);
     const s = Math.floor(run.elapsed);
     this._set('time', `${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`);
-    this._set('kills', `击杀 ${run.kills}`);
-    this._set('level', `Lv ${pickups.level}`);
-    this._set('tide', `${WUXING_LABEL[tideInfo.element]}潮 ${Math.ceil(tideInfo.timeLeft)}s · 下潮 ${WUXING_LABEL[tideInfo.nextElement]}`);
+    this._set('kills', `${t('run.kills')} ${run.kills}`);
+    this._set('level', `${t('run.level')} ${pickups.level}`);
+    this._set(
+      'tide',
+      `${WUXING_LABEL[tideInfo.element]}${t('run.tide')} ${Math.ceil(tideInfo.timeLeft)}s · ${t('run.nextTide')} ${WUXING_LABEL[tideInfo.nextElement]}`
+    );
     this._set('resonance', resonanceText);
   }
 

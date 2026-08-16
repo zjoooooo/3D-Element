@@ -25,6 +25,7 @@ import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { RunManager } from '../src/run/RunManager.js';
 import { sequenceRefund } from '../src/run/sequence.js';
+import { STRINGS, t } from '../src/ui/strings.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1426,6 +1427,42 @@ import { sequenceRefund } from '../src/run/sequence.js';
   assert.equal(loadout.levelOf(id), settings.fusion.maxLevel, 'fusion: capped at its own max');
   settings.run.draftLoadout = true;
   console.log('ok  fusion core');
+}
+
+/* ---- strings: bilingual table + t() fallback chain (spec §9) ---- */
+{
+  assert.ok(STRINGS.zh['run.kills'] && STRINGS.en['run.kills'], 'strings: run.kills exists in both languages');
+  assert.notEqual(STRINGS.zh['run.kills'], STRINGS.en['run.kills'], 'strings: run.kills actually differs by language');
+
+  const saved = settings.ui.language;
+  settings.ui.language = 'zh';
+  assert.equal(t('run.kills'), STRINGS.zh['run.kills'], 't: reads the zh table when language is zh');
+  settings.ui.language = 'en';
+  assert.equal(t('run.kills'), STRINGS.en['run.kills'], 't: reads the en table when language is en');
+
+  // Middle rung of the fallback chain: present in zh, absent from the
+  // current (en) table — must land on zh, not skip straight to the key.
+  STRINGS.zh.__probe = '探针';
+  assert.equal(t('__probe'), '探针', 't: missing from the current language falls back to zh');
+  delete STRINGS.zh.__probe;
+
+  // Bottom rung: absent everywhere falls back to the key itself, loud but
+  // never throwing.
+  assert.equal(t('no.such.key'), 'no.such.key', 't: unknown key falls back to itself');
+  settings.ui.language = saved;
+  console.log('ok  strings table');
+}
+
+/* ---- settings.ui: shape + relationships (spec §9/§9.5) ---- */
+{
+  const ui = settings.ui;
+  assert.ok(ui.language === 'zh' || ui.language === 'en', 'settings.ui: language is zh or en');
+  assert.equal(typeof ui.reduceFlashes, 'boolean', 'settings.ui: reduceFlashes is a boolean');
+  assert.equal(typeof ui.performanceMode, 'boolean', 'settings.ui: performanceMode is a boolean');
+  for (const key of ['sfxVolume', 'uiVolume', 'bgmVolume']) {
+    assert.ok(ui[key] >= 0 && ui[key] <= 1, `settings.ui: ${key} must be in [0,1] (got ${ui[key]})`);
+  }
+  console.log('ok  settings.ui shape');
 }
 
 console.log('\nevery game-logic check passed');

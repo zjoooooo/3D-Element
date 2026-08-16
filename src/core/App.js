@@ -53,6 +53,7 @@ import { PostProcessing } from '../postprocessing/PostProcessing.js';
 
 import { HUD, LoadingScreen } from '../ui/HUD.js';
 import { Editor } from '../ui/Editor.js';
+import { t } from '../ui/strings.js';
 
 import { settings, ELEMENTS, ELEMENT_META, CastShape, castShapeOf } from '../config/settings.js';
 
@@ -302,7 +303,7 @@ export class App {
 
     if (this.runMode) {
       this._syncRunHudLabels();
-      this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}潮来临`);
+      this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}${t('run.tideTurn')}`);
       // A shard only ever offers its own wuxing (spec 残章定向手). Reuses the
       // same upgradeUi instance — and so the same freeze gate — as a level-up
       // hand; an empty offer (no ability of that wuxing exists yet) falls back
@@ -318,7 +319,7 @@ export class App {
         const hand = this.upgradePool.draw(this.pickups.level, this.pickups.level, element);
         if (!hand.length) {
           this._skipHeal();
-          this.hud.showToast('残章逸散');
+          this.hud.showToast(t('run.shardFizzle'));
         } else {
           this.upgradeUi.open(hand, { rerolls: 0, summary: this._buildSummaryLines().join('　') });
         }
@@ -558,7 +559,7 @@ export class App {
     const wux = fusionWux(element);
     if (sequenceRefund(this._lastCastWux, this._lastCastAt, wux, this.run.elapsed)) {
       this.cooldowns.set(element, this.cooldowns.get(element) * settings.sequence.refund);
-      this.hud.showToast('相生轮转');
+      this.hud.showToast(t('run.sequenceChain'));
     }
     this._lastCastWux = wux;
     this._lastCastAt = this.run.elapsed;
@@ -796,7 +797,7 @@ export class App {
       if (this.modifiers.resonates(w)) labels.push(WUXING_LABEL[w]);
     }
     if (!labels.length) return '';
-    return `共鸣 ${labels.join(' ')}${this.modifiers.cycleActive() ? ' · 周天' : ''}`;
+    return `${t('run.resonance')} ${labels.join(' ')}${this.modifiers.cycleActive() ? ` · ${t('run.cycleActive')}` : ''}`;
   }
 
   /** One line per seated skill, for the level-up hand's footer and the
@@ -1085,11 +1086,11 @@ export class App {
         let deathLine = null;
         if (!won && killer) {
           if (killer.element < 0) {
-            deathLine = '死于：吐息者的弹幕——它们怕近身';
+            deathLine = `${t('verdict.diedTo')}吐息者的弹幕——它们怕近身`;
           } else {
             const beats = WUXING_LABEL[BEATS.indexOf(killer.element)];
             deathLine =
-              `死于：${WUXING_LABEL[killer.element]}系${['涌兽', '吐息者', '磐兽'][killer.behavior]}` +
+              `${t('verdict.diedTo')}${WUXING_LABEL[killer.element]}系${['涌兽', '吐息者', '磐兽'][killer.behavior]}` +
               `——${beats}系对${WUXING_LABEL[killer.element]}系有 1.25× 克制`;
           }
         }

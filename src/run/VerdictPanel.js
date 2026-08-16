@@ -1,3 +1,5 @@
+import { t } from '../ui/strings.js';
+
 /**
  * The end card (spec §7 结算): stats, the build, the top three skills and one
  * line about what killed you — plus the advice the wuxing table implies. Grey
@@ -16,14 +18,14 @@ export class VerdictPanel {
     const s = Math.floor(elapsed);
     const time = `${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     this.root.innerHTML =
-      `<h2>${won ? '生存达成' : '倒下了'}</h2>` +
-      `<p>存活 ${time} · 击杀 ${kills} · Lv ${level}</p>` +
+      `<h2>${won ? t('verdict.won') : t('verdict.lost')}</h2>` +
+      `<p>${t('verdict.survived')} ${time} · ${t('run.kills')} ${kills} · ${t('run.level')} ${level}</p>` +
       `<p class="verdict__build">${buildLines.join('<br>')}</p>` +
       (topSkills.length
-        ? `<p>输出前三：${topSkills.map(([name, amount]) => `${name} ${Math.round(amount)}`).join(' / ')}</p>`
+        ? `<p>${t('verdict.topSkills')}${topSkills.map(([name, amount]) => `${name} ${Math.round(amount)}`).join(' / ')}</p>`
         : '') +
       (deathLine ? `<p class="verdict__death">${deathLine}</p>` : '') +
-      `<p class="verdict__hint">回车重开</p>`;
+      `<p class="verdict__hint">${t('verdict.restart')}</p>`;
     this.root.style.display = '';
     this.isOpen = true;
   }

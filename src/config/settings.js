@@ -237,6 +237,16 @@ export const settings = {
     loadout: ['ice', 'fireball', 'thunder', 'meteor', 'beam', 'glacier']
   },
 
+  /** UI-facing switches (spec §9/§9.5). All live; consumers read per frame. */
+  ui: {
+    language: 'zh', // 'zh' | 'en' — strings.js reads this
+    reduceFlashes: false, // photosensitivity: big flashes damped hard
+    performanceMode: false, // halves particle/glow/shadow budgets via global multipliers
+    sfxVolume: 0.8,
+    uiVolume: 0.8,
+    bgmVolume: 0.8 // reserved; BGM lands post-v1
+  },
+
   /** The five 3-minute tides (spec §7). Order shuffles per run, seeded. */
   tides: {
     length: 180, // seconds per tide; 5 tides fill the 15-minute run
