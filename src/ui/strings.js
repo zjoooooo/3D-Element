@@ -39,7 +39,11 @@ export const STRINGS = {
     'verdict.survived': '存活',
     'verdict.topSkills': '输出前三：',
     'verdict.restart': '回车重开',
-    'verdict.diedTo': '死于：'
+    'verdict.diedTo': '死于：',
+    'verdict.behaviors': ['涌兽', '吐息者', '磐兽'],
+    'verdict.rangedDeath': '吐息者的弹幕——它们怕近身',
+    'verdict.elementSuffix': '系',
+    'verdict.matchupHint': '克制'
   },
   en: {
     'run.hp': 'HP',
@@ -57,7 +61,11 @@ export const STRINGS = {
     'verdict.survived': 'Survived',
     'verdict.topSkills': 'Top damage: ',
     'verdict.restart': 'Press Enter to restart',
-    'verdict.diedTo': 'Slain by: '
+    'verdict.diedTo': 'Slain by: ',
+    'verdict.behaviors': ['Swarmer', 'Spitter', 'Tank'],
+    'verdict.rangedDeath': 'a spitter\'s volley — they fear the close fight',
+    'verdict.elementSuffix': ' ',
+    'verdict.matchupHint': 'overcomes'
   }
 };
 

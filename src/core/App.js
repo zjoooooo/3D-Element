@@ -1086,12 +1086,23 @@ export class App {
         let deathLine = null;
         if (!won && killer) {
           if (killer.element < 0) {
-            deathLine = `${t('verdict.diedTo')}吐息者的弹幕——它们怕近身`;
+            deathLine = `${t('verdict.diedTo')}${t('verdict.rangedDeath')}`;
           } else {
             const beats = WUXING_LABEL[BEATS.indexOf(killer.element)];
-            deathLine =
-              `${t('verdict.diedTo')}${WUXING_LABEL[killer.element]}系${['涌兽', '吐息者', '磐兽'][killer.behavior]}` +
-              `——${beats}系对${WUXING_LABEL[killer.element]}系有 1.25× 克制`;
+            const elementName = WUXING_LABEL[killer.element];
+            const behaviorName = t('verdict.behaviors')[killer.behavior];
+            const suffix = t('verdict.elementSuffix');
+            const matchupHint = t('verdict.matchupHint');
+
+            if (settings.ui.language === 'zh') {
+              deathLine =
+                `${t('verdict.diedTo')}${elementName}${suffix}${behaviorName}` +
+                `——${beats}${suffix}对${elementName}${suffix}有 1.25× ${matchupHint}`;
+            } else {
+              deathLine =
+                `${t('verdict.diedTo')}${elementName} ${behaviorName} ` +
+                `— ${beats} ${matchupHint} ${elementName} at 1.25×`;
+            }
           }
         }
         const topSkills = Object.entries(this.combat.damageDealt)
