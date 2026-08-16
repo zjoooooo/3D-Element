@@ -154,6 +154,9 @@ export class CombatSystem {
             // new mechanic, same debuff channel/resonance/淤塞 interactions
             // c.slowFactor above already rides.
             if (c.stunTime) this.targets.slow(ability.position, radius, 1.0, c.stunTime);
+            // quake's 震地波 shove — an extra shockwave impulse beyond the
+            // baseline the damage() hit itself already applied.
+            if (c.knockback) this.targets.knockback(ability.position, radius, c.knockback);
             // M6 T4: lifebloom's self-heal. CombatSystem stays player-agnostic
             // (see tick()'s own doc) — accumulate and hand it back to the caller.
             if (c.healPlayer) healDue += c.healPlayer * this._amp(ability);

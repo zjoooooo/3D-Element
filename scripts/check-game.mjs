@@ -504,7 +504,27 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(slows[0].f, 1, 'burst: stunTime is full-strength (factor 1.0)');
   assert.equal(slows[0].d, settings.combat.boulder.stunTime, 'burst: stunTime\'s own duration, not slowTime');
 
-  console.log('ok  M6 T4: aura annulus, healPlayer routing, stunTime');
+  // knockback (quake): the burst composes an extra shockwave shove on top of
+  // the baseline impulse damage() already applied — enemy in radius ends up
+  // shoved harder than one hit by a plain no-knockback burst of equal size.
+  {
+    const enemies = new EnemySystem(createRng(22));
+    const shoved = enemies.spawnAt(2, 0, 0);
+    enemies.damage({ x: 0, z: 0 }, settings.combat.quake.radius, 1, -1);
+    const baseline = enemies.kbX[shoved];
+    enemies.knockback({ x: 0, z: 0 }, settings.combat.quake.radius, settings.combat.quake.knockback);
+    const extra = enemies.kbX[shoved] - baseline;
+    assert.ok(baseline > 0, 'knockback: damage() itself shoves outward');
+    assert.ok(
+      Math.abs(extra - baseline * (settings.combat.quake.knockback / settings.enemies.knockback)) < 1e-9,
+      'knockback: sweep adds impulse/mass·kbMult on the same channel, scaled by the row value'
+    );
+    const outside = enemies.spawnAt(settings.combat.quake.radius + 5, 0, 0);
+    enemies.knockback({ x: 0, z: 0 }, settings.combat.quake.radius, 9);
+    assert.equal(enemies.kbX[outside], 0, 'knockback: past the radius takes no shove');
+  }
+
+  console.log('ok  M6 T4: aura annulus, healPlayer routing, stunTime, quake knockback');
 }
 
 /* ---- pickups: drop, magnet, level math ---- */

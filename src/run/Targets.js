@@ -42,6 +42,10 @@ export class Targets {
     for (const p of this._populations) p.slow?.(point, radius, factor, duration);
   }
 
+  knockback(point, radius, impulse) {
+    for (const p of this._populations) p.knockback?.(point, radius, impulse);
+  }
+
   /** Damage only within an annulus [innerRadius, radius] of point (M6 T4:
    * an aura's orbiting ring/flames/orbs occupy a band, not a filled disc).
    * Populations that don't implement it degrade to a plain disc — the same

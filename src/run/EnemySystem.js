@@ -456,6 +456,26 @@ export class EnemySystem {
   }
 
   /**
+   * Shockwave shove (spec §12 震地波 击退): an extra outward impulse on top
+   * of the baseline every damage() hit already applies — same mass/kbMult
+   * scaling, same kbX/kbZ channel the decay integrator drains. Sweep shape
+   * mirrors slow() above: burst rows compose it after their damage call.
+   */
+  knockback(point, radius, impulse) {
+    for (let i = 0; i < this.count; i++) {
+      const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
+      const dx = this.x[i] - point.x;
+      const dz = this.z[i] - point.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist >= radius + kind.radius) continue;
+      const d = dist || 1;
+      const kb = (impulse / kind.mass) * this.tuning.kbMult;
+      this.kbX[i] += (dx / d) * kb;
+      this.kbZ[i] += (dz / d) * kb;
+    }
+  }
+
+  /**
    * Kills every enemy within `radius` of `point` whose hp is at or under
    * `hpThreshold` — an absolute floor (spec §4.9 金斩杀; see
    * settings.ultimate.metal for why it's absolute, not a %-of-max-hp ratio).
