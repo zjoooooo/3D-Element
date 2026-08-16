@@ -26,12 +26,13 @@ import { PlayerState } from '../src/run/PlayerState.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
-import { STRINGS, t } from '../src/ui/strings.js';
+import { STRINGS, t, wuxingWord, wuxingPhrase } from '../src/ui/strings.js';
 import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
 import { mixTint } from '../src/run/TideAtmosphere.js';
 import { getColor } from '../src/utils/color.js';
 import { GameAudio } from '../src/run/GameAudio.js';
 import { applyPerfPreset } from '../src/run/perfPreset.js';
+import { ScreenFlash } from '../src/effects/ScreenFlash.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1531,6 +1532,40 @@ import { applyPerfPreset } from '../src/run/perfPreset.js';
   console.log('ok  strings table');
 }
 
+/* ---- strings: M6 facade debt — character-switch toasts now go through
+   t() instead of hardcoded English (App#_switchCharacter, reachable from
+   both the sandbox editor's dropdown and the run-mode title screen's) ---- */
+{
+  for (const key of ['char.loading', 'char.switched', 'char.loadFailed']) {
+    assert.ok(STRINGS.zh[key] && STRINGS.en[key], `strings: ${key} exists in both languages`);
+    assert.notEqual(STRINGS.zh[key], STRINGS.en[key], `strings: ${key} actually differs by language`);
+  }
+  console.log('ok  character-switch strings');
+}
+
+/* ---- strings: wuxingWord/wuxingPhrase — M6 facade debt. en compositions
+   used to jam a hanzi glyph straight against latin text ("金Tide"); zh
+   keeps its glyphs (WUXING_LABEL, unspaced — that's correct Chinese), en
+   now reads the capitalized WUXING word with a real word boundary. ---- */
+{
+  const saved = settings.ui.language;
+  settings.ui.language = 'zh';
+  assert.equal(wuxingWord(0), '金', 'wuxingWord: zh returns the glyph');
+  assert.equal(wuxingWord(4), '土', 'wuxingWord: zh glyph indexing matches WUXING_LABEL for every element');
+  assert.equal(wuxingPhrase(0, 'run.tide'), '金潮', 'wuxingPhrase: zh glues the glyph directly onto the next word (no space — matches Chinese)');
+
+  settings.ui.language = 'en';
+  assert.equal(wuxingWord(0), 'Metal', 'wuxingWord: en returns the capitalized WUXING word');
+  assert.equal(wuxingWord(4), 'Earth', 'wuxingWord: en capitalizes every element, not just metal');
+  assert.equal(
+    wuxingPhrase(0, 'run.tide'),
+    'Metal Tide',
+    'wuxingPhrase: en separates the word from the next one with a space — no more hanzi-latin jam'
+  );
+  settings.ui.language = saved;
+  console.log('ok  wuxing word/phrase');
+}
+
 /* ---- settings.ui: shape + relationships (spec §9/§9.5) ---- */
 {
   const ui = settings.ui;
@@ -1540,7 +1575,33 @@ import { applyPerfPreset } from '../src/run/perfPreset.js';
   for (const key of ['sfxVolume', 'uiVolume', 'bgmVolume']) {
     assert.ok(ui[key] >= 0 && ui[key] <= 1, `settings.ui: ${key} must be in [0,1] (got ${ui[key]})`);
   }
+  // M6 facade debt: repo-wide reduceFlashes convention was ×0.5; spec §9.5
+  // wants −80% (0.2 remaining). Pinned here as the one shared constant every
+  // flash consumer reads instead of each hand-rolling its own factor.
+  assert.equal(ui.flashDamp, 0.2, "settings.ui: flashDamp pinned to spec §9.5's −80% cut");
   console.log('ok  settings.ui shape');
+}
+
+/* ---- ScreenFlash: reduceFlashes scales through the shared flashDamp
+   constant, not a locally hardcoded ratio (M6 facade debt) ---- */
+{
+  const saved = settings.ui.reduceFlashes;
+  const flash = new ScreenFlash();
+
+  settings.ui.reduceFlashes = false;
+  flash.trigger(getColor('#ffffff'), 1, 1);
+  assert.ok(Math.abs(flash.strength - settings.post.flashStrength) < 1e-9, 'ScreenFlash: full strength when reduceFlashes is off');
+
+  settings.ui.reduceFlashes = true;
+  const flash2 = new ScreenFlash();
+  flash2.trigger(getColor('#ffffff'), 1, 1);
+  const expected = Math.min(1, settings.post.flashStrength * settings.ui.flashDamp);
+  assert.ok(
+    Math.abs(flash2.strength - expected) < 1e-9,
+    `ScreenFlash: reduceFlashes damps by flashDamp (got ${flash2.strength}, want ${expected})`
+  );
+  settings.ui.reduceFlashes = saved;
+  console.log('ok  screenflash flashDamp');
 }
 
 /* ---- ultimate: charge curve + five field effects (spec §4.9) ---- */

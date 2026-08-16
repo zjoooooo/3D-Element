@@ -106,20 +106,6 @@ export class HUD {
     if (meta && !options.silent) this.showToast(`${meta.hint} selected`);
   }
 
-  /**
-   * Run mode rebinds the keys, and the badges must say so — a card that still
-   * reads "R" while E casts it looks like the input is scrambled. Elements
-   * missing from `labels` sit out the run and dim.
-   */
-  setRunKeys(labels) {
-    for (const [element, card] of this.cards) {
-      const badge = card.querySelector('.ability-card__key');
-      const label = labels[element];
-      badge.textContent = label ?? '';
-      card.classList.toggle('is-offstage', !label);
-    }
-  }
-
   /** Highlight the slot while a cast is armed. */
   setArmed(armed) {
     if (armed === this._armedShown) return;

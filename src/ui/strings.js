@@ -17,6 +17,7 @@
  * it replaces used to carry.
  */
 import { settings } from '../config/settings.js';
+import { WUXING, WUXING_LABEL } from '../run/TideSchedule.js';
 
 export const STRINGS = {
   zh: {
@@ -50,6 +51,12 @@ export const STRINGS = {
     'verdict.rangedDeath': '吐息者的弹幕——它们怕近身',
     'verdict.elementSuffix': '系',
     'verdict.matchupHint': '克制',
+    // Character-switch toasts (App#_switchCharacter — shared by the sandbox
+    // editor's dropdown and the run-mode title screen's own; M6 facade debt,
+    // these used to be hardcoded English regardless of language).
+    'char.loading': '加载角色中…',
+    'char.switched': '角色：',
+    'char.loadFailed': '角色加载失败',
     // TitleScreen (spec §9/§9.5).
     'title.name': '五行降世',
     'title.lore': '「五行失序，潮汐吞界；执灯者立于法阵中央，以术法还天地清明。」',
@@ -99,6 +106,9 @@ export const STRINGS = {
     'verdict.rangedDeath': 'a spitter\'s volley — they fear the close fight',
     'verdict.elementSuffix': ' ',
     'verdict.matchupHint': 'overcomes',
+    'char.loading': 'Loading character…',
+    'char.switched': 'Character: ',
+    'char.loadFailed': 'Character failed to load',
     'title.name': 'Wuxing: Descent',
     'title.lore':
       'The Five Phases have fallen from balance, and the tide devours the world — the ' +
@@ -130,4 +140,30 @@ export const STRINGS = {
 export function t(key) {
   const lang = settings.ui.language;
   return STRINGS[lang]?.[key] ?? STRINGS.zh[key] ?? key;
+}
+
+/** WUXING, capitalized for display ('metal' -> 'Metal'), computed once. */
+const WUXING_WORD = WUXING.map((word) => word[0].toUpperCase() + word.slice(1));
+
+/**
+ * A wuxing element's display name for the current language: the glyph in zh
+ * (金木水火土, `WUXING_LABEL`) or the capitalized WUXING word in en (Metal/
+ * Wood/Water/Fire/Earth) — bare substitution for a context that already
+ * supplies its own spacing around the result.
+ */
+export function wuxingWord(el) {
+  return settings.ui.language === 'zh' ? WUXING_LABEL[el] : WUXING_WORD[el];
+}
+
+/**
+ * An element glued onto the following `t(key)` phrase: no separator in zh
+ * (金潮, matching how Chinese runs characters together with no spaces), one
+ * space in en (Metal Tide) so the capitalized word doesn't jam against the
+ * next one (M6 facade debt: en used to read "金Tide", a hanzi glyph
+ * immediately touching latin text — see settings.ui.flashDamp's sibling fix
+ * for the other M5-deferred facade debt this same task pays off).
+ */
+export function wuxingPhrase(el, key) {
+  const sep = settings.ui.language === 'zh' ? '' : ' ';
+  return `${wuxingWord(el)}${sep}${t(key)}`;
 }

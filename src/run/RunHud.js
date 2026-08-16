@@ -1,5 +1,5 @@
 import { WUXING_LABEL } from './TideSchedule.js';
-import { t } from '../ui/strings.js';
+import { t, wuxingWord, wuxingPhrase } from '../ui/strings.js';
 import { settings, ELEMENT_META } from '../config/settings.js';
 import { ELEMENT_SIGILS } from '../ui/glyphs.js';
 
@@ -172,7 +172,12 @@ export class RunHud {
 
   /** Current-tide badge (glyph + tint, title on every call so a language
    * flip is visible without waiting for the next tide turn) and the
-   * countdown+next sentence — same wording the M1 grey-box used. */
+   * countdown+next sentence — same wording the M1 grey-box used. The badge
+   * glyph itself (`textContent`) stays WUXING_LABEL in both languages: it's
+   * a small fixed-size circular icon (colour is its real channel, spec
+   * §9.5), not a translated sentence — only the title/countdown prose below
+   * switches to the WUXING word in en (M6 facade debt: en used to jam the
+   * glyph straight against latin text, "金Tide"). */
   _updateTide(tideInfo) {
     const el = tideInfo.element;
     if (el !== this._lastTideEl) {
@@ -180,10 +185,11 @@ export class RunHud {
       this._tideGlyph.textContent = WUXING_LABEL[el];
       this._tideGlyph.style.setProperty('--tint', WUXING_TINT[el]);
     }
-    this._tideGlyph.title = `${WUXING_LABEL[el]}${t('run.tide')}`;
+    const tidePhrase = wuxingPhrase(el, 'run.tide');
+    this._tideGlyph.title = tidePhrase;
     this._set(
       'tide',
-      `${WUXING_LABEL[el]}${t('run.tide')} ${Math.ceil(tideInfo.timeLeft)}s · ${t('run.nextTide')} ${WUXING_LABEL[tideInfo.nextElement]}`
+      `${tidePhrase} ${Math.ceil(tideInfo.timeLeft)}s · ${t('run.nextTide')} ${wuxingWord(tideInfo.nextElement)}`
     );
   }
 

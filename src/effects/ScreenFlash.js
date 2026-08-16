@@ -21,11 +21,13 @@ export class ScreenFlash {
    * @param {number} [decay]  fraction remaining after one second
    */
   trigger(color, strength, decay = 0.0004) {
-    // Photosensitivity (M5 Task 9): halves every flash through here, not just
-    // the run's red hit-variant — `settings.ui.reduceFlashes`'s own comment
-    // says "big flashes damped hard" with no carve-out, and this is the one
-    // place every flash in the game already funnels through.
-    const reduce = settings.ui.reduceFlashes ? 0.5 : 1;
+    // Photosensitivity (M5 Task 9; factor unified to spec in M6): damps every
+    // flash through here, not just the run's red hit-variant — this is the
+    // one place every flash in the game already funnels through, and
+    // `settings.ui.flashDamp` (spec §9.5: −80%) is the one shared constant
+    // every such consumer reads (see also OrbBottles' heartbeat and
+    // CharacterController's i-frame flicker).
+    const reduce = settings.ui.reduceFlashes ? settings.ui.flashDamp : 1;
     const scaled = strength * settings.post.flashStrength * reduce;
     if (scaled <= this.strength) return;
     this.color.copy(color);

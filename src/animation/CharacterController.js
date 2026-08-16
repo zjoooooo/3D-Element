@@ -778,12 +778,13 @@ export class CharacterController {
 
     if (this._flickering) {
       // Hard on/off strobe rather than a smooth sine pulse — reads as a
-      // flicker instead of a glow. `settings.ui.reduceFlashes` halves the
-      // peak rather than turning it off outright (this is on the character's
-      // own silhouette, not a full-screen flash, but it is still a bright
-      // pulse — see ScreenFlash.trigger for the same knob on the red edge flash).
+      // flicker instead of a glow. `settings.ui.reduceFlashes` damps the
+      // peak by `settings.ui.flashDamp` (spec §9.5: −80%) rather than
+      // turning it off outright (this is on the character's own silhouette,
+      // not a full-screen flash, but it is still a bright pulse — see
+      // ScreenFlash.trigger for the same knob on the red edge flash).
       this._hitT += dt;
-      const peak = settings.ui.reduceFlashes ? 0.4 : 0.8;
+      const peak = settings.ui.reduceFlashes ? 0.8 * settings.ui.flashDamp : 0.8;
       const on = Math.floor(this._hitT / 0.06) % 2 === 0;
       for (const material of this.materials) material.emissiveIntensity = on ? peak : 0;
     }

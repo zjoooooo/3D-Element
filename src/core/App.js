@@ -64,7 +64,7 @@ import { PostProcessing } from '../postprocessing/PostProcessing.js';
 
 import { HUD, LoadingScreen } from '../ui/HUD.js';
 import { Editor } from '../ui/Editor.js';
-import { t } from '../ui/strings.js';
+import { t, wuxingWord, wuxingPhrase } from '../ui/strings.js';
 
 import { settings, ELEMENTS, ELEMENT_META, CastShape, castShapeOf } from '../config/settings.js';
 
@@ -423,7 +423,7 @@ export class App {
       // point (startRun() hasn't drafted a seat yet, whether that's about to
       // happen immediately below for #run=quick or only later, on the title
       // screen's pick) — startRun() itself syncs once real seats exist.
-      this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}${t('run.tideTurn')}`);
+      this.run.onTideTurn = (element) => this.hud.showToast(wuxingPhrase(element, 'run.tideTurn'));
       // 微顿帧 (M5 Task 9): a sheng detonation is a big moment. Elite kills and
       // 禁咒 fire trigger it from their own App-side call sites instead.
       this.run.onBigMoment = () => {
@@ -805,13 +805,13 @@ export class App {
    * exactly one place that knows how to load a character and report it.
    */
   _switchCharacter(id) {
-    this.hud.showToast('Loading character…');
+    this.hud.showToast(t('char.loading'));
     this.character
       .setCharacter(id, this.assets)
-      .then(() => this.hud.showToast(`Character: ${id}`))
+      .then(() => this.hud.showToast(`${t('char.switched')}${id}`))
       .catch((error) => {
         console.error('[App] character switch failed', error);
-        this.hud.showToast('Character failed to load');
+        this.hud.showToast(t('char.loadFailed'));
       });
   }
 
@@ -1158,13 +1158,14 @@ export class App {
   }
 
   /** HUD resonance readout (spec §4.8): '共鸣 水 金' for whichever wuxing
-   * currently resonate, '· 周天' appended once every wuxing does; counts
-   * aren't public so this only lists labels, never tallies. Empty when
-   * nothing resonates. */
+   * currently resonate ('Resonance Water Metal' in en — M6 facade debt:
+   * wuxingWord swaps in the WUXING word instead of the zh glyph), '· 周天'
+   * appended once every wuxing does; counts aren't public so this only
+   * lists labels, never tallies. Empty when nothing resonates. */
   _resonanceText() {
     const labels = [];
     for (let w = 0; w < 5; w++) {
-      if (this.modifiers.resonates(w)) labels.push(WUXING_LABEL[w]);
+      if (this.modifiers.resonates(w)) labels.push(wuxingWord(w));
     }
     if (!labels.length) return '';
     return `${t('run.resonance')} ${labels.join(' ')}${this.modifiers.cycleActive() ? ` · ${t('run.cycleActive')}` : ''}`;
@@ -1563,8 +1564,8 @@ export class App {
       this.deathShards.sync();
       // Taking a bite flashes the screen red, scaled by how big a bite —
       // the bar alone is easy to miss mid-fight. Restart raises hp, which
-      // correctly stays silent here. reduceFlashes' own halving lives inside
-      // ScreenFlash.trigger, not here (see its comment).
+      // correctly stays silent here. reduceFlashes' own damping (flashDamp)
+      // lives inside ScreenFlash.trigger, not here (see its comment).
       if (this.playerState.hp < this._lastHp) {
         const dmgFrac = (this._lastHp - this.playerState.hp) / this.playerState.maxHp;
         this.flash.trigger(getColor('#ff3226'), MathUtils.clamp(dmgFrac * 2.5, 0.1, 1));

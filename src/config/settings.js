@@ -258,7 +258,13 @@ export const settings = {
   /** UI-facing switches (spec §9/§9.5). All live; consumers read per frame. */
   ui: {
     language: 'zh', // 'zh' | 'en' — strings.js reads this
-    reduceFlashes: false, // photosensitivity: big flashes damped hard
+    reduceFlashes: false, // photosensitivity: scales every flash by flashDamp below when on
+    // spec §9.5: reduce-flashes mode cuts flash intensity by −80% (0.2 = 20%
+    // remaining). One shared constant instead of each consumer hand-rolling
+    // its own ratio (M5 shipped ×0.5 at each site — M6 facade debt, unified
+    // here). Read by ScreenFlash.trigger, OrbBottles' low-hp heartbeat and
+    // CharacterController's i-frame flicker.
+    flashDamp: 0.2,
     performanceMode: false, // halves particle/glow/shadow budgets via global multipliers
     sfxVolume: 0.8,
     uiVolume: 0.8,

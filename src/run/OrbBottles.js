@@ -114,7 +114,7 @@ const FRAGMENT = /* glsl */ `
 
     // HP-only: the rim flushes on a lub-dub double pulse when hp is low. App
     // already folds the envelope shape, the current rate and the
-    // reduceFlashes halving into this one scalar — the shader just trusts it.
+    // reduceFlashes damping into this one scalar — the shader just trusts it.
     glass += vec3(1.0, 0.16, 0.12) * rim * uHeartbeat * 1.6;
 
     /* ---- liquid body colour ---- */
@@ -231,7 +231,7 @@ export class OrbBottles {
     // Always integrated, never reset — a rate change turns the beat faster or
     // slower, it never skips or rewinds it.
     this._heartPhase += rateHz * dt;
-    const ampTarget = lowHp ? (settings.ui.reduceFlashes ? 0.5 : 1) : 0;
+    const ampTarget = lowHp ? (settings.ui.reduceFlashes ? settings.ui.flashDamp : 1) : 0;
     this._heartAmp = damp(this._heartAmp, ampTarget, 0.05, dt);
 
     this._feed(this.hp, hpRatio, this._prevHpRatio);
