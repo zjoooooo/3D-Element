@@ -23,7 +23,7 @@ import { EnemyProjectiles } from '../src/run/EnemyProjectiles.js';
 import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
-import { RunManager } from '../src/run/RunManager.js';
+import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
 import { STRINGS, t } from '../src/ui/strings.js';
@@ -1786,6 +1786,21 @@ import { getColor } from '../src/utils/color.js';
   }
 
   console.log('ok  tide atmosphere lerp');
+}
+
+/* ---- hitstop: 微顿帧 timer's pure decay/trigger arithmetic (M5 Task 9) ---- */
+{
+  let h = 0;
+  h = addHitstop(h);
+  assert.equal(h, settings.run.hitstopDuration, 'hitstop: one trigger adds hitstopDuration');
+
+  h = addHitstop(h); // a second trigger before the first has decayed at all
+  assert.equal(h, settings.run.hitstopCap, 'hitstop: a second trigger clamps at hitstopCap, does not stack past it');
+
+  h = tickHitstop(h, 1); // a full second of real time — far more than the cap
+  assert.equal(h, 0, 'hitstop: decays to exactly zero and never negative');
+
+  console.log('ok  hitstop timer');
 }
 
 console.log('\nevery game-logic check passed');

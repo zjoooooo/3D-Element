@@ -38,7 +38,11 @@ export const CHARACTERS = {
       run: 'Fast Run-2.fbx',
       cast1: 'Standing 1H Magic Attack 02.fbx',
       cast2: 'Standing 1H Magic Attack 02.fbx',
-      cast3: 'Standing 1H Magic Attack 02.fbx'
+      cast3: 'Standing 1H Magic Attack 02.fbx',
+      // 翻滚闪避 (M5 Task 9, spec 裁定5): sorcerer only. classic has no `roll`
+      // entry, so `_buildBundle` skips loading one and `hasRoll` stays false —
+      // App's dodge branch falls back to the old instant teleport for it.
+      roll: 'Stand To Roll.fbx'
     }
   }
 };
@@ -228,6 +232,16 @@ export class CharacterController {
     this.casts = new Map();
     /** The cast currently being thrown, null while idling. */
     this._cast = null;
+    /** One-shot roll action (M5 Task 9, spec 裁定5) — sorcerer only, null on a
+     * character with no `clips.roll`. A separate handle from `casts`/`_cast`
+     * so a roll never gets caught by the cast-specific bookkeeping. */
+    this.roll = null;
+    /** Every converted PBR material on the active rig — App pulses
+     * `emissiveIntensity` on these while `playerState.iframes > 0` (M5 Task 9
+     * 受击泛红), driven by `setHitFlicker`/`update` below. */
+    this.materials = [];
+    this._flickering = false;
+    this._hitT = 0;
     /** Every character built so far, kept warm so switching back is instant. */
     this._bundles = new Map();
     this._active = null;
@@ -281,7 +295,12 @@ export class CharacterController {
 
   /** Parse one character's files into a self-contained, stage-ready bundle. */
   async _buildBundle(character, assets) {
-    const clipIds = ['run', ...CAST_ANIMATIONS];
+    // Roll (M5 Task 9, spec 裁定5) rides the same clip pipeline as run/casts,
+    // but only for a character whose clips table actually has one — loading
+    // `character.clips.roll ?? 'roll.fbx'` unconditionally would 404 for
+    // classic, which has no such file.
+    const hasRoll = !!character.clips.roll;
+    const clipIds = ['run', ...CAST_ANIMATIONS, ...(hasRoll ? ['roll'] : [])];
     // The clip files are the same skeleton again, so they cost a parse each
     // but nothing at run time — everything but the clip is thrown away below.
     const [fbx, skin, ...clipFiles] = await Promise.all([
@@ -310,7 +329,7 @@ export class CharacterController {
     fbx.position.z -= center.z;
     fbx.position.y -= box.min.y;
 
-    this._prepareMaterials(fbx, skin);
+    const materials = this._prepareMaterials(fbx, skin);
 
     const mixer = new AnimationMixer(fbx);
     mixer.addEventListener('finished', this._onCastFinished);
@@ -324,7 +343,9 @@ export class CharacterController {
       mixer,
       idle: null,
       run: null,
+      roll: null,
       casts: new Map(),
+      materials,
       height: size.y,
       headY: size.y * 0.86,
       ...measureFacing(fbx)
@@ -363,6 +384,20 @@ export class CharacterController {
       disposeObject(clipFiles[index + 1]);
     });
 
+    if (hasRoll) {
+      const rollFile = clipFiles[CAST_ANIMATIONS.length + 1]; // clipIds = ['run', ...casts, 'roll']
+      const rollClip = prepareClip('roll', rollFile, bones);
+      if (rollClip) {
+        bundle.roll = mixer.clipAction(rollClip);
+        bundle.roll.setLoop(LoopOnce, 1);
+        // Unlike a cast, don't hold the last (mid-tumble) frame — the
+        // finished handler below crossfades idle/run back in the instant it
+        // ends, same as a cast, just without the held pose in between.
+        bundle.roll.clampWhenFinished = false;
+        disposeObject(rollFile);
+      }
+    }
+
     return bundle;
   }
 
@@ -382,7 +417,9 @@ export class CharacterController {
     this.mixer = bundle.mixer;
     this.idle = bundle.idle;
     this.run = bundle.run;
+    this.roll = bundle.roll ?? null;
     this.casts = bundle.casts;
+    this.materials = bundle.materials;
     this._cast = null;
     this.height = bundle.height;
     this.headPosition.set(0, bundle.headY, 0);
@@ -445,7 +482,12 @@ export class CharacterController {
           metalness: 0,
           transparent: material.transparent ?? false,
           opacity: material.opacity ?? 1,
-          side: material.side
+          side: material.side,
+          // 受击泛红 (M5 Task 9): zero by construction — invisible until
+          // `setHitFlicker`/`update` below pulse `emissiveIntensity` while
+          // `playerState.iframes > 0`.
+          emissive: 0xff3226,
+          emissiveIntensity: 0
         });
 
         // Worth the samples: the character is the one thing on screen the camera
@@ -462,6 +504,8 @@ export class CharacterController {
 
       node.material = Array.isArray(node.material) ? result : result[0];
     });
+
+    return [...converted.values()];
   }
 
   /* ------------------------------------------------------------------ */
@@ -502,10 +546,51 @@ export class CharacterController {
     return this._cast !== null;
   }
 
-  _onCastFinished = (event) => {
-    // Anything else finishing is an older clip that a re-cast already faded out.
-    if (event.action !== this._cast) return;
+  /** True when the active character has a roll clip (sorcerer only, spec 裁定5). */
+  get hasRoll() {
+    return !!this.roll;
+  }
+
+  /** The roll clip's authored length, seconds, unscaled by `rate` — 0 with no roll. */
+  get rollDuration() {
+    return this.roll ? this.roll.getClip().duration : 0;
+  }
+
+  /**
+   * Throw the roll clip once, at `rate` (App passes `settings.run.rollSpeed`,
+   * mirroring `castSpeed`'s own knob) — the spacebar dodge's verb for a
+   * character with `hasRoll`. Mirrors `playCast`'s shape (fade from whatever
+   * is actually on screen, take the legs with it) but keeps its own handle
+   * rather than joining `casts`/`_cast`: a roll is locomotion standing in for
+   * the old instant teleport, not an ability throw, and must not be caught by
+   * `_onCastFinished`'s cast-specific bookkeeping.
+   */
+  playRoll(rate) {
+    if (!this.roll || !this.idle) return;
+
+    // A roll started mid-cast takes over from it outright, same idea as
+    // `playCast`'s own previous/next swap: fade from whatever is actually on
+    // screen, and clear `_cast` so its 'finished' event (still coming, on its
+    // own timeline) doesn't fight the roll's recovery later in
+    // `_onCastFinished` — by then it points at neither `_cast` nor `roll`.
+    const from = this._cast ?? this.idle;
     this._cast = null;
+
+    this.roll.reset();
+    this.roll.setEffectiveTimeScale(rate);
+    this.roll.play();
+    this.roll.crossFadeFrom(from, settings.character.castBlendIn, false);
+
+    if (this.run) this.run.fadeOut(settings.character.castBlendIn);
+  }
+
+  _onCastFinished = (event) => {
+    if (event.action === this._cast) {
+      this._cast = null;
+    } else if (event.action !== this.roll) {
+      // Anything else finishing is an older clip a re-cast/re-roll already faded out.
+      return;
+    }
 
     // The fade in disabled the idle once its weight hit zero; wake it back up
     // before asking it to come in again.
@@ -669,11 +754,39 @@ export class CharacterController {
     this.run.timeScale = blend * c.runPlayback;
   }
 
+  /**
+   * Toggle the i-frame flicker (M5 Task 9 受击泛红) — App drives this every
+   * run-mode frame from `playerState.iframes > 0`. A hit's recovery window
+   * and a dodge's own i-frames share that one field, so either reason to be
+   * briefly invulnerable flickers the body, not just a hit landing.
+   */
+  setHitFlicker(active) {
+    if (active) {
+      this._flickering = true;
+      return;
+    }
+    if (this._flickering) for (const material of this.materials) material.emissiveIntensity = 0;
+    this._flickering = false;
+    this._hitT = 0;
+  }
+
   update(dt) {
     // Driven by the *simulation* delta, and re-applied every frame even at
     // dt = 0: pausing mid-cast holds the lunge, and `castLean` stays a live
     // slider against that frozen pose.
     this._applyBodyAccents(dt);
+
+    if (this._flickering) {
+      // Hard on/off strobe rather than a smooth sine pulse — reads as a
+      // flicker instead of a glow. `settings.ui.reduceFlashes` halves the
+      // peak rather than turning it off outright (this is on the character's
+      // own silhouette, not a full-screen flash, but it is still a bright
+      // pulse — see ScreenFlash.trigger for the same knob on the red edge flash).
+      this._hitT += dt;
+      const peak = settings.ui.reduceFlashes ? 0.4 : 0.8;
+      const on = Math.floor(this._hitT / 0.06) % 2 === 0;
+      for (const material of this.materials) material.emissiveIntensity = on ? peak : 0;
+    }
 
     if (!this.mixer) return;
 

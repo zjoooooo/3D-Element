@@ -21,7 +21,12 @@ export class ScreenFlash {
    * @param {number} [decay]  fraction remaining after one second
    */
   trigger(color, strength, decay = 0.0004) {
-    const scaled = strength * settings.post.flashStrength;
+    // Photosensitivity (M5 Task 9): halves every flash through here, not just
+    // the run's red hit-variant — `settings.ui.reduceFlashes`'s own comment
+    // says "big flashes damped hard" with no carve-out, and this is the one
+    // place every flash in the game already funnels through.
+    const reduce = settings.ui.reduceFlashes ? 0.5 : 1;
+    const scaled = strength * settings.post.flashStrength * reduce;
     if (scaled <= this.strength) return;
     this.color.copy(color);
     this.strength = Math.min(1, scaled);

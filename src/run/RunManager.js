@@ -26,6 +26,20 @@ function wuxingRep(wux) {
   return Object.entries(settings.combat.wuxingOf).find(([, v]) => v === wux)?.[0];
 }
 
+/**
+ * 微顿帧 (M5 Task 9) pure arithmetic. App owns the `_hitstop` seconds field
+ * itself — `frame()` reads it every tick to scale the world's dt — these two
+ * live here, outside the class, only so `check-game.mjs` can pin the numbers
+ * without a renderer (RunManager is already Node-safe and already imported
+ * there; App.js is not, it touches the canvas/WebGL stack directly).
+ */
+export function tickHitstop(current, raw) {
+  return Math.max(0, current - raw);
+}
+export function addHitstop(current) {
+  return Math.min(settings.run.hitstopCap, current + settings.run.hitstopDuration);
+}
+
 export class RunManager {
   constructor(systems) {
     this.s = systems;
@@ -43,6 +57,11 @@ export class RunManager {
     this.onTideTurn = null;
     /** Fired when a shard is picked up (element index) — App opens a directional hand. */
     this.onShardHand = null;
+    /** Fired on a "big moment" (currently: every sheng detonation) — App
+     * triggers 微顿帧 off it. Elite kills and 禁咒 fire are App-side already
+     * (onDeath's elite flag, `_fireUltimate`'s own success branch), so only
+     * the reaction case needs a signal out of here. */
+    this.onBigMoment = null;
 
     this.s.enemies.onDeath = (x, z, element, elite) => {
       this.kills++;
@@ -189,6 +208,11 @@ export class RunManager {
     _reactPt.x = x;
     _reactPt.z = z;
     this.s.ultimate?.gainReaction();
+    // Any of the five sheng detonations counts as a big moment for hitstop
+    // purposes (spec's own "禁咒/融合引爆/精英杀" list — a fusion cast
+    // self-detonates per M4's retained semantics, so this single hook covers
+    // that case too without a separate signal).
+    this.onBigMoment?.('reaction');
     switch (markWux) {
       case 1: // 木→火 助燃: a splash of untyped damage around the victim
         enemies.damage(_reactPt, m.assistSplash.radius, amount * m.assistSplash.share, -1);

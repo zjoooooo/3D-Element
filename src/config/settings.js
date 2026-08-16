@@ -227,7 +227,22 @@ export const settings = {
     dodgeDistance: 3, // metres the spacebar dash covers
     dodgeIframes: 0.3,
     dodgeCooldown: 2,
+    // 翻滚闪避 (M5 Task 9): sorcerer only (CHARACTERS.sorcerer.clips.roll).
+    // rollSpeed is castSpeed's own pattern — the clip's playback rate, not a
+    // duration. 2.37s clip → ~0.79s roll at this rate.
+    rollSpeed: 3,
+    // Cap, seconds: how long the dodge's displacement lerps toward its target
+    // for. rollDuration/rollSpeed (~0.79s) can run longer than this — the
+    // lerp finishes early and the rest of the clip just plays out in place.
+    dodgeRollWindow: 0.35,
     autocastDamage: 0.85, // 自动施法: a slot left on auto pays 15% less
+    // 微顿帧 (M5 Task 9): 禁咒/融合引爆/精英杀 buy the world a brief slowdown —
+    // App's `_hitstop` field counts down in real seconds; while it is
+    // positive, `frame()` scales the world's dt (VFX/abilities/gameClock,
+    // never aim/camera/movement/cooldowns) by `hitstopFactor`. Run mode only.
+    hitstopFactor: 0.85,
+    hitstopDuration: 0.1, // seconds one trigger adds
+    hitstopCap: 0.15, // ceiling — repeated triggers don't stack past this
     godMode: false, // debug: take no damage, everything else runs
     manaMax: 100, // 法力池容量
     manaRegen: 4, // 法力回复速率（每秒）

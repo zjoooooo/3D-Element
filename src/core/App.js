@@ -31,11 +31,12 @@ import { UpgradePool } from '../run/UpgradePool.js';
 import { UpgradeUi } from '../run/UpgradeUi.js';
 import { VerdictPanel } from '../run/VerdictPanel.js';
 import { Ultimate } from '../run/Ultimate.js';
-import { RunManager } from '../run/RunManager.js';
+import { RunManager, tickHitstop, addHitstop } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
 import { ThreatArrows } from '../run/ThreatArrows.js';
 import { OrbBottles } from '../run/OrbBottles.js';
+import { DeathShards } from '../run/DeathShards.js';
 import { getColor } from '../utils/color.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
@@ -193,6 +194,9 @@ export class App {
       this.gameClock = new GameClock(settings.run.tickRate);
       this.enemySystem = new EnemySystem(rng);
       this.enemyRenderer = new EnemyRenderer(this.scene);
+      // Death shatter (M5 Task 9): five-wuxing tetrahedra off `onDeath`'s own
+      // element index, doubled for an elite — see the onDeath wrapper below.
+      this.deathShards = new DeathShards(this.scene);
       // 五行法阵 (M5 Task 7): five steles + the boundary arc, replacing
       // EnemyRenderer's old M1 rim. Ritual strength never changes mid-run
       // (no editor slider), so this is a one-time set, not a per-frame sync.
@@ -218,6 +222,9 @@ export class App {
       this._slotCd = Array.from({ length: 6 }, () => ({ active: false, remaining: 0, total: 0 }));
       this._lastCastWux = -1;
       this._lastCastAt = -Infinity;
+      /** 微顿帧 (M5 Task 9): seconds left of the world's brief post-big-moment
+       * slow. See `frame()`'s dt computation and `_triggerHitstop`. */
+      this._hitstop = 0;
       this.upgradePool = new UpgradePool(rng, this.loadout, this.modifiers);
       this.upgradeUi = new UpgradeUi();
       this.upgradeUi.onChoice = (result) => this._onUpgradeChoice(result);
@@ -279,6 +286,9 @@ export class App {
         this.bursts.spawn(BurstMode.AIR, _deathPos, {
           radius: 0.3, endRadius: 1.2, life: 0.35, intensity: 0.55, opacity: 0.65
         });
+        this.deathShards.burst(x, z, element, elite);
+        // 微顿帧 (M5 Task 9): an elite kill is one of the run's big moments.
+        if (elite) this._triggerHitstop();
       };
       // Frame-loop scratch: the verdict box and the tick closure are minted
       // once here so advance() never allocates per frame.
@@ -338,6 +348,9 @@ export class App {
     if (this.runMode) {
       this._syncBadges();
       this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}${t('run.tideTurn')}`);
+      // 微顿帧 (M5 Task 9): a sheng detonation is a big moment. Elite kills and
+      // 禁咒 fire trigger it from their own App-side call sites instead.
+      this.run.onBigMoment = () => this._triggerHitstop();
       // A shard only ever offers its own wuxing (spec 残章定向手). Reuses the
       // same upgradeUi instance — and so the same freeze gate — as a level-up
       // hand; an empty offer (no ability of that wuxing exists yet) falls back
@@ -388,6 +401,15 @@ export class App {
     this._moveDir = new Vector3();
     this._camForward = new Vector3();
     this._camRight = new Vector3();
+
+    /** 翻滚闪避 (M5 Task 9): a sorcerer dodge lerps `_dodgeStart → _dodgeTarget`
+     * over `_dodgeDuration` seconds instead of teleporting — see `frame()`'s
+     * steer-gate. `_dodgeT >= _dodgeDuration` (true at construction, 0 >= 0)
+     * means "no roll in flight", so `_steer` runs normally by default. */
+    this._dodgeStart = new Vector3();
+    this._dodgeTarget = new Vector3();
+    this._dodgeT = 0;
+    this._dodgeDuration = 0;
   }
 
   /** The ability currently in the slot. */
@@ -482,8 +504,28 @@ export class App {
         if (this._moveDir.lengthSq() < 0.01) {
           this._moveDir.set(Math.sin(this.character.facing), 0, Math.cos(this.character.facing));
         }
-        this._moveDir.normalize().multiplyScalar(settings.run.dodgeDistance);
-        this.character.root.position.add(this._moveDir);
+        this._moveDir.normalize();
+        if (this.character.hasRoll) {
+          // Sorcerer (spec 裁定5): play the roll and spread the displacement
+          // over its window instead of teleporting — frame()'s steer-gate
+          // lerps `_dodgeStart → _dodgeTarget` while `_dodgeT < _dodgeDuration`.
+          // dodgeIframes covers essentially all of that window (see
+          // settings.run.dodgeRollWindow's own comment on the small gap).
+          this.character.setFacing(Math.atan2(this._moveDir.x, this._moveDir.z));
+          this.character.playRoll(settings.run.rollSpeed);
+          this._dodgeStart.copy(this.character.root.position);
+          this._dodgeTarget
+            .copy(this.character.root.position)
+            .addScaledVector(this._moveDir, settings.run.dodgeDistance);
+          this._dodgeDuration = Math.min(
+            this.character.rollDuration / settings.run.rollSpeed,
+            settings.run.dodgeRollWindow
+          );
+          this._dodgeT = 0;
+        } else {
+          // classic: no roll clip — the original instant teleport (spec 裁定5 fallback).
+          this.character.root.position.addScaledVector(this._moveDir, settings.run.dodgeDistance);
+        }
         break;
       }
       case 'restart':
@@ -607,10 +649,22 @@ export class App {
     if (this.ultimate.fire(this.character.position)) {
       this.flash.trigger(getColor('#fff2c8'), 0.45);
       this.shake.add(1, 1.2, 20);
+      this._triggerHitstop();
       this.hud.showToast(t('ult.fired'));
     } else {
       this.hud.showToast(t('ult.notReady'));
     }
+  }
+
+  /**
+   * 微顿帧 (M5 Task 9): called from the run's few "big moments" (禁咒 fire
+   * above, an elite death, a sheng detonation via `run.onBigMoment`). The
+   * actual slow lives in `frame()`'s dt computation; this just arms the
+   * timer `addHitstop` caps at `settings.run.hitstopCap`, so repeated
+   * triggers inside one window extend it rather than stacking past the cap.
+   */
+  _triggerHitstop() {
+    this._hitstop = addHitstop(this._hitstop);
   }
 
   /**
@@ -984,6 +1038,10 @@ export class App {
     this.lights.reset();
     this.shake.reset();
     this.flash.reset();
+    // `clearEffects()` also runs in the sandbox (the editor's Clear button, the
+    // 'clear' action) where this never got constructed — unlike its siblings
+    // above, which are shared VFX services built either way.
+    this.deathShards?.clear();
   }
 
   /* ------------------------------------------------------------------ */
@@ -1033,7 +1091,18 @@ export class App {
     gl.info.reset();
 
     const raw = this.time.tick();
-    const dt = this.paused || (this.runMode && this.upgradeUi?.isOpen) ? 0 : raw * settings.global.timeScale;
+    // 微顿帧 (M5 Task 9): a few big moments buy the world a brief slowdown —
+    // decays on real time so the stagger itself never drags. `worldRaw` feeds
+    // everything `dt` already does (VFX/abilities/character/elapsed below)
+    // plus the fixed-step run clock's own advance() call further down; aim,
+    // camera, movement and the cooldown decrement all keep reading `raw`
+    // directly and never feel it, same as they already ignore `paused`.
+    // Freeze/verdict outrank it structurally, not by priority check: both
+    // gate *after* this scale is folded in, so a frozen or stopped run reads
+    // dt = 0 regardless of `_hitstop`. Run mode only — the sandbox never sets it.
+    if (this.runMode) this._hitstop = tickHitstop(this._hitstop, raw);
+    const worldRaw = this.runMode && this._hitstop > 0 ? raw * settings.run.hitstopFactor : raw;
+    const dt = this.paused || (this.runMode && this.upgradeUi?.isOpen) ? 0 : worldRaw * settings.global.timeScale;
     this.elapsed += dt;
 
     /* ---- shared uniforms ---- */
@@ -1053,7 +1122,22 @@ export class App {
     // the camera anchor, the contact shadows — already reads the character's
     // position, so moving it here is all that is needed for them to follow.
     // A level-up hand is the one thing that does stop it.
-    if (!(this.runMode && this.upgradeUi.isOpen)) this._steer(raw);
+    if (!(this.runMode && this.upgradeUi.isOpen)) {
+      // 翻滚闪避 (M5 Task 9): a roll in flight owns the position for its short
+      // window instead of the WASD steer below — same freeze gate as this
+      // whole block, so a hand opening mid-roll holds it in place rather than
+      // snapping the rest of the way once the hand closes.
+      if (this.runMode && this._dodgeT < this._dodgeDuration) {
+        this._dodgeT = Math.min(this._dodgeDuration, this._dodgeT + raw);
+        this.character.root.position.lerpVectors(
+          this._dodgeStart,
+          this._dodgeTarget,
+          this._dodgeT / this._dodgeDuration
+        );
+      } else {
+        this._steer(raw);
+      }
+    }
 
     this.environment.setFocus(this.character.position.x, this.character.position.z);
     this.environment.update();
@@ -1089,9 +1173,10 @@ export class App {
     this.dummies.update(raw, this.camera);
 
     if (this.runMode) {
-      // The run ticks on *raw* time through the fixed-step clock — the enemies
-      // do not slow down because the VFX time scale was turned down, and the
-      // renderer interpolates between the last two ticks with the leftover.
+      // The run ticks on *raw* time (worldRaw during a hitstop, see below)
+      // through the fixed-step clock — the enemies do not slow down because
+      // the VFX time scale was turned down, and the renderer interpolates
+      // between the last two ticks with the leftover.
       this._verdict.value = 'playing';
       // Not sticky — this reset (and a stopped run.tick()'s own 'playing'
       // return) means a cached read is 'playing' again one frame after death
@@ -1102,7 +1187,11 @@ export class App {
       // gated where they live, freeze the character and VFX the same way.
       const frozen = this.upgradeUi.isOpen;
       if (!frozen) {
-        this._runAlpha = this.gameClock.advance(raw, this._runTick);
+        // 微顿帧 reaches the fixed-step run clock too (worldRaw, not raw) —
+        // see this frame's own dt computation above for why: enemies/combat
+        // still ignore `settings.global.timeScale` (worldRaw carries no
+        // timeScale factor), they just also feel the brief hitstop slow.
+        this._runAlpha = this.gameClock.advance(worldRaw, this._runTick);
         // Fresh read, not the frame-start `frozen`: advance() above can open
         // a shard hand synchronously (onShardHand fires mid-tick), and an
         // echo must not cast into a hand that opened this very frame. The
@@ -1200,13 +1289,22 @@ export class App {
       this.threatArrows.update(this.enemySystem, this.character.position);
       this.pickups.sync();
       this.enemyProjectiles.sync();
-      // Taking a bite flashes the screen red — the bar alone is easy to miss
-      // mid-fight. Restart raises hp, which correctly stays silent here.
+      this.deathShards.update(dt);
+      this.deathShards.sync();
+      // Taking a bite flashes the screen red, scaled by how big a bite —
+      // the bar alone is easy to miss mid-fight. Restart raises hp, which
+      // correctly stays silent here. reduceFlashes' own halving lives inside
+      // ScreenFlash.trigger, not here (see its comment).
       if (this.playerState.hp < this._lastHp) {
-        this.flash.trigger(getColor('#ff3226'), 0.22);
+        const dmgFrac = (this._lastHp - this.playerState.hp) / this.playerState.maxHp;
+        this.flash.trigger(getColor('#ff3226'), MathUtils.clamp(dmgFrac * 2.5, 0.1, 1));
         this.orbBottles.pulseSlosh();
       }
       this._lastHp = this.playerState.hp;
+      // 受击泛红 (M5 Task 9): the character's own materials flicker for as
+      // long as `iframes` reads positive — a hit's own recovery window and a
+      // dodge's i-frames share that one field, so both flicker the body.
+      this.character.setHitFlicker(this.playerState.iframes > 0);
       this.orbBottles.update(
         raw,
         this.camera,
@@ -1297,6 +1395,7 @@ export class App {
       this.threatArrows.dispose();
       for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
+      this.deathShards.dispose();
       this.arena.dispose();
       this.camera.remove(this.orbBottles.object3D);
       this.orbBottles.dispose();
