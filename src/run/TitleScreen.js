@@ -10,11 +10,11 @@ import { t } from '../ui/strings.js';
  * 火) so this can't be derived generically off `settings.combat.wuxingOf`
  * the way RunManager's own `wuxingRep()` picks a "first match" — the spec's
  * title screen names fireball specifically. Index 4 (土) is M6 T2's
- * rockspikes (岩刺突贯, spec's named 土 first-skill) — data only until T4
- * registers its class, same as the other twelve M6 T2 ids (AbilityManager's
- * `ABILITY_TYPES` guards the cast either way, so picking this card today
- * starts an inert-but-harmless run, exactly like the other four cards would
- * if their class ever went missing).
+ * rockspikes (岩刺突贯, spec's named 土 first-skill), classed onto
+ * LineSweepSkill as of M6 T4 (AbilityManager's `ABILITY_TYPES`) — picking
+ * this card starts a fully live run, same as the other four cards (that
+ * registry is still what guards the cast either way, so a class ever going
+ * missing would degrade to inert-but-harmless, not a crash).
  */
 const HOME_ELEMENT = ['beam', 'thunder', 'ice', 'fireball', 'rockspikes'];
 

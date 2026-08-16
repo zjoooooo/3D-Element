@@ -1437,14 +1437,25 @@ export class App {
    * currently resonate ('Resonance Water Metal' in en — M6 facade debt:
    * wuxingWord swaps in the WUXING word instead of the zh glyph), '· 周天'
    * appended once every wuxing does; counts aren't public so this only
-   * lists labels, never tallies. Empty when nothing resonates. */
+   * lists labels, never tallies. Empty when nothing resonates and the cycle
+   * isn't closed either — M6 T7 fix: 周天 only needs one of each wuxing
+   * seated (`cycleActive()`), which a 5-seat one-per-wuxing loadout reaches
+   * with every individual wuxing still below its own resonates() threshold
+   * of 2 — `labels` empty, `cycleActive()` true. Gating the whole readout on
+   * `labels.length` (as this used to) swallowed '· 周天' in exactly that
+   * state, unreachable before M6 T2-7 gave earth its own skills and this
+   * branch its first live path. */
   _resonanceText() {
     const labels = [];
     for (let w = 0; w < 5; w++) {
       if (this.modifiers.resonates(w)) labels.push(wuxingWord(w));
     }
-    if (!labels.length) return '';
-    return `${t('run.resonance')} ${labels.join(' ')}${this.modifiers.cycleActive() ? ` · ${t('run.cycleActive')}` : ''}`;
+    const cycle = this.modifiers.cycleActive();
+    if (!labels.length && !cycle) return '';
+    const parts = [t('run.resonance')];
+    if (labels.length) parts.push(labels.join(' '));
+    if (cycle) parts.push(`· ${t('run.cycleActive')}`);
+    return parts.join(' ');
   }
 
   /** One line per seated skill, for the level-up hand's footer and the

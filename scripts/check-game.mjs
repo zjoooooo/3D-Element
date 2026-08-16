@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS, ELEMENT_META } from '../src/config/settings.js';
-import { TideSchedule, WUXING, BEATS, FEEDS } from '../src/run/TideSchedule.js';
+import { TideSchedule, WUXING, WUXING_LABEL, BEATS, FEEDS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
 import { UpgradePool } from '../src/run/UpgradePool.js';
@@ -779,7 +779,11 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   loadout.acquire('dashstrike');
   loadout.acquire('iceshield');
   loadout.acquire('rockspikes');
-  for (const el of ['dashstrike', 'iceshield', 'rockspikes']) {
+  // M6 T7: one more seat on the same loadout — firering (火, wux 3) FEEDS
+  // rockspikes (土, wux 4 — FEEDS[3]===4), the other earth-adjacent pair
+  // the T6 comment above didn't need yet: 地心火山.
+  loadout.acquire('firering');
+  for (const el of ['dashstrike', 'iceshield', 'rockspikes', 'firering']) {
     while (loadout.levelOf(el) < settings.fusion.minLevel) loadout.upgrade(el);
   }
   const eligible = loadout.eligibleFusions();
@@ -791,8 +795,12 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
     eligible.some((f) => f.a === 'rockspikes' && f.b === 'dashstrike' && f.name === '锋岩星阵'),
     'eligibleFusions: rockspikes(土) feeds dashstrike(金) — 锋岩星阵 eligible at Lv4/Lv4'
   );
+  assert.ok(
+    eligible.some((f) => f.a === 'firering' && f.b === 'rockspikes' && f.name === '地心火山'),
+    'eligibleFusions: firering(火) feeds rockspikes(土) — 地心火山 eligible at Lv4/Lv4'
+  );
 
-  console.log('ok  M6 T6 fix: dashstrike fusion pairs (霜刃洪流/锋岩星阵) eligible at Lv4/Lv4');
+  console.log('ok  M6 T6/T7 fix: earth fusion pairs (霜刃洪流/锋岩星阵/地心火山) eligible at Lv4/Lv4');
 }
 
 /* ---- M6 T6 fix round: resolveTarget — chainbolt's WYSIWYG re-validation ---- */
@@ -2004,6 +2012,33 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   console.log('ok  resonance & quench');
 }
 
+/* ---- M6 T7: 周天 cycleActive() reachable from a real 5-seat loadout ---- */
+{
+  // The block above drives Modifiers in isolation off a hand-fed wuxing
+  // array; this drives the actual pipeline App._refreshResonance uses —
+  // real skill ids seated in a Loadout, looked up through
+  // settings.combat.wuxingOf, only then fed into computeResonance. One
+  // skill per wuxing (金木水火土), all five already classed onto real
+  // Ability subclasses (AbilityManager.ABILITY_TYPES, M6 T4-6).
+  const loadout = new Loadout();
+  loadout.acquire('swordrain'); // 金
+  loadout.acquire('chainbolt'); // 木
+  loadout.acquire('iceshield'); // 水
+  loadout.acquire('firering'); // 火
+  loadout.acquire('rockspikes'); // 土
+  const wuxingOf = settings.combat.wuxingOf;
+  const wuxingList = loadout.equippedList().map((id) => wuxingOf[id]);
+  assert.deepEqual(
+    wuxingList.slice().sort(),
+    [0, 1, 2, 3, 4],
+    'M6 T7: the five seats really are one of each wuxing'
+  );
+  const mods = new Modifiers();
+  mods.computeResonance(wuxingList);
+  assert.ok(mods.cycleActive(), 'M6 T7: 周天 — a real five-skill loadout (one per wuxing) closes the cycle');
+  console.log('ok  M6 T7: cycleActive reachable from a real loadout');
+}
+
 /* ---- reaction routing reaches every neighbour system ---- */
 {
   const rng = createRng(41);
@@ -2631,6 +2666,33 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(calls2.length, 9, 'play: a priority>=2 sound still gets through once the base budget is spent');
 
   console.log('ok  audio wiring');
+}
+
+/* ---- M6 T7: castEarth — the audio table's wuxing-ordered cast keys ---- */
+{
+  // App.js's two cast sites route `audio.play(CAST_SOUND[fusionWux(element)])`
+  // (CAST_SOUND = ['castMetal','castWood','castWater','castFire','castEarth'],
+  // the same WUXING order as TideSchedule's own WUXING). App.js itself stays
+  // out of check-game.mjs — it's the renderer-coupled orchestrator, verified
+  // in the browser, same as EnemyRenderer — so the lookup is mirrored here
+  // (same idiom as SHAPE_COEF above) rather than imported: a reorder of
+  // either table trips this assertion instead of silently going quiet.
+  const CAST_SOUND = ['castMetal', 'castWood', 'castWater', 'castFire', 'castEarth'];
+  assert.equal(CAST_SOUND.length, WUXING.length, 'audio: one cast key per wuxing');
+  for (let w = 0; w < WUXING.length; w++) {
+    const cfg = settings.audio.sounds[CAST_SOUND[w]];
+    assert.ok(cfg, `audio: settings.audio.sounds.${CAST_SOUND[w]} must exist (${WUXING_LABEL[w]})`);
+    assert.ok(Array.isArray(cfg.params) && cfg.params.length > 0, `audio: ${CAST_SOUND[w]} needs zzfx params`);
+    assert.equal(cfg.channel, 'sfx', `audio: ${CAST_SOUND[w]} plays on the sfx channel`);
+  }
+  // rockspikes (土's own M6 T2 launch skill) resolves to wuxing 4 — the
+  // exact index an earth-wuxing cast selects castEarth through.
+  assert.equal(
+    CAST_SOUND[settings.combat.wuxingOf.rockspikes],
+    'castEarth',
+    'audio: an earth-wuxing cast (rockspikes) selects castEarth'
+  );
+  console.log('ok  M6 T7: castEarth audio key (table + wuxing routing)');
 }
 
 /* ---- perfPreset: performance-mode write/restore is a pure halve+restore (M5 Task 11) ---- */

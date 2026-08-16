@@ -341,7 +341,7 @@ export const settings = {
     waterSlowDur: 1.5, // slow duration ×
     fireDot: 1.3, // fire-wuxing dot damage ×
     earthKnockback: 1.5, // shove ×
-    cycleReaction: 1.5 // 周天: reaction damage × (dormant until earth skills land)
+    cycleReaction: 1.5 // 周天: reaction damage × (live as of M6 T7 — earth skills seat now)
   },
 
   /** Sheng-pair fusion (spec §4.7; composite-cast placeholder until M6). */
@@ -444,7 +444,7 @@ export const settings = {
     glacier: { kind: 'burst', damage: 70, slowFactor: 0.6, slowTime: 2.5 },
     fireball: { kind: 'self' }, // FireballAbility already resolves its own hits
 
-    // --- M6 T2: the thirteen v1 launch skills (data only; classes land T4-6) ---
+    // --- M6 T2: the thirteen v1 launch skills (all thirteen classed as of T4-6) ---
     // 锚2, recalibrated (勘误 D-M6-1): damage ≈ BASE_DPS × cooldown × 形状系数
     // (窄线1.3/宽线1.0/小圈1.1/大圈0.8/自身光环0.7/弹道1.2), where BASE_DPS is
     // ice-as-played (settings.combat.ice.damage / settings.ice.cooldown = 50),
@@ -2152,25 +2152,28 @@ export const settings = {
   },
 
   /* ================================================================== */
-  /* M6 T2 — the thirteen v1 launch skills (data only; classes land T4-6) */
+  /* M6 T2 — the thirteen v1 launch skills (all thirteen classed, T4-6)   */
   /* ================================================================== */
   /**
    * Every block below carries the same floor every ability block in this file
    * does — `range`, `minRange`, `speed`, `cooldown`, `castAnim` (+ `zoneRadius`
    * on the three `CastShape.ZONE` ones) — plus `manaCost` (spec 锚2.5) and a
    * deliberately small set of VFX knobs (size/count/radius); the rest of each
-   * skill's VFX is composed from existing systems when its class lands.
+   * skill's VFX is composed from existing systems, wired in by its own class
+   * (M6 T4-6 — LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill/ShieldSkill/
+   * DashStrikeSkill/ChainBoltSkill; see AbilityManager's ABILITY_TYPES).
    *
-   * No `Ability` subclass reads any of this yet — `AbilityManager`'s
-   * `ABILITY_TYPES` registry, not `ELEMENTS`, gates what can actually cast
-   * (AbilityManager.js) — so `range`/`minRange`/`speed` on the seven
-   * `CastShape.SELF` blocks carry no gameplay meaning today. They still hold
-   * real numbers rather than `undefined`, because `AimController._resolve()`
-   * runs for *any* armed element regardless of its cast shape or whether it
-   * has a class, and reads `c.minRange`/`c.range` unconditionally; leaving
-   * either one out turns every aim update into `NaN` (and, once the geometry
-   * update reaches it, a real console error) the moment the element is armed
-   * — which the title screen's now-live earth card (rockspikes) can do today.
+   * Every subclass reads its own block now — `AbilityManager`'s
+   * `ABILITY_TYPES` registry, not `ELEMENTS`, is what gates what can
+   * actually cast (AbilityManager.js). `range`/`minRange`/`speed` on the
+   * seven `CastShape.SELF` blocks still carry no *aiming* meaning (a self
+   * cast never uses them to place anything) — they hold real numbers rather
+   * than `undefined` because `AimController._resolve()` runs for *any*
+   * armed element regardless of its cast shape, and reads `c.minRange`/
+   * `c.range` unconditionally; leaving either one out turns every aim
+   * update into `NaN` (and, once the geometry update reaches it, a real
+   * console error) the moment the element is armed — which the title
+   * screen's earth card (rockspikes) does on its very first frame.
    *
    * `damage`/`dps` numbers are spec 锚2 against the live ice-as-played anchor
    * (勘误 D-M6-1, not spec §8's paper value — see the comment in
