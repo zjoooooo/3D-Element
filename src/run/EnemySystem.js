@@ -86,8 +86,10 @@ export class EnemySystem {
     this._reactionFlush = new Float32Array(REACTION_QUEUE_CAP * 5); // see _flushReactions
     this._reactionCount = 0;
 
-    /** element/behavior of the strongest contact this tick — reused scratch, zero-alloc. */
-    this.lastContact = { element: 0, behavior: 0 };
+    /** element/behavior/position of the strongest contact this tick — reused
+     * scratch, zero-alloc. x/z (M6 T5) is 石肤's reflect target: whoever
+     * landed *this* hit, at the position they landed it from. */
+    this.lastContact = { element: 0, behavior: 0, x: 0, z: 0 };
 
     /** Matchup/knockback/slow knobs a resonance build can override (spec §4.8). */
     this.tuning = { kbMult: 1, slowDurMult: 1, advantage: 0, disadvantage: 0, reactionMult: 1 };
@@ -195,6 +197,8 @@ export class EnemySystem {
           contact = dmg;
           this.lastContact.element = this.element[i];
           this.lastContact.behavior = this.behavior[i];
+          this.lastContact.x = this.x[i];
+          this.lastContact.z = this.z[i];
         }
       }
     }

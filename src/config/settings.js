@@ -2238,7 +2238,11 @@ export const settings = {
   iceshield: {
     range: 1, minRange: 0, speed: 0, cooldown: 9, manaCost: 30, castAnim: 'cast1',
     shieldSize: 1.1, crystalCount: 6,
-    color: '#9fe8ff', colorGlow: '#eefbff'
+    color: '#9fe8ff', colorGlow: '#eefbff',
+    // M6 T5: every ability's base class reads lightColor/lightIntensity/
+    // lightRadius unconditionally each frame it's active (Ability#_updateLight)
+    // — a personal-scale glow, smaller than a thrown AoE's.
+    lightColor: '#eefbff', lightIntensity: 8, lightRadius: 7
   },
 
   // --- 火 firering: 燃阵, a ring of ground fire around the caster — permanent aura ---
@@ -2293,7 +2297,9 @@ export const settings = {
   stoneskin: {
     range: 1, minRange: 0, speed: 0, cooldown: 10, manaCost: 30, castAnim: 'cast1',
     shieldSize: 1.2, crackCount: 5,
-    color: '#a68968', colorGlow: '#e3d3bd'
+    color: '#a68968', colorGlow: '#e3d3bd',
+    // M6 T5: see iceshield's own copy of this comment.
+    lightColor: '#e3d3bd', lightIntensity: 7, lightRadius: 6
   },
 
   /* ------------------------------------------------------------------ */

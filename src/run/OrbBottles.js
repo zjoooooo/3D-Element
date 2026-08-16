@@ -48,6 +48,7 @@ const FRAGMENT = /* glsl */ `
   uniform float uHeartbeat; // HP only: lub-dub envelope × amplitude, App-computed
   uniform float uDim;       // mana only: 1 when the pool is low
   uniform float uRise;      // 1 the frame the level is climbing (heal / regen)
+  uniform float uShield;    // HP only: shield pool as a fraction of maxHp, capping the bottle from its brim
   uniform vec3  uLiquidColor;
   uniform float uOpacity;
 
@@ -90,6 +91,32 @@ const FRAGMENT = /* glsl */ `
     // for free as it rises past the shoulder into the neck.
     float liquidMask = (1.0 - smoothstep(liquidTop - edge, liquidTop + edge, p.y)) * step(d, 0.0);
 
+    // M6 T5: 冰晶甲/石肤 — a cap hanging down from the bottle's own brim
+    // (fillTop, the same line a full hp reading already sits at), sized by
+    // shieldRatio against that same bodyBottom..fillTop ruler hp uses.
+    // Deliberately pinned to the brim rather than stacked above the *current*
+    // liquid top: hp is very often already full when a defensive shield goes
+    // up, and stacking above uRatio there would have nowhere left to grow
+    // (uRatio+uShield clamps at the rim same as uRatio alone) — the shield
+    // would be invisible exactly when it's most likely to be cast. Anchoring
+    // at the brim instead means it always reads, overlaying the liquid's own
+    // top (armor sitting on the surface) whenever hp reaches that high, and
+    // overlaying bare glass above a lower liquid line otherwise — both still
+    // land as "a plate capping the bottle," never as a second liquid.
+    // Gated to exactly 0 whenever uShield is ~0 (not just thin) — otherwise
+    // smoothstep's own antialiasing would leave a faint ghost line sitting
+    // at the brim even with no shield up (and on the mana bottle, which
+    // never feeds this uniform at all).
+    float hasShield = step(0.0015, uShield);
+    float shieldBandH = clamp(uShield, 0.0, 1.0) * (fillTop - bodyBottom);
+    float shieldBottom = max(bodyBottom, fillTop - shieldBandH) + wobble + slosh;
+    float shieldTop = fillTop + wobble + slosh;
+    float shieldMask = (1.0 - smoothstep(shieldTop - edge, shieldTop + edge, p.y))
+                      * step(shieldBottom, p.y) * step(d, 0.0) * hasShield;
+    // A crisp seam at the band's own lower edge — the "sits above the blood
+    // level" read the brief asks for, not just a colour change.
+    float shieldSeam = (1.0 - smoothstep(0.0, 0.015, abs(p.y - shieldBottom))) * step(d, 0.0) * hasShield;
+
     // A thin brighter band riding the surface while the level is climbing
     // (heal / mana regen). App only feeds a positive uRise on a rising frame.
     float band = (1.0 - smoothstep(0.0, 0.03, abs(p.y - liquidTop))) * clamp(uRise, 0.0, 1.0) * liquidMask;
@@ -123,9 +150,16 @@ const FRAGMENT = /* glsl */ `
     liquid += bubbles * 0.55;
     liquid += band * 0.5;
 
-    vec3 color = glass + liquid * liquidMask;
+    // Cool white-silver, deliberately outside the hp/mana liquid palette so
+    // it reads as plating over blood rather than a third liquid colour — and
+    // additive on top of the glass term above, never gating it, so the
+    // low-hp heartbeat rim-flush keeps flushing untouched underneath the band.
+    vec3 shieldColor = vec3(0.86, 0.93, 1.0);
+
+    vec3 color = glass + liquid * liquidMask + shieldColor * shieldMask + shieldSeam * 0.7;
     float alpha = clamp(
-      inside * mix(0.24, 0.15, dimAmt) + liquidMask * mix(0.88, 0.55, dimAmt) + rim * inside * 0.5,
+      inside * mix(0.24, 0.15, dimAmt) + liquidMask * mix(0.88, 0.55, dimAmt)
+        + shieldMask * 0.85 + shieldSeam * 0.6 + rim * inside * 0.5,
       0.0, 1.0
     ) * uOpacity;
 
@@ -188,6 +222,7 @@ export class OrbBottles {
         uHeartbeat: { value: 0 },
         uDim: { value: 0 },
         uRise: { value: 0 },
+        uShield: { value: 0 },
         uLiquidColor: { value: getColor(liquidHex).clone() },
         uOpacity: { value: 1 }
       }),
@@ -217,11 +252,18 @@ export class OrbBottles {
    * of, so the idle wobble and the heartbeat keep breathing through a frozen
    * level-up hand instead of seizing mid-cycle.
    */
-  update(dt, camera, hp, maxHp, mana, maxMana) {
+  update(dt, camera, hp, maxHp, mana, maxMana, shield = 0) {
     this._layout(camera);
 
     const hpRatio = maxHp > 0 ? clamp(hp / maxHp, 0, 1) : 0;
     const manaRatio = maxMana > 0 ? clamp(mana / maxMana, 0, 1) : 0;
+    // M6 T5: shield sized against maxHp, not itself — that's what makes it
+    // read on the same ruler the hp liquid already fills (a 40-point shield
+    // against 100 maxHp visibly covers less than a 55-point one). Clamped to
+    // 1 here (not just left to the shader) so a shield bigger than maxHp
+    // reads as "the whole bottle capped", never as a value the shader has to
+    // guess how to handle.
+    const shieldRatio = maxHp > 0 ? clamp(shield / maxHp, 0, 1) : 0;
 
     this._sloshValue = damp(this._sloshValue, 0, SLOSH_DECAY, dt);
 
@@ -237,6 +279,10 @@ export class OrbBottles {
     this._feed(this.hp, hpRatio, this._prevHpRatio);
     this.hp.material.uniforms.uSlosh.value = this._sloshValue;
     this.hp.material.uniforms.uHeartbeat.value = heartbeatEnvelope(this._heartPhase) * this._heartAmp;
+    // Mana's own uShield uniform is simply never written — it stays the 0 it
+    // was constructed with, same "only ever driven on the bottle it means
+    // something for" contract uHeartbeat/uDim already keep.
+    this.hp.material.uniforms.uShield.value = shieldRatio;
     this._prevHpRatio = hpRatio;
 
     /* ---- mana: dims below the same 30% line (spec: no consumer yet) ---- */

@@ -13,6 +13,13 @@ const TELEGRAPH_TIME = 0.5; // seconds a spawn ring shows before the enemy lands
 const PROJECTILE_SOURCE = { element: -1, behavior: 1 };
 /** Reused {x,z} target for a detonation's splash/slow — _react never allocates. */
 const _reactPt = { x: 0, z: 0 };
+/** Reused {x,z} target for 石肤's reflect — tick() never allocates. */
+const _reflectPt = { x: 0, z: 0 };
+/** 石肤反伤: enemies.damage()'s own reach already adds the target's own body
+ * radius on top of this, so a small constant here is enough to land squarely
+ * on "whoever touched the player" without also catching a neighbour standing
+ * shoulder to shoulder (spec: "single-point small radius"). */
+const REFLECT_RADIUS = 0.5;
 
 /**
  * The skill ledger books by element id, not by wuxing — a detonation only
@@ -186,12 +193,39 @@ export class RunManager {
     // scratch object), so player.lastHitBy aliases it. Safe only because a
     // lethal hit here flips player.alive false, and tick()'s own top-of-call
     // guard then refuses to run enemies.tick() again and mutate it further.
-    if (contact > 0) this.s.player.takeDamage(contact, this.s.enemies.lastContact);
+    if (contact > 0) {
+      // 石肤 (M6 T5): a before/after diff on the pool — not takeDamage's own
+      // return — is what says "how much did the shield actually eat", since
+      // a hit can pierce partway through. Read reflectShare before the call:
+      // takeDamage zeroes it right alongside the pool if this hit empties it.
+      const shieldBefore = this.s.player.shield;
+      const reflectShare = this.s.player.reflectShare;
+      this.s.player.takeDamage(contact, this.s.enemies.lastContact);
+      const absorbed = shieldBefore - this.s.player.shield;
+      // Contact only — a projectile's shooter carries no position to reflect
+      // at (the `shot > 0` branch above hits with the anonymous
+      // PROJECTILE_SOURCE, not an enemy index/position), so reflect never
+      // runs off that path.
+      if (absorbed > 0 && reflectShare > 0) {
+        _reflectPt.x = this.s.enemies.lastContact.x;
+        _reflectPt.z = this.s.enemies.lastContact.z;
+        this.s.enemies.damage(_reflectPt, REFLECT_RADIUS, absorbed * reflectShare, -1);
+      }
+    }
     this.s.player.tick(step);
     // M6 T4: lifebloom's healPlayer — CombatSystem stays player-agnostic and
     // just reports what's due; this is the one place that actually spends it.
     const healDue = this.s.combat.tick(step, this.s.abilities.active);
     if (healDue > 0) this.s.player.heal(healDue);
+    // M6 T5: iceshield/stoneskin's addShield — same routing shape as healDue
+    // just above, read off a field instead of tick()'s own return (see
+    // CombatSystem.shieldDue's own doc). `?.` guards the handful of headless
+    // tests/pre-M6 fakes that construct RunManager with a bare `{ tick, ... }`
+    // combat stub carrying no shieldDue at all.
+    const shieldDue = this.s.combat.shieldDue;
+    if (shieldDue?.amount > 0) {
+      this.s.player.addShield(shieldDue.amount, shieldDue.duration, shieldDue.reflectShare);
+    }
     this.s.ultimate?.tick(step, playerPos);
     this.pendingLevels += this.s.pickups.tick(step, playerPos);
 

@@ -8,6 +8,7 @@ import { FireballAbility } from './FireballAbility.js';
 import { LineSweepSkill } from './templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
 import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
+import { ShieldSkill } from './templates/ShieldSkill.js';
 import { ELEMENTS } from '../config/settings.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
 
@@ -20,12 +21,13 @@ import { ObjectPool } from '../utils/ObjectPool.js';
  * element up for the player to pick (a draft card, a HUD slot) needs to ask
  * this, not `ELEMENTS`, or it offers something that can never actually cast.
  *
- * M6 T4 registers nine of the thirteen onto three data-driven template
- * classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill) — several keys
- * below share the same class reference on purpose: the pool-building loop
- * keys everything by element id, not by class, so each still gets its own
- * pool and its own live instances (see the constructor below). dashstrike/
- * chainbolt (T6) and iceshield/stoneskin (T5) stay unregistered.
+ * M6 T4 registered nine of the thirteen onto three data-driven template
+ * classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill); M6 T5 adds the two
+ * `shield`-kind specials onto a fourth (ShieldSkill) — several keys below
+ * share the same class reference on purpose: the pool-building loop keys
+ * everything by element id, not by class, so each still gets its own pool
+ * and its own live instances (see the constructor below). Only dashstrike/
+ * chainbolt (T6) stay unregistered now.
  */
 export const ABILITY_TYPES = {
   ice: IceAbility,
@@ -46,7 +48,10 @@ export const ABILITY_TYPES = {
 
   bladeorbit: OrbitAuraSkill,
   firering: OrbitAuraSkill,
-  sunwheel: OrbitAuraSkill
+  sunwheel: OrbitAuraSkill,
+
+  iceshield: ShieldSkill,
+  stoneskin: ShieldSkill
 };
 
 const MAX_CONCURRENT = 4;

@@ -527,6 +527,100 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   console.log('ok  M6 T4: aura annulus, healPlayer routing, stunTime, quake knockback');
 }
 
+/* ---- M6 T5: shield kind — detonate-once routing, player-agnostic (mirrors healPlayer) ---- */
+{
+  // CombatSystem stays player-agnostic: tick()'s numeric return is already
+  // pinned to healDue by the M6 T4 assertion above, so the shield event
+  // routes out through the public `shieldDue` field instead — RunManager is
+  // the one place that actually calls player.addShield() (see
+  // CombatSystem.tick's own doc, same shape as healPlayer's routing).
+  const shieldCombat = new CombatSystem({ damage: () => 1, damageOnce: () => 1, slow: () => {} });
+  const iceshield = {
+    element: 'iceshield', phase: 'travel', age: 0.01, impactTime: 0, fadeTime: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1, u: 0
+  };
+  assert.equal(shieldCombat.shieldDue.amount, 0, 'shield: shieldDue starts at 0, nothing cast yet');
+  shieldCombat.tick(1 / 60, [iceshield]);
+  assert.equal(shieldCombat.shieldDue.amount, settings.combat.iceshield.amount, 'shield: tick() reports the flat amount on cast');
+  assert.equal(shieldCombat.shieldDue.duration, settings.combat.iceshield.duration, 'shield: ...and its duration');
+  assert.equal(shieldCombat.shieldDue.reflectShare, 0, 'shield: iceshield carries no reflectShare');
+
+  shieldCombat.tick(1 / 60, [iceshield]);
+  assert.equal(shieldCombat.shieldDue.amount, 0, 'shield: detonates exactly once per cast — silent on every later tick');
+
+  const stoneskinCast = {
+    element: 'stoneskin', phase: 'travel', age: 0.01, impactTime: 0, fadeTime: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1, u: 0
+  };
+  shieldCombat.tick(1 / 60, [stoneskinCast]);
+  assert.equal(shieldCombat.shieldDue.amount, settings.combat.stoneskin.amount, 'shield: stoneskin reports its own amount');
+  assert.equal(shieldCombat.shieldDue.reflectShare, settings.combat.stoneskin.reflectShare, 'shield: stoneskin carries reflectShare');
+
+  console.log('ok  M6 T5: shield kind routing');
+}
+
+/* ---- M6 T5: shield absorption + stoneskin reflect, end to end through RunManager ---- */
+{
+  const rng = createRng(51);
+  const enemies = new EnemySystem(rng);
+  const pickups = new PickupSystem();
+  const player = new PlayerState();
+  const run = new RunManager({
+    enemies, pickups, player, rng,
+    tides: new TideSchedule(createRng(51)),
+    projectiles: new EnemyProjectiles(),
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {}, book: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [] }
+  });
+  run.start();
+
+  // Casting the shield itself is CombatSystem/App's job (covered above and
+  // in the browser checklist) — this test drives PlayerState + RunManager's
+  // contact/reflect wiring directly, the same way the reaction-routing test
+  // elsewhere in this file calls enemies.onReaction(...) directly.
+  player.addShield(settings.combat.stoneskin.amount, settings.combat.stoneskin.duration, settings.combat.stoneskin.reflectShare);
+
+  // One touching enemy planted right on the player so contact fires this tick.
+  const toucher = enemies.spawnAt(0.3, 0, 0, 0, 0); // swarm, well inside contact range of {0,0}
+  const hpBefore = enemies.hp[toucher];
+  const shieldBefore = player.shield;
+  run.tick(1 / 60, { x: 0, z: 0 });
+
+  assert.ok(player.shield < shieldBefore, 'reflect: contact drains the shield, not hp');
+  assert.equal(player.hp, settings.run.playerHp, 'reflect: fully absorbed (8 contact < 55 shield) — hp untouched');
+  const absorbed = shieldBefore - player.shield;
+  const expectedReflect = absorbed * settings.combat.stoneskin.reflectShare;
+  assert.ok(
+    Math.abs(hpBefore - enemies.hp[toucher] - expectedReflect) < 1e-6,
+    `reflect: the toucher takes back absorbed×reflectShare (want ${expectedReflect}, got ${hpBefore - enemies.hp[toucher]})`
+  );
+
+  // iceshield carries no reflectShare — an absorbed hit drains the pool but
+  // sends nothing back.
+  const enemies2 = new EnemySystem(createRng(52));
+  const player2 = new PlayerState();
+  const run2 = new RunManager({
+    enemies: enemies2, pickups: new PickupSystem(), player: player2, rng: createRng(52),
+    tides: new TideSchedule(createRng(52)),
+    projectiles: new EnemyProjectiles(),
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {}, book: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [] }
+  });
+  run2.start();
+  player2.addShield(settings.combat.iceshield.amount, settings.combat.iceshield.duration);
+  const toucher2 = enemies2.spawnAt(0.3, 0, 0, 0, 0);
+  const hp2Before = enemies2.hp[toucher2];
+  run2.tick(1 / 60, { x: 0, z: 0 });
+  assert.ok(player2.shield < settings.combat.iceshield.amount, 'reflect: iceshield still absorbs the contact');
+  assert.equal(enemies2.hp[toucher2], hp2Before, 'reflect: iceshield (reflectShare 0) sends nothing back');
+
+  console.log('ok  M6 T5: shield absorption + stoneskin reflect');
+}
+
 /* ---- pickups: drop, magnet, level math ---- */
 {
   const pickups = new PickupSystem();
@@ -560,6 +654,51 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(player.alive, false, 'player: lethal damage kills');
   player.reset();
   assert.ok(player.alive && player.hp === settings.run.playerHp);
+
+  // M6 T5: shield — absorbs first, never trips iframes on its own; only a
+  // remainder that pierces into hp does.
+  player.reset();
+  player.addShield(30, 6);
+  assert.equal(player.shield, 30, 'shield: addShield sets the pool');
+  assert.equal(player.shieldT, 6, 'shield: addShield sets the timer');
+  const hpBefore = player.hp;
+  assert.ok(player.takeDamage(20), 'shield: an absorbed hit still reports as landing');
+  assert.equal(player.hp, hpBefore, 'shield: absorption order — hp untouched while the pool covers the hit');
+  assert.equal(player.shield, 10, 'shield: the pool takes the hit, not hp');
+  assert.equal(player.iframes, 0, 'shield: a fully-absorbed hit does not spend iframes');
+  assert.ok(player.takeDamage(5), 'shield: iframes were never armed, so the very next hit still lands');
+  assert.equal(player.hp, hpBefore, 'shield: second hit also fully absorbed (10 pool covers 5)');
+  assert.equal(player.shield, 5, 'shield: pool keeps draining');
+
+  // Pierce-through: a hit bigger than what's left in the pool spends the
+  // pool, and only the remainder both reaches hp and arms iframes.
+  assert.ok(player.takeDamage(20), 'shield: a hit bigger than the pool still lands');
+  assert.equal(player.shield, 0, 'shield: pool is fully spent');
+  assert.equal(player.hp, hpBefore - 15, 'shield: only the pierced remainder (20-5) reaches hp');
+  assert.ok(player.iframes > 0, 'shield: the pierced remainder arms iframes same as an unshielded hit');
+  assert.ok(!player.takeDamage(5), 'shield: iframes now guard the next hit, as normal');
+
+  // Expiry: tick decays shieldT; hitting zero zeroes the pool even if it was
+  // never touched.
+  player.reset();
+  player.addShield(40, 0.05);
+  for (let t = 0; t < 10; t++) player.tick(1 / 60); // 10/60s comfortably clears 0.05s
+  assert.equal(player.shieldT, 0, 'shield: tick decays the timer to zero');
+  assert.equal(player.shield, 0, 'shield: expiry zeroes the pool even though it was never hit');
+
+  // 覆盖式取大: a smaller cast never downgrades a bigger surviving shield
+  // (amount AND duration both held back together); an equal-or-bigger cast
+  // replaces the whole bundle.
+  player.reset();
+  player.addShield(40, 6);
+  player.addShield(10, 20);
+  assert.equal(player.shield, 40, 'shield: a smaller cast does not shrink the pool');
+  assert.equal(player.shieldT, 6, 'shield: ...nor does it graft its own longer duration on top');
+  player.addShield(55, 7, 0.3);
+  assert.equal(player.shield, 55, 'shield: an equal-or-bigger cast overwrites the pool');
+  assert.equal(player.shieldT, 7, 'shield: ...and its own duration comes with it');
+  assert.equal(player.reflectShare, 0.3, 'shield: ...and its own reflectShare, same bundle');
+
   console.log('ok  player state');
 }
 

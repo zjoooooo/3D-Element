@@ -34,6 +34,17 @@ export class CombatSystem {
      * EnemySystem per enemy, so a mixed crowd nets out; the ledger only needs
      * to rank skills against each other, not settle the run's exact total. */
     this.damageDealt = Object.create(null);
+    /**
+     * M6 T5 (冰晶甲/石肤): this tick's shield application, if any. Reused in
+     * place every tick (never a fresh object) — `amount` reads 0 when no
+     * shield-kind cast detonated this tick. Same "CombatSystem stays player-
+     * agnostic, RunManager applies it" shape as `tick()`'s own `healDue`
+     * return, just surfaced as a public field instead of a second return
+     * value — `tick()`'s numeric return is already pinned by an M6 T4
+     * assertion (`healCombat.tick(...) === 0`), so reusing it as a second
+     * channel would break that contract instead of extending it.
+     */
+    this.shieldDue = { amount: 0, duration: 0, reflectShare: 0 };
   }
 
   /** Wipe the damage ledger — a fresh run starts counting from zero. */
@@ -98,6 +109,7 @@ export class CombatSystem {
    */
   tick(step, active) {
     let healDue = 0;
+    this.shieldDue.amount = 0;
     for (const ability of active) {
       const c = settings.combat[ability.element];
       if (!c || c.kind === 'self') continue;
@@ -178,6 +190,32 @@ export class CombatSystem {
             if (this._dot(castId, step, c.burnDps * this._amp(ability) * resonance)) {
               const amt = this._take(castId);
               this._book(ability.element, amt, this.targets.damage(ability.position, c.radius, amt, wux));
+            }
+          }
+          break;
+        }
+
+        case 'shield': {
+          // Detonates once per cast, same idiom as burst above — except there
+          // is no travel/arrival to gate on: a shield cast is self-centred
+          // and instant (ShieldSkill's own `advance()` never reports
+          // anything else), so "on cast" and "the first tick this ability is
+          // active" are the same moment. Gating on `_detonated` alone (no
+          // phase check — every ability `tick()` ever sees is already past
+          // idle by construction) keeps this decoupled from however long
+          // ShieldSkill's own VFX phase machine later chooses to hold the
+          // ring up for (see that class's own doc).
+          if (!this._detonated.has(castId)) {
+            this._detonated.add(castId);
+            const amt = c.amount * this._amp(ability);
+            // Take the larger of two casts that happen to detonate the same
+            // tick (a near-impossible coincidence, but resolved the same
+            // order-independent way PlayerState.addShield's own take-max
+            // already is) rather than reporting both.
+            if (amt >= this.shieldDue.amount) {
+              this.shieldDue.amount = amt;
+              this.shieldDue.duration = c.duration;
+              this.shieldDue.reflectShare = c.reflectShare ?? 0;
             }
           }
           break;

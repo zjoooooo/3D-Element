@@ -296,6 +296,11 @@ export class App {
       // FireballAbility books its self-resolved hits straight into the run's
       // damage ledger (D-M3-8) — same wiring shape as ctx.mods above.
       this.abilities.ctx.stats = this.combat;
+      // M6 T5: ShieldSkill reads ctx.playerState.shieldT to know how long its
+      // ring should keep holding (see that class's own doc) — sandbox-absent,
+      // same as playerState itself; the class falls back to a fixed preview
+      // duration there instead of reading this.
+      this.abilities.ctx.playerState = this.playerState;
       this.targets.register(this.enemySystem);
       // One schedule per page load, seeded off the same run rng — but
       // RunManager.start() reshuffles it every call, so a restart still deals
@@ -1740,7 +1745,8 @@ export class App {
         this.playerState.hp,
         this.playerState.maxHp,
         this.playerState.mana,
-        settings.run.manaMax
+        settings.run.manaMax,
+        this.playerState.shield
       );
       // The verdict borrows the hp span, so a live update would stamp it out.
       if (this.run.active) {
