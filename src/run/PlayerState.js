@@ -21,6 +21,7 @@ export class PlayerState {
     this.dodgeCooldown = 0;
     /** {element, behavior} of whoever landed the last hit — the verdict's death line. */
     this.lastHitBy = null;
+    this.mana = settings.run.manaMax;
   }
 
   takeDamage(amount, source = null) {
@@ -49,8 +50,22 @@ export class PlayerState {
     return true;
   }
 
+  spendMana(cost) {
+    if (!this.alive || this.mana < cost) return false;
+    this.mana -= cost;
+    return true;
+  }
+
+  gainMana(amount) {
+    if (!this.alive) return;
+    this.mana = Math.min(settings.run.manaMax, this.mana + amount);
+  }
+
   tick(step) {
     this.iframes = Math.max(0, this.iframes - step);
     this.dodgeCooldown = Math.max(0, this.dodgeCooldown - step);
+    if (this.alive) {
+      this.mana = Math.min(settings.run.manaMax, this.mana + settings.run.manaRegen * step);
+    }
   }
 }

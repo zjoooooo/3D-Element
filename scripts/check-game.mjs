@@ -355,6 +355,48 @@ import { STRINGS, t } from '../src/ui/strings.js';
   console.log('ok  player state');
 }
 
+/* ---- mana ---- */
+{
+  const player = new PlayerState();
+  // Full pool on reset
+  assert.equal(player.mana, settings.run.manaMax, 'mana: reset fills the pool');
+
+  // Spend success deducts exactly
+  assert.ok(player.spendMana(10), 'mana: spend succeeds when funded');
+  assert.equal(player.mana, settings.run.manaMax - 10, 'mana: spend deducts exactly');
+
+  // Insufficient spend returns false and deducts nothing
+  const beforeFail = player.mana;
+  assert.ok(!player.spendMana(beforeFail + 1), 'mana: insufficient spend returns false');
+  assert.equal(player.mana, beforeFail, 'mana: insufficient spend deducts nothing');
+
+  // One second of ticks ≈ +4 (1e-3 tolerance)
+  player.mana = 0;
+  for (let t = 0; t < 60; t++) player.tick(1 / 60);
+  assert.ok(
+    Math.abs(player.mana - settings.run.manaRegen) < 1e-3,
+    `mana: one second regen ≈ ${settings.run.manaRegen} (got ${player.mana.toFixed(6)})`
+  );
+
+  // gainMana clamps at max
+  player.reset();
+  player.gainMana(50);
+  assert.equal(player.mana, settings.run.manaMax, 'mana: gainMana clamps at max');
+
+  // Dead player: no regen, no gain, no spend
+  player.reset();
+  player.alive = false;
+  const deadMana = player.mana;
+  player.tick(1 / 60);
+  assert.equal(player.mana, deadMana, 'mana: dead player does not regen');
+  assert.ok(!player.spendMana(1), 'mana: dead player cannot spend');
+  assert.equal(player.mana, deadMana, 'mana: dead player spend deducts nothing');
+  player.gainMana(10);
+  assert.equal(player.mana, deadMana, 'mana: dead player gainMana does nothing');
+
+  console.log('ok  mana');
+}
+
 /* ---- run manager: schedule, deaths feed gems, verdicts ---- */
 {
   const rng = createRng(7);
@@ -407,6 +449,16 @@ import { STRINGS, t } from '../src/ui/strings.js';
   assert.ok(run.pendingLevels >= 2, `run: level-ups queue (got ${run.pendingLevels})`);
   run.start();
   assert.equal(run.pendingLevels, 0, 'run: restart clears the queue');
+
+  // Mana on kill: RunManager's onDeath grants mana.
+  run.start();
+  player.spendMana(10); // spend so there's room for regen
+  const manaBefore = player.mana;
+  enemies.clear();
+  enemies.spawnAt(0, 0, 0);
+  enemies.damage({ x: 0, z: 0 }, 1, 1e6);
+  assert.ok(run.kills > 0, 'run: the blast killed something');
+  assert.equal(player.mana, manaBefore + settings.run.manaPerKill, 'mana: kill grants manaPerKill');
 
   // Verdicts.
   player.hp = 0;

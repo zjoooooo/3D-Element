@@ -57,6 +57,7 @@ export class RunManager {
       // still construct RunManager without a modifiers collaborator — they
       // never arm a reaction either, so this is the only spot that needs it.
       if (this.s.modifiers?.resonates(1)) this.s.player.heal(settings.resonance.woodKillHeal);
+      this.s.player.gainMana(settings.run.manaPerKill);
     };
     this.s.enemies.onFire = (x, z, dx, dz, dmg) => this.s.projectiles.spawn(x, z, dx, dz, dmg);
     this.s.enemies.onReaction = (markWux, wux, x, z, amount) => this._react(markWux, wux, x, z, amount);

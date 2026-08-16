@@ -229,6 +229,9 @@ export const settings = {
     dodgeCooldown: 2,
     autocastDamage: 0.85, // 自动施法: a slot left on auto pays 15% less
     godMode: false, // debug: take no damage, everything else runs
+    manaMax: 100, // 法力池容量
+    manaRegen: 4, // 法力回复速率（每秒）
+    manaPerKill: 1, // 击杀回蓝量
     draftLoadout: true, // run starts with seat 0 only; false = all six (debug)
     // The six abilities on stage in run mode, in slot order:
     // left mouse, right mouse, Q, E, R, T. Every id must be one of ELEMENTS;
