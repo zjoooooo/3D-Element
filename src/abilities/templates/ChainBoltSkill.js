@@ -92,6 +92,46 @@ export function chainHops(enemies, from, hops, radius, seen = new Set()) {
 }
 
 /**
+ * Re-validate a remembered target (index + its own stable `id`) against the
+ * live population — the WYSIWYG fix (M6 T6 fix round): `onSpawn` remembers
+ * one target for the travel-phase visual to commit to, and `onImpact` must
+ * land its damage on that *same* enemy, not whichever `_findFirstTarget()`
+ * happens to turn up fresh.
+ *
+ * The index alone can't be trusted across that gap: `EnemySystem._kill`
+ * swap-removes on death, copying the population's last live slot into the
+ * gap — a *different*, still-living enemy can end up sitting at the
+ * remembered index by the time `onImpact` looks. The id is what actually
+ * identifies the body; this follows it by re-scanning only when the index
+ * no longer matches.
+ *
+ * @param {{x:Float32Array, z:Float32Array, id:Float64Array, count:number}} enemies
+ * @param {number} index  the index the target was found at, originally
+ * @param {number} id     `enemies.id[index]` at that same moment
+ * @param {number} range  metres — the target must still be this close to (ox,oz)
+ * @param {number} ox
+ * @param {number} oz
+ * @returns {number} the target's CURRENT index if it's still alive and in
+ *   range; -1 if it's gone (dead, or walked out of range) — the caller
+ *   should fall back to a fresh search.
+ */
+export function resolveTarget(enemies, index, id, range, ox, oz) {
+  let i = index;
+  if (i < 0 || i >= enemies.count || enemies.id[i] !== id) {
+    i = -1;
+    for (let k = 0; k < enemies.count; k++) {
+      if (enemies.id[k] === id) {
+        i = k;
+        break;
+      }
+    }
+  }
+  if (i === -1) return -1;
+  if (Math.hypot(enemies.x[i] - ox, enemies.z[i] - oz) >= range) return -1;
+  return i;
+}
+
+/**
  * ChainBoltSkill — chainbolt (连锁闪电), the other `self`-kind (D-M3-8) line
  * special. Pure VFX+damage, same as every other ability: no character
  * movement involved (unlike its DashStrikeSkill sibling), so App has no
@@ -99,15 +139,16 @@ export function chainHops(enemies, from, hops, radius, seen = new Set()) {
  *
  * First target: nearest enemy to the aim ray within a modest corridor, or
  * failing that the nearest enemy anywhere in range (`_findFirstTarget`).
- * `onSpawn` runs that search once — purely to snap the travel-phase visual
- * onto the real target instead of flying the fixed nominal range and
- * "arriving" somewhere past it — and `onImpact` runs it again, fresh,
- * because that second result is the one that actually decides the hit: the
- * brief's "resolution is instant at impact" reads as *when* the decision is
- * made, and a decision that was actually made 0.3s earlier (at spawn) could
- * see something an unrelated hit killed or moved in between. Re-scanning is
- * O(count) against a ≤300-enemy field, twice, once per ~1.2s cooldown — not
- * a hot path by any of this codebase's usual budgets.
+ * `onSpawn` runs that search once and *remembers* the answer (index + the
+ * enemy's own stable `id`, not the index alone — `onImpact` re-validates
+ * through `resolveTarget`, which follows the id through an EnemySystem
+ * swap-remove relocation rather than trusting a stale index) — spec §3
+ * 所见即所判 (WYSIWYG) is load-bearing here: the travel-phase bolt visually
+ * commits to flying at *that* target, so onImpact using a second, independent
+ * search that could land on a *different* enemy would make the bolt visibly
+ * streak toward A while the damage lands on B. `resolveTarget` only falls
+ * back to a fresh `_findFirstTarget()` call when the remembered target is
+ * actually gone (dead, or walked out of range) — not on every impact.
  *
  * Damage lands all at once in `onImpact` (first hit + every hop, decaying
  * `hopDecay` per hop) via `ctx.targets.damage` — plain damage, not
@@ -168,6 +209,12 @@ export class ChainBoltSkill extends Ability {
      * travel visual — `_findFirstTarget` always searches along this, never
      * `this.direction` (see that method's own doc). */
     this._aimDir = new Vector3();
+    /** The target `onSpawn` found and committed the travel visual to — index
+     * + the enemy's own stable id, re-validated by `resolveTarget` at
+     * `onImpact` rather than re-searched independently (see class doc,
+     * WYSIWYG fix). -1 when nothing was found (fizzle, or sandbox). */
+    this._targetIndex = -1;
+    this._targetId = -1;
     this._hit = false;
   }
 
@@ -261,19 +308,23 @@ export class ChainBoltSkill extends Ability {
     for (let i = 0; i < this._landed.length; i++) this._landed[i] = false;
     this._aimDir.copy(this.direction);
 
-    // Visual-only snap: aim the travel-phase bolt at the real target instead
-    // of the fixed nominal range, so it doesn't fly past a close enemy
-    // before "arriving." onImpact re-resolves the actual hit fresh (see
-    // class doc) — this redirect never feeds back into that.
-    const first = this._findFirstTarget();
-    if (first !== -1) {
+    // Commit to one target: the travel-phase bolt visually aims here instead
+    // of flying past it to the fixed nominal range, and onImpact's damage
+    // must land on this *same* enemy (WYSIWYG, see class doc) — remembered
+    // by id, not just index, so a swap-remove elsewhere in the population
+    // during travel can't quietly point the index at someone else.
+    this._targetIndex = this._findFirstTarget();
+    if (this._targetIndex !== -1) {
       const enemies = this.ctx.enemies;
-      const dx = enemies.x[first] - this.origin.x;
-      const dz = enemies.z[first] - this.origin.z;
+      this._targetId = enemies.id[this._targetIndex];
+      const dx = enemies.x[this._targetIndex] - this.origin.x;
+      const dz = enemies.z[this._targetIndex] - this.origin.z;
       const dist = Math.max(0.5, Math.hypot(dx, dz));
       this.direction.set(dx / dist, 0, dz / dist);
       this.side.crossVectors(this.direction, _up).normalize();
       this.length = dist;
+    } else {
+      this._targetId = -1;
     }
   }
 
@@ -300,7 +351,18 @@ export class ChainBoltSkill extends Ability {
     this._chainPoints[0].copy(this.origin).setY(1.0);
     this._chainCount = 1;
 
-    const first = this._findFirstTarget();
+    // Land on the SAME enemy the travel-phase bolt visually committed to in
+    // onSpawn (WYSIWYG, see class doc) — resolveTarget follows it through a
+    // possible swap-remove relocation; a fresh _findFirstTarget() only runs
+    // when that target is actually gone (never found one at spawn, died, or
+    // walked out of range since).
+    const enemies = this.ctx.enemies;
+    let first = -1;
+    if (this._targetIndex !== -1 && enemies) {
+      first = resolveTarget(enemies, this._targetIndex, this._targetId, c.range, this.origin.x, this.origin.z);
+    }
+    if (first === -1) first = this._findFirstTarget();
+
     if (first === -1) {
       this._hit = false;
       this.ribbon.clear();
@@ -309,7 +371,6 @@ export class ChainBoltSkill extends Ability {
     }
     this._hit = true;
 
-    const enemies = this.ctx.enemies;
     const wux = settings.combat.wuxingOf[this.element] ?? -1;
     // Same four factors CombatSystem's own `_amp()` folds in for every other
     // kind, inlined here since kind:'self' skips it — mirrors

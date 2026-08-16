@@ -24,7 +24,7 @@ import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
-import { chainHops } from '../src/abilities/templates/ChainBoltSkill.js';
+import { chainHops, resolveTarget } from '../src/abilities/templates/ChainBoltSkill.js';
 import { dashTarget, dashLineHits } from '../src/abilities/templates/DashStrikeSkill.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -764,6 +764,88 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(settings.dashstrike.damage, 280, 'dashstrike: controller-ruled base damage pinned');
 
   console.log('ok  M6 T6: dashLineHits (dash path damage)');
+}
+
+/* ---- M6 T6 fix round: dashstrike IS reachable via fusion today ---- */
+{
+  // Reviewer-caught: the original report's "no legal fusion partner exists"
+  // risk framing was wrong. Ran against the real FUSIONS table (T2 data,
+  // untouched by this task): dashstrike (金, wux 0) both FEEDS iceshield
+  // (水, wux 2 — FEEDS[0]===2) and is FED BY rockspikes (土, wux 4 —
+  // FEEDS[4]===0), and both pairs already have named entries. A player who
+  // levels either pair to fusion.minLevel (4) in a normal run reaches
+  // App's dash-displacement hook through the golden seat.
+  const loadout = new Loadout();
+  loadout.acquire('dashstrike');
+  loadout.acquire('iceshield');
+  loadout.acquire('rockspikes');
+  for (const el of ['dashstrike', 'iceshield', 'rockspikes']) {
+    while (loadout.levelOf(el) < settings.fusion.minLevel) loadout.upgrade(el);
+  }
+  const eligible = loadout.eligibleFusions();
+  assert.ok(
+    eligible.some((f) => f.a === 'dashstrike' && f.b === 'iceshield' && f.name === '霜刃洪流'),
+    'eligibleFusions: dashstrike(金) feeds iceshield(水) — 霜刃洪流 eligible at Lv4/Lv4'
+  );
+  assert.ok(
+    eligible.some((f) => f.a === 'rockspikes' && f.b === 'dashstrike' && f.name === '锋岩星阵'),
+    'eligibleFusions: rockspikes(土) feeds dashstrike(金) — 锋岩星阵 eligible at Lv4/Lv4'
+  );
+
+  console.log('ok  M6 T6 fix: dashstrike fusion pairs (霜刃洪流/锋岩星阵) eligible at Lv4/Lv4');
+}
+
+/* ---- M6 T6 fix round: resolveTarget — chainbolt's WYSIWYG re-validation ---- */
+{
+  // Untouched: same id at the same index resolves straight through.
+  {
+    const enemies = new EnemySystem(createRng(66));
+    const target = enemies.spawnAt(0, 5, 0);
+    const id = enemies.id[target];
+    assert.equal(resolveTarget(enemies, target, id, 14, 0, 0), target, 'resolveTarget: untouched target resolves at its own index');
+  }
+
+  // Relocated: an unrelated death elsewhere in the population swap-removes —
+  // EnemySystem._kill copies the population's last live slot into the
+  // vacated one. Filler @ index 0, target @ index 1 (the last slot); killing
+  // filler copies target's own data down into slot 0, relocating it under
+  // the same id.
+  {
+    const enemies = new EnemySystem(createRng(67));
+    const filler = enemies.spawnAt(0, 0, 0);
+    const target = enemies.spawnAt(0, 5, 0);
+    const targetId = enemies.id[target];
+    enemies.damage({ x: 0, z: 0 }, 0.5, 1000, -1); // kills only filler (target is 5m away, out of this radius)
+    assert.equal(enemies.count, 1, 'resolveTarget setup: filler died, one enemy left');
+    const resolved = resolveTarget(enemies, target, targetId, 14, 0, 0);
+    assert.equal(resolved, 0, "resolveTarget: follows a swap-remove relocation to the enemy's new index");
+    assert.equal(enemies.id[resolved], targetId, 'resolveTarget: the resolved index really is the same enemy (matching id)');
+    assert.equal(enemies.z[resolved], 5, "resolveTarget: resolved position is the relocated enemy's own, not the filler's");
+  }
+
+  // Gone: the remembered target itself died — its id no longer exists
+  // anywhere in the population, so this must signal "re-search," not -1's
+  // opposite (a stale index that happens to still pass the bounds check).
+  {
+    const enemies = new EnemySystem(createRng(68));
+    const target = enemies.spawnAt(0, 5, 0);
+    const targetId = enemies.id[target];
+    enemies.damage({ x: 0, z: 5 }, 0.5, 1000, -1);
+    assert.equal(enemies.count, 0, 'resolveTarget setup: the target itself died, field now empty');
+    assert.equal(resolveTarget(enemies, target, targetId, 14, 0, 0), -1, 'resolveTarget: a dead target (id gone entirely) signals re-search');
+  }
+
+  // Out of range: still alive, same id, same index, but walked past `range`
+  // since it was remembered — also a re-search signal, not a stale hit.
+  {
+    const enemies = new EnemySystem(createRng(69));
+    const target = enemies.spawnAt(0, 5, 0);
+    const targetId = enemies.id[target];
+    enemies.z[target] = 500;
+    assert.equal(resolveTarget(enemies, target, targetId, 14, 0, 0), -1, 'resolveTarget: alive but walked out of range also signals re-search');
+  }
+
+  console.log('ok  M6 T6 fix: resolveTarget (relocation/death/range all correctly signal re-search)');
 }
 
 /* ---- pickups: drop, magnet, level math ---- */

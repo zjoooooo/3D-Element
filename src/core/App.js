@@ -750,6 +750,14 @@ export class App {
         break;
       case 'dodge': {
         if (this.runMode) this._markHintDone('dodge');
+        // M6 T6 fix round: the lerp channel has one target at a time (see
+        // `_dashing`'s own doc) — a dodge pressed while it's already in
+        // flight (a dash, or an earlier dodge's own roll window) must not
+        // spend a second cooldown+i-frames for a displacement the
+        // still-running lerp would silently overwrite next frame. Checked
+        // before `tryDodge()`, not after, so neither the cooldown nor the
+        // i-frames are ever spent on a dodge that can't actually move you.
+        if (this.runMode && this._dashing) break;
         if (!this.runMode || !this.playerState.tryDodge()) break;
         // Dash along the current move axis, or facing when standing still.
         const axis = this.input.moveAxis(this._moveAxis);
@@ -963,6 +971,33 @@ export class App {
   }
 
   /**
+   * M6 T6 fix round (reviewer-caught): true while the physical dash/dodge
+   * lerp (`_dodgeStart → _dodgeTarget`, driven by `frame()`'s steer-gate) is
+   * still in flight. The channel has exactly one target at a time — a
+   * second write into `_dodgeStart`/`_dodgeTarget`/`_dodgeT`/`_dodgeDuration`
+   * while one is already running doesn't queue, it *overwrites*, so the
+   * still-running lerp simply teleports to wherever the OLD target was one
+   * more frame and then snaps onto the new one — the first displacement
+   * never actually happens, but its cooldown/resource already got spent.
+   * This is the exclusivity gate both a second dodge (`case 'dodge'`) and a
+   * dashstrike cast (`_cast`/`_quickCastToward`, below) check before
+   * spending anything. `0 < 0` is false, so a fresh app (or one that has
+   * never dashed) reads `false` by construction — no separate "never
+   * dashed yet" case needed.
+   */
+  get _dashing() {
+    return this._dodgeT < this._dodgeDuration;
+  }
+
+  /** True when casting `element` would run DashStrikeSkill's own
+   * displacement hook — directly, or as either half of a fused pair (the
+   * fusion branch of `_quickCastToward` calls `_dashDisplace` per part too,
+   * see its own comment) — i.e. the set `_dashing` needs to gate against. */
+  _castsDash(element) {
+    return element === 'dashstrike' || (isFusionId(element) && fusionParents(element).includes('dashstrike'));
+  }
+
+  /**
    * M6 T6 (弑神一闪): the physical half of a dashstrike cast. The ability
    * class itself is pure VFX+damage, like every other ability (see
    * DashStrikeSkill's own doc) — the caster's own teleport rides the exact
@@ -981,6 +1016,9 @@ export class App {
    * still frozen the instant a demo fires, so queuing a teleport there would
    * either be silently dropped or fire stale once the hand closes, neither
    * of which reads as the "free instant preview" the demo is supposed to be.
+   * By the time this runs, `_castsDash`+`_dashing` has already refused the
+   * cast outright if the channel was busy (see both call sites) — this
+   * never has to defend against overwriting a lerp itself.
    *
    * Run-mode only — the sandbox has no playerState/character-lerp channel
    * to move (contract: sandbox casts are VFX-only, the character stays put).
@@ -1009,6 +1047,15 @@ export class App {
 
   _cast(origin, direction, distance) {
     const element = this.element;
+    // M6 T6 fix round: the dash/dodge lerp channel is exclusive (see
+    // `_dashing`'s own doc) — refused upfront, before the mana gate and
+    // every other five-field write, same "a refused cast writes nothing"
+    // shape the mana gate itself already follows. `element` here is never a
+    // fusion id (`_cast` is only ever reached via `aim.quickCast()`'s 'cast'
+    // event, which `_quickCast` never routes a fusion id through — see its
+    // own branch), so `_castsDash` degrades to the plain `=== 'dashstrike'`
+    // check, but stays the one shared predicate with `_quickCastToward`.
+    if (this.runMode && this._dashing && this._castsDash(element)) return;
     // 法力消费门 (M6 T3, spec 锚2.5): run-mode only — sandbox never
     // constructs `playerState`, same reason every `this.runMode ?` guard
     // below this one exists. Sits before every side effect a real cast has
@@ -1113,6 +1160,12 @@ export class App {
     // autocast, the acquire-a-new-active demo shot, and a fusion hand-off's
     // shared target point, so an aura seat has to be refused here too.
     if (settings.combat[element]?.kind === 'aura') return;
+    // M6 T6 fix round: same exclusive-channel refusal `_cast` applies, ahead
+    // of the mana gate/any five-field write (see `_dashing`'s own doc).
+    // Skipped for a demo cast — `_dashDisplace`'s own `!demo` guard means a
+    // demo never touches the lerp channel at all, so there is no collision
+    // here for this to prevent.
+    if (this.runMode && !demo && this._dashing && this._castsDash(element)) return;
 
     const origin = this.character.position;
     const dx = tx - origin.x;
