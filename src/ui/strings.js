@@ -33,6 +33,10 @@ export const STRINGS = {
     'run.tideTurn': '潮来临',
     'run.sequenceChain': '相生轮转',
     'run.shardFizzle': '残章逸散',
+    // 禁咒 (App#_fireUltimate / RunHud's ult field).
+    'ult.label': '禁咒',
+    'ult.fired': '禁咒已释放',
+    'ult.notReady': '禁咒未充能',
     // VerdictPanel (+ its deathLine, composed in App and passed in already-built).
     'verdict.won': '生存达成',
     'verdict.lost': '倒下了',
@@ -56,6 +60,9 @@ export const STRINGS = {
     'run.tideTurn': 'tide rising',
     'run.sequenceChain': 'Chain Bonus',
     'run.shardFizzle': 'Page scattered',
+    'ult.label': 'Ult',
+    'ult.fired': 'Ultimate unleashed',
+    'ult.notReady': 'Ultimate not charged',
     'verdict.won': 'Run Complete',
     'verdict.lost': 'You Fell',
     'verdict.survived': 'Survived',

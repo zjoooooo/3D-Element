@@ -100,6 +100,9 @@ export class InputManager extends EventEmitter {
         this.emit('action', 'ability', 2);
         break;
       case 'KeyF':
+        // Slot 3 has no run-mode loadout seat (RUN_KEY_SLOTS) — App reroutes
+        // it to the 禁咒 ultimate there instead, since this class has no idea
+        // whether a run is even active. Sandbox keeps this as Nova Beam.
         this.emit('action', 'ability', 3);
         break;
       case 'KeyV':

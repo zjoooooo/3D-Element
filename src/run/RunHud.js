@@ -1,5 +1,6 @@
 import { WUXING_LABEL } from './TideSchedule.js';
 import { t } from '../ui/strings.js';
+import { settings } from '../config/settings.js';
 
 /**
  * M1's grey readouts: hp, clock, kills, level. The real HUD — glass bottles,
@@ -14,6 +15,7 @@ export class RunHud {
       '<span class="run-hud__bar"><i data-fill></i></span>' +
       '<span data-k="hp"></span><span data-k="time"></span>' +
       '<span data-k="kills"></span><span data-k="level"></span>' +
+      '<span data-k="ult"></span>' +
       '<span data-k="tide"></span><span data-k="resonance"></span>';
     parent.appendChild(this.root);
     this._fields = Object.fromEntries(
@@ -24,7 +26,7 @@ export class RunHud {
     this._lastPct = -1;
   }
 
-  update(player, run, pickups, tideInfo, resonanceText) {
+  update(player, run, pickups, tideInfo, resonanceText, ultCharge) {
     // The red bar is the read; the number backs it up. Max HP comes in on the
     // player rather than from settings so this stays a dumb display.
     const pct = Math.round((player.hp / (player.maxHp || 100)) * 100);
@@ -37,6 +39,8 @@ export class RunHud {
     this._set('time', `${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`);
     this._set('kills', `${t('run.kills')} ${run.kills}`);
     this._set('level', `${t('run.level')} ${pickups.level}`);
+    // Text-only stopgap for 禁咒's charge — Task 6 replaces this with a real ring.
+    this._set('ult', `${t('ult.label')} ${ultCharge}/${settings.ultimate.chargeMax}`);
     this._set(
       'tide',
       `${WUXING_LABEL[tideInfo.element]}${t('run.tide')} ${Math.ceil(tideInfo.timeLeft)}s · ${t('run.nextTide')} ${WUXING_LABEL[tideInfo.nextElement]}`

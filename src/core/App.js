@@ -28,6 +28,7 @@ import { Loadout } from '../run/Loadout.js';
 import { UpgradePool } from '../run/UpgradePool.js';
 import { UpgradeUi } from '../run/UpgradeUi.js';
 import { VerdictPanel } from '../run/VerdictPanel.js';
+import { Ultimate } from '../run/Ultimate.js';
 import { RunManager } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
@@ -219,6 +220,11 @@ export class App {
       this.tideSchedule = new TideSchedule(rng);
       this.enemyProjectiles = new EnemyProjectiles();
       this.scene.add(this.enemyProjectiles.points);
+      // 禁咒 (spec §4.9): one full-field ultimate per wuxing, charged by kills
+      // and reactions (RunManager below already wires gainKill/gainReaction/
+      // tick/reset onto whatever sits at `ultimate`) and fired by F/Digit4
+      // through _fireUltimate. `wuxing` is set below, after loadout.reset().
+      this.ultimate = new Ultimate({ enemies: this.enemySystem, player: this.playerState, combat: this.combat, rng });
       this.run = new RunManager({
         enemies: this.enemySystem,
         pickups: this.pickups,
@@ -229,6 +235,7 @@ export class App {
         abilities: this.abilities,
         tides: this.tideSchedule,
         projectiles: this.enemyProjectiles,
+        ultimate: this.ultimate,
         rng
       });
       this.runHud = new RunHud();
@@ -264,6 +271,10 @@ export class App {
       };
       this._lastHp = settings.run.playerHp;
       this.loadout.reset();
+      // 本命系 (spec §4.9): the ultimate's home element is whatever the draft/
+      // debug reset above put in seat 0. Placeholder until Task 11's real
+      // title-screen draft picks it before the run even starts.
+      this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0));
       this.modifiers.reset();
       this.run.start();
       this._refreshResonance();
@@ -402,6 +413,12 @@ export class App {
     switch (action) {
       case 'ability': {
         if (this.runMode) {
+          // Slot 3 (KeyF and Digit4 both emit it — InputManager doesn't know
+          // about runMode, so it always emits ability/3 for either key) has
+          // no loadout seat of its own (RUN_KEY_SLOTS has no 3 entry, so this
+          // used to be a dead key in a run): that's exactly the seat 禁咒
+          // borrows instead of adding a new key.
+          if (slot === 3) { this._fireUltimate(); break; }
           // Keys cast their loadout seat straight away; unseated keys do nothing.
           const seat = RUN_KEY_SLOTS[slot];
           if (seat !== undefined) this._quickCast(this.loadout.elementAt(seat));
@@ -452,6 +469,7 @@ export class App {
           // A fresh run starts with every ability ready.
           for (const element of this.cooldowns.keys()) this.cooldowns.set(element, 0);
           this.loadout.reset();
+          this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0)); // seat 0 again (see constructor)
           this.modifiers.reset();
           this._syncRunHudLabels();
           this._autocast.clear();
@@ -547,6 +565,29 @@ export class App {
     if ((this.cooldowns.get(element) ?? 0) > 0) return;
     if (element !== this.element) this.selectAbility(element, { silent: true });
     this.aim.quickCast();
+  }
+
+  /**
+   * 禁咒 (spec §4.9): F/Digit4's run-mode verb, routed here from
+   * `_handleAction`'s `case 'ability'` when slot === 3. A ready cast clears
+   * on its own (`Ultimate#fire`) and gets the big feedback — full-field
+   * effects don't otherwise show up on screen the way a thrown spell does;
+   * a refused one just toasts, spending nothing. Doesn't freeze the world
+   * either way (禁咒 is a burst inside combat, not a menu).
+   *
+   * Guard shape matches autocast's own loop in frame() — upgradeUi.isOpen is
+   * already caught by _handleAction's early return above this switch, so
+   * only the run-over half needs repeating here.
+   */
+  _fireUltimate() {
+    if (!this.run.active || this._verdict.value !== 'playing') return;
+    if (this.ultimate.fire(this.character.position)) {
+      this.flash.trigger(getColor('#fff2c8'), 0.45);
+      this.shake.add(1, 1.2, 20);
+      this.hud.showToast(t('ult.fired'));
+    } else {
+      this.hud.showToast(t('ult.notReady'));
+    }
   }
 
   /**
@@ -1131,7 +1172,7 @@ export class App {
       }
       this._lastHp = this.playerState.hp;
       // The verdict borrows the hp span, so a live update would stamp it out.
-      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide(), this._resonanceText());
+      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide(), this._resonanceText(), this.ultimate.charge);
     }
 
     // 自动施法: every seat left on auto fires itself at the nearest enemy,
