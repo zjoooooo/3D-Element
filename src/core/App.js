@@ -39,6 +39,9 @@ import { OrbBottles } from '../run/OrbBottles.js';
 import { DeathShards } from '../run/DeathShards.js';
 import { GameAudio } from '../run/GameAudio.js';
 import { resumeAudio } from '../run/audio/zzfx.js';
+import { TitleScreen } from '../run/TitleScreen.js';
+import { PauseMenu } from '../run/PauseMenu.js';
+import { applyPerfPreset } from '../run/perfPreset.js';
 import { getColor } from '../utils/color.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
@@ -104,6 +107,22 @@ function fusionWux(element) {
  * already does (spec §4.7 挂印取子系). */
 const CAST_SOUND = ['castMetal', 'castWood', 'castWater', 'castFire', 'castEarth'];
 
+/** 首局按键浮层 (spec §9): one hint per action group, each dismissed the
+ * first time its own action fires — see App#_markHintDone. */
+const HINT_IDS = ['move', 'aim', 'dodge', 'ult'];
+const HINTS_KEY = 'wuxing.hints.v1';
+
+/** Which hints a past session already dismissed. Swallows a disabled/full
+ * localStorage (Safari private mode, sandboxed embeds) the same way a
+ * missing record does: start with every hint still owed. */
+function loadHintsDone() {
+  try {
+    return JSON.parse(localStorage.getItem(HINTS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Application root: owns every subsystem and the frame loop.
  *
@@ -165,7 +184,11 @@ export class App {
 
     // Read once, so flipping the hash mid-session changes nothing until a
     // reload — off this gate, every frame is byte-identical to the sandbox.
-    this.runMode = location.hash === '#run';
+    // #run shows the title screen; #run=quick skips straight to a run with
+    // the configured loadout (every prior browser-verification script uses
+    // this to bypass the title) — both are runMode, decided again (title vs
+    // immediate start) at the end of this constructor.
+    this.runMode = location.hash === '#run' || location.hash === '#run=quick';
 
     this.targets = new Targets();
     // Dummies are sandbox furniture; in a run the horde is the only target
@@ -236,6 +259,18 @@ export class App {
       this.upgradePool = new UpgradePool(rng, this.loadout, this.modifiers);
       this.upgradeUi = new UpgradeUi();
       this.upgradeUi.onChoice = (result) => this._onUpgradeChoice(result);
+      // Esc's destination in a run (spec §9) — see the `_frozen` getter for
+      // how this shares UpgradeUi's freeze semantics.
+      this.pauseMenu = new PauseMenu({
+        onRestart: () => this._restart(),
+        onReturnToTitle: () => this._returnToTitle(),
+        // Belt-and-suspenders: RunHud's own per-frame update() already
+        // re-renders every t()-derived field next frame regardless, but
+        // this keeps the six-slot bar's hover titles in step too.
+        onLanguageChange: () => this._syncBadges(),
+        onPerfModeChange: (on) => applyPerfPreset(settings.global, on),
+        getBuildSummary: () => ({ lines: this._buildSummaryLines(), resonance: this._resonanceText() })
+      });
       this.verdictPanel = new VerdictPanel();
       this.pickups.mods = this.modifiers;
       // FireballAbility reads ctx.mods?.damageMult() straight from the ability
@@ -255,7 +290,8 @@ export class App {
       // 禁咒 (spec §4.9): one full-field ultimate per wuxing, charged by kills
       // and reactions (RunManager below already wires gainKill/gainReaction/
       // tick/reset onto whatever sits at `ultimate`) and fired by F/Digit4
-      // through _fireUltimate. `wuxing` is set below, after loadout.reset().
+      // through _fireUltimate. `wuxing` is set in startRun(), once the title
+      // screen (or #run=quick) has actually picked a seat-0 element.
       this.ultimate = new Ultimate({ enemies: this.enemySystem, player: this.playerState, combat: this.combat, rng });
       this.run = new RunManager({
         enemies: this.enemySystem,
@@ -292,6 +328,10 @@ export class App {
       // why that trick needs the camera itself sitting in the scene graph.
       this.orbBottles = new OrbBottles(canvas);
       this.camera.add(this.orbBottles.object3D);
+      // A THREE object, not DOM — the .pre-run CSS class that hides RunHud
+      // can't reach it. startRun() flips this back on; pre-run it would
+      // otherwise show a full/idle readout under the title screen's dim.
+      this.orbBottles.object3D.visible = false;
       this.scene.add(this.camera);
       // A death gets a small grey pop on top of RunManager's gem/kill wiring —
       // pure look, layered over the callback it already installed. The real
@@ -324,14 +364,12 @@ export class App {
         this._verdict.value = this.run.tick(step, this.character.position);
       };
       this._lastHp = settings.run.playerHp;
-      this.loadout.reset();
-      // 本命系 (spec §4.9): the ultimate's home element is whatever the draft/
-      // debug reset above put in seat 0. Placeholder until Task 11's real
-      // title-screen draft picks it before the run even starts.
-      this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0));
-      this.modifiers.reset();
-      this.run.start();
-      this._refreshResonance();
+      /** The 本命 the title screen picked (or #run=quick's default loadout[0])
+       * — remembered so 重开 reseats the same starting skill even after seat
+       * 0 has since fused into something else (see startRun()/_restart()). */
+      this._chosenElement = null;
+      this._hintsDone = loadHintsDone();
+      this._hintsBuilt = false;
     }
 
     /* ---- character ---- */
@@ -354,20 +392,14 @@ export class App {
       onClear: () => this.clearEffects(),
       onToast: (message) => this.hud.showToast(message),
       onResetDummies: () => this.dummies.reset(),
-      onCharacter: (id) => {
-        this.hud.showToast('Loading character…');
-        this.character
-          .setCharacter(id, this.assets)
-          .then(() => this.hud.showToast(`Character: ${id}`))
-          .catch((error) => {
-            console.error('[App] character switch failed', error);
-            this.hud.showToast('Character failed to load');
-          });
-      }
+      onCharacter: (id) => this._switchCharacter(id)
     });
 
     if (this.runMode) {
-      this._syncBadges();
+      // No _syncBadges() here any more: the loadout is still empty at this
+      // point (startRun() hasn't drafted a seat yet, whether that's about to
+      // happen immediately below for #run=quick or only later, on the title
+      // screen's pick) — startRun() itself syncs once real seats exist.
       this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}${t('run.tideTurn')}`);
       // 微顿帧 (M5 Task 9): a sheng detonation is a big moment. Elite kills and
       // 禁咒 fire trigger it from their own App-side call sites instead.
@@ -436,11 +468,40 @@ export class App {
     this._dodgeTarget = new Vector3();
     this._dodgeT = 0;
     this._dodgeDuration = 0;
+
+    // 标题屏 (spec §9/§9.5): #run shows it and waits for a card; #run=quick
+    // skips straight to a run with the configured loadout — every prior
+    // browser-verification script uses that hash, so this keeps them working
+    // byte-for-byte with no title screen in the way. Built either way (even
+    // for a quick start) so 回标题 always has an instance to show later.
+    if (this.runMode) {
+      document.body.classList.add('pre-run');
+      this.titleScreen = new TitleScreen({
+        onStart: (element) => this.startRun(element),
+        onCharacter: (id) => this._switchCharacter(id)
+      });
+      if (location.hash === '#run=quick') this.startRun(settings.run.loadout[0]);
+    }
   }
 
   /** The ability currently in the slot. */
   get element() {
     return this.abilities.selected;
+  }
+
+  /**
+   * Run mode's freeze gate: a level-up/shard hand or the pause menu is a
+   * full stop (spec: "run 模式暂停...=全停，含走位与施法"). Used to be spelled
+   * out three separate times as `this.runMode && this.upgradeUi.isOpen`
+   * (M2 review flagged the triplication) plus a fourth copy inside the
+   * runMode-gated block further down; unified here rather than re-copied a
+   * second cause into all four. Not cached into a local — every read is
+   * fresh, which is what lets the two spots that specifically care about a
+   * hand opening mid-tick (the echo/pendingLevels checks) just read this
+   * again instead of tracking their own "frozen at frame-start" snapshot.
+   */
+  get _frozen() {
+    return this.runMode && (this.upgradeUi.isOpen || this.pauseMenu.isOpen);
   }
 
   /* ------------------------------------------------------------------ */
@@ -460,8 +521,12 @@ export class App {
     this.input.on('pointer:move', (pointer) => this.aim.point(pointer));
     this.input.on('pointer:confirm', (pointer) => {
       this.aim.point(pointer);
-      if (this.runMode) this._quickCast(this.loadout.elementAt(0));
-      else this.aim.confirm();
+      if (this.runMode) {
+        this._quickCast(this.loadout.elementAt(0));
+        this._markHintDone('aim');
+      } else {
+        this.aim.confirm();
+      }
     });
     this.input.on('action', (action, slot) => this._handleAction(action, slot));
 
@@ -481,12 +546,103 @@ export class App {
     }
   }
 
+  /**
+   * Start (or restart) the run with `chosenElement` seated at slot 0 — the
+   * title screen's pick (spec §9.5), or `#run=quick`/`_restart()`'s replay
+   * of whatever was picked last. Never writes settings: `Loadout.draftFirst`
+   * keeps the choice as run state only (spec's "数值分层" rule — the
+   * sandbox's shipped `settings.run.loadout` is untouched either way).
+   */
+  startRun(chosenElement) {
+    this._chosenElement = chosenElement;
+    this.loadout.draftFirst(chosenElement);
+    // 本命系 (spec §4.9): the ultimate's home element is whatever just got
+    // seated at slot 0.
+    this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0));
+    this.modifiers.reset();
+    this.run.start();
+    this._refreshResonance();
+    this._syncBadges();
+    document.body.classList.remove('pre-run');
+    this.orbBottles.object3D.visible = true;
+    this.titleScreen.hide();
+    // Hints are a once-ever-per-browser affair (localStorage), not a
+    // per-run one — build them the first time a run actually begins, never
+    // again on a later restart/return-to-title/restart cycle.
+    if (!this._hintsBuilt) {
+      this._hintsBuilt = true;
+      this._buildHints();
+    }
+  }
+
+  /** Transient run-session state a restart or a return to the title both
+   * throw away — shared by `_restart()` and `_returnToTitle()`, which only
+   * differ in what happens after (a fresh `startRun()` vs showing the title
+   * screen again). Lifted straight from the pre-Task-11 restart handler. */
+  _resetRunState() {
+    this.clearEffects();
+    this.verdictPanel.hide();
+    for (const element of this.cooldowns.keys()) this.cooldowns.set(element, 0);
+    this._autocast.clear();
+    this._echoAt = null;
+    this._lastCastWux = -1;
+    this._lastCastAt = -Infinity;
+  }
+
+  /**
+   * 重开: reseat `_chosenElement` (the title's pick, not whatever seat 0
+   * evolved into via fusion) and start fresh. Shared by the verdict
+   * screen's Enter key and the pause menu's 重开 button, which differ only
+   * in when each is allowed to fire — see their own call sites.
+   */
+  _restart() {
+    this._resetRunState();
+    this.startRun(this._chosenElement);
+  }
+
+  /** 回标题: stop the run, wipe the same transient state a restart does,
+   * and show the title screen again so a different 本命 can be picked. */
+  _returnToTitle() {
+    this.run.stop();
+    this._resetRunState();
+    document.body.classList.add('pre-run');
+    this.orbBottles.object3D.visible = false;
+    this.titleScreen.show();
+  }
+
+  /** Build whichever hint lines a past session (localStorage) hasn't
+   * already dismissed — nothing at all when every hint is already done. */
+  _buildHints() {
+    const remaining = HINT_IDS.filter((id) => !this._hintsDone[id]);
+    if (!remaining.length) return;
+    this._hintsRoot = document.createElement('div');
+    this._hintsRoot.className = 'run-hints';
+    this._hintsRoot.innerHTML = remaining
+      .map((id) => `<div class="run-hints__line" data-hint="${id}">${t(`hint.${id}`)}</div>`)
+      .join('');
+    document.body.appendChild(this._hintsRoot);
+  }
+
+  /** Fade and forget one hint line — called from wherever its own action
+   * first fires (movement, aim/click, dodge, 禁咒). Persists immediately, so
+   * a hint dismissed this session never comes back on a later page load. */
+  _markHintDone(id) {
+    if (this._hintsDone[id]) return;
+    this._hintsDone[id] = true;
+    try {
+      localStorage.setItem(HINTS_KEY, JSON.stringify(this._hintsDone));
+    } catch {
+      /* storage disabled/full — the fade below still happens this session */
+    }
+    this._hintsRoot?.querySelector(`[data-hint="${id}"]`)?.classList.add('is-done');
+  }
+
   _handleAction(action, slot) {
-    // A level-up hand is a full stop. Its own keydown listener already
-    // swallows the keyboard in the capture phase before InputManager ever
-    // sees it; this is the double-check for whatever reaches here another
-    // way (the HUD's click path).
-    if (this.runMode && this.upgradeUi.isOpen) return;
+    // A level-up hand or the pause menu is a full stop. Each owns its own
+    // keydown listener already, swallowing the keyboard in the capture
+    // phase before InputManager ever sees it; this is the double-check for
+    // whatever reaches here another way (the HUD's click path).
+    if (this._frozen) return;
     switch (action) {
       case 'ability': {
         if (this.runMode) {
@@ -520,9 +676,21 @@ export class App {
         else this.aim.cancel();
         break;
       case 'cancel':
-        this.aim.cancel();
+        // Sandbox semantics untouched: Esc puts an armed cast away. In a
+        // run it opens the pause menu instead — only while the run is
+        // actually live, not over the verdict screen (run.stop() has
+        // already run by then; a second Esc there would have nothing
+        // sensible to pause). A pause menu already open can't reach this
+        // case at all (its own capture-phase listener eats Escape first),
+        // so this never needs to double as a close.
+        if (this.runMode) {
+          if (this.run.active) this.pauseMenu.open();
+        } else {
+          this.aim.cancel();
+        }
         break;
       case 'dodge': {
+        if (this.runMode) this._markHintDone('dodge');
         if (!this.runMode || !this.playerState.tryDodge()) break;
         // Dash along the current move axis, or facing when standing still.
         const axis = this.input.moveAxis(this._moveAxis);
@@ -560,22 +728,10 @@ export class App {
         break;
       }
       case 'restart':
-        if (this.runMode && !this.run.active) {
-          this.clearEffects();
-          this.verdictPanel.hide();
-          // A fresh run starts with every ability ready.
-          for (const element of this.cooldowns.keys()) this.cooldowns.set(element, 0);
-          this.loadout.reset();
-          this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0)); // seat 0 again (see constructor)
-          this.modifiers.reset();
-          this._autocast.clear();
-          this._syncBadges();
-          this._echoAt = null;
-          this._lastCastWux = -1;
-          this._lastCastAt = -Infinity;
-          this.run.start();
-          this._refreshResonance();
-        }
+        // Enter only restarts at the verdict screen — deliberately narrower
+        // than the pause menu's 重开 button (see _restart()'s own callers),
+        // so a stray Enter mid-fight can't blow away a live run.
+        if (this.runMode && !this.run.active) this._restart();
         break;
       case 'toggleHelp':
         this.hud.toggleHelp();
@@ -618,6 +774,22 @@ export class App {
     // ability's range on the frame it appears.
     if (element !== this.element) this.selectAbility(element);
     this.aim.arm();
+  }
+
+  /**
+   * The one real character-switch path (spec: 角色系统已实装), shared by the
+   * sandbox editor's dropdown and the title screen's own — so there is
+   * exactly one place that knows how to load a character and report it.
+   */
+  _switchCharacter(id) {
+    this.hud.showToast('Loading character…');
+    this.character
+      .setCharacter(id, this.assets)
+      .then(() => this.hud.showToast(`Character: ${id}`))
+      .catch((error) => {
+        console.error('[App] character switch failed', error);
+        this.hud.showToast('Character failed to load');
+      });
   }
 
   /**
@@ -671,11 +843,12 @@ export class App {
    * a refused one just toasts, spending nothing. Doesn't freeze the world
    * either way (禁咒 is a burst inside combat, not a menu).
    *
-   * Guard shape matches autocast's own loop in frame() — upgradeUi.isOpen is
+   * Guard shape matches autocast's own loop in frame() — this._frozen is
    * already caught by _handleAction's early return above this switch, so
    * only the run-over half needs repeating here.
    */
   _fireUltimate() {
+    this._markHintDone('ult'); // awareness of the key, not a successful cast — charge starts at 0
     if (!this.run.active || this._verdict.value !== 'playing') return;
     if (this.ultimate.fire(this.character.position)) {
       this.flash.trigger(getColor('#fff2c8'), 0.45);
@@ -1144,7 +1317,7 @@ export class App {
     // dt = 0 regardless of `_hitstop`. Run mode only — the sandbox never sets it.
     if (this.runMode) this._hitstop = tickHitstop(this._hitstop, raw);
     const worldRaw = this.runMode && this._hitstop > 0 ? raw * settings.run.hitstopFactor : raw;
-    const dt = this.paused || (this.runMode && this.upgradeUi?.isOpen) ? 0 : worldRaw * settings.global.timeScale;
+    const dt = this.paused || this._frozen ? 0 : worldRaw * settings.global.timeScale;
     this.elapsed += dt;
 
     /* ---- shared uniforms ---- */
@@ -1163,8 +1336,8 @@ export class App {
     // them. Everything downstream — the light focus, the aim origin, the dust,
     // the camera anchor, the contact shadows — already reads the character's
     // position, so moving it here is all that is needed for them to follow.
-    // A level-up hand is the one thing that does stop it.
-    if (!(this.runMode && this.upgradeUi.isOpen)) {
+    // A level-up hand or the pause menu is the one thing that does stop it.
+    if (!this._frozen) {
       // 翻滚闪避 (M5 Task 9): a roll in flight owns the position for its short
       // window instead of the WASD steer below — same freeze gate as this
       // whole block, so a hand opening mid-roll holds it in place rather than
@@ -1178,6 +1351,7 @@ export class App {
         );
       } else {
         this._steer(raw);
+        if (this.runMode && this._moveAxis.lengthSq() > 0) this._markHintDone('move');
       }
     }
 
@@ -1199,10 +1373,10 @@ export class App {
     }
     this.character.update(dt);
 
-    // A level-up hand freezes the world; a cooldown counting down behind it
-    // would hand back an ability the player never earned time for.
-    const frozen = this.runMode && this.upgradeUi.isOpen;
-    if (!frozen) {
+    // A level-up hand or the pause menu freezes the world; a cooldown
+    // counting down behind it would hand back an ability the player never
+    // earned time for.
+    if (!this._frozen) {
       for (const [element, remaining] of this.cooldowns) {
         if (remaining > 0) this.cooldowns.set(element, Math.max(0, remaining - raw));
       }
@@ -1224,21 +1398,23 @@ export class App {
       // return) means a cached read is 'playing' again one frame after death
       // or victory; "is the verdict screen up" is only truthfully answered
       // downstream by !run.active.
-      // A level-up hand is a full stop: the clock (and with it the echo timer)
-      // holds dead still behind it until a card is chosen. dt and _steer,
-      // gated where they live, freeze the character and VFX the same way.
-      const frozen = this.upgradeUi.isOpen;
-      if (!frozen) {
+      // A level-up hand or the pause menu is a full stop: the clock (and
+      // with it the echo timer) holds dead still behind it until a card is
+      // chosen or the menu closes. dt and _steer, gated where they live,
+      // freeze the character and VFX the same way.
+      if (!this._frozen) {
         // 微顿帧 reaches the fixed-step run clock too (worldRaw, not raw) —
         // see this frame's own dt computation above for why: enemies/combat
         // still ignore `settings.global.timeScale` (worldRaw carries no
         // timeScale factor), they just also feel the brief hitstop slow.
         this._runAlpha = this.gameClock.advance(worldRaw, this._runTick);
-        // Fresh read, not the frame-start `frozen`: advance() above can open
-        // a shard hand synchronously (onShardHand fires mid-tick), and an
-        // echo must not cast into a hand that opened this very frame. The
-        // short-circuit also holds the timer's own decrement here, same as
-        // the freeze holds everything else.
+        // Fresh read, not the check above (evaluated before advance() ran):
+        // advance() above can open a shard hand synchronously (onShardHand
+        // fires mid-tick), and an echo must not cast into a hand that
+        // opened this very frame. The pause menu can't change mid-tick the
+        // same way, so only upgradeUi needs the re-read here — the
+        // short-circuit also holds the timer's own decrement, same as the
+        // freeze holds everything else.
         if (!this.upgradeUi.isOpen && this._echoAt && (this._echoAt.t -= raw) <= 0) {
           const { element } = this._echoAt;
           this._echoAt = null;
@@ -1254,12 +1430,14 @@ export class App {
           this._echoing = false;
         }
       }
-      // Fresh read, not the frame-start `frozen`: a shard hand can have opened
-      // synchronously inside the advance() call just above (onShardHand fires
-      // mid-tick), and this branch must not clobber it. pendingLevels itself
-      // stays queued when skipped here — untouched until a later, unfrozen
-      // frame finds isOpen false again and this same check fires for real.
-      if (!this.upgradeUi.isOpen && this.run.active && this._verdict.value === 'playing' && this.run.pendingLevels > 0) {
+      // Fresh read (this._frozen, not a cached value from before advance()
+      // ran): a shard hand can have opened synchronously inside the
+      // advance() call just above (onShardHand fires mid-tick), and this
+      // branch must not clobber it — nor open a hand over the pause menu,
+      // which _frozen also now covers. pendingLevels itself stays queued
+      // when skipped here — untouched until a later, unfrozen frame finds
+      // this false again and the check fires for real.
+      if (!this._frozen && this.run.active && this._verdict.value === 'playing' && this.run.pendingLevels > 0) {
         // A tick that banks more than one level (a burst of xp) leaves
         // pickups.level already sitting on the destination — the levels in
         // between never get their own hand. sinceLevel carries that span back
@@ -1374,10 +1552,12 @@ export class App {
 
     // 自动施法: every seat left on auto fires itself at the nearest enemy,
     // once its own cooldown allows — same freeze/verdict stop as everything
-    // else above. run.active is the real "run over" signal: _verdict.value
+    // else above (now including the pause menu: without this, a paused
+    // run's seats would keep firing at the frozen — but still targetable —
+    // horde). run.active is the real "run over" signal: _verdict.value
     // resets to 'playing' every frame, so checking only that would leave a
     // dead run firing seats at the frozen horde forever.
-    if (this.runMode && !this.upgradeUi.isOpen && this.run.active && this._verdict.value === 'playing') {
+    if (this.runMode && !this._frozen && this.run.active && this._verdict.value === 'playing') {
       for (const seat of this._autocast) {
         const element = this.loadout.elementAt(seat);
         if (!element || (this.cooldowns.get(element) ?? 0) > 0) continue;
@@ -1449,6 +1629,9 @@ export class App {
       this.scene.remove(this.camera);
       this.upgradeUi?.dispose();
       this.verdictPanel?.dispose();
+      this.pauseMenu?.dispose();
+      this.titleScreen?.dispose();
+      this._hintsRoot?.remove();
     }
     this.input.dispose();
     this.aim.dispose();

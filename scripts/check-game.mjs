@@ -31,6 +31,7 @@ import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
 import { mixTint } from '../src/run/TideAtmosphere.js';
 import { getColor } from '../src/utils/color.js';
 import { GameAudio } from '../src/run/GameAudio.js';
+import { applyPerfPreset } from '../src/run/perfPreset.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1884,6 +1885,36 @@ import { GameAudio } from '../src/run/GameAudio.js';
   assert.equal(calls2.length, 9, 'play: a priority>=2 sound still gets through once the base budget is spent');
 
   console.log('ok  audio wiring');
+}
+
+/* ---- perfPreset: performance-mode write/restore is a pure halve+restore (M5 Task 11) ---- */
+{
+  // A standalone object, not settings.global itself — proves the function
+  // only ever touches what it's handed, never reaches into settings on its
+  // own (so it structurally cannot ever touch settings.environment either).
+  const globals = { particleCount: 1.0, glow: 1.0, lightIntensity: 1.0, shaderIntensity: 1.0, timeScale: 1.0 };
+
+  applyPerfPreset(globals, true);
+  assert.equal(globals.particleCount, 0.5, 'perfPreset: on halves particleCount');
+  assert.equal(globals.glow, 0.5, 'perfPreset: on halves glow');
+  assert.equal(globals.lightIntensity, 0.5, 'perfPreset: on halves lightIntensity');
+  assert.equal(globals.shaderIntensity, 0.5, 'perfPreset: on halves shaderIntensity');
+  assert.equal(globals.timeScale, 1.0, 'perfPreset: an unrelated global multiplier is left alone');
+
+  applyPerfPreset(globals, true); // double-on: must not halve an already-halved value
+  assert.equal(globals.particleCount, 0.5, 'perfPreset: a second "on" is idempotent, not a further halve');
+  assert.equal(globals.glow, 0.5, 'perfPreset: idempotent on glow too');
+
+  applyPerfPreset(globals, false);
+  assert.equal(globals.particleCount, 1.0, 'perfPreset: off restores the exact pre-halve particleCount');
+  assert.equal(globals.glow, 1.0, 'perfPreset: off restores glow exactly');
+  assert.equal(globals.lightIntensity, 1.0, 'perfPreset: off restores lightIntensity exactly');
+  assert.equal(globals.shaderIntensity, 1.0, 'perfPreset: off restores shaderIntensity exactly');
+
+  applyPerfPreset(globals, false); // off when already off: a no-op, not a further mutation
+  assert.equal(globals.particleCount, 1.0, 'perfPreset: a second "off" is a no-op');
+
+  console.log('ok  perf preset');
 }
 
 console.log('\nevery game-logic check passed');

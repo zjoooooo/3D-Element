@@ -34,6 +34,28 @@ export class Loadout {
     }
   }
 
+  /**
+   * Like `reset()`, but seat 0 gets `element` instead of whatever
+   * `settings.run.loadout[0]` configures — the title screen's picked 本命
+   * (spec §9.5), kept as run state only: never written into settings, so
+   * the sandbox's shipped loadout and the next fresh run are untouched.
+   * Falls back to `reset()`'s own seat-0 choice when `element` is falsy —
+   * `#run=quick` passes `settings.run.loadout[0]` straight through, so that
+   * call is byte-identical to a plain `reset()`.
+   */
+  draftFirst(element) {
+    const configured = settings.run.loadout;
+    this._levels = Object.create(null);
+    for (let seat = 0; seat < 6; seat++) {
+      const keep = settings.run.draftLoadout ? seat === 0 : true;
+      const fromConfig = keep ? configured[seat] : null;
+      const candidate = seat === 0 && element ? element : fromConfig;
+      // Same duplicate guard as reset(): first seat wins, repeats sit out.
+      this.seats[seat] = candidate && !this.seats.slice(0, seat).includes(candidate) ? candidate : null;
+      if (this.seats[seat]) this._levels[this.seats[seat]] = 1;
+    }
+  }
+
   elementAt(seat) {
     return this.seats[seat] ?? null;
   }

@@ -49,7 +49,31 @@ export const STRINGS = {
     'verdict.behaviors': ['涌兽', '吐息者', '磐兽'],
     'verdict.rangedDeath': '吐息者的弹幕——它们怕近身',
     'verdict.elementSuffix': '系',
-    'verdict.matchupHint': '克制'
+    'verdict.matchupHint': '克制',
+    // TitleScreen (spec §9/§9.5).
+    'title.name': '五行降世',
+    'title.lore': '「五行失序，潮汐吞界；执灯者立于法阵中央，以术法还天地清明。」',
+    'title.character': '角色',
+    'title.sandbox': '沙盒模式',
+    'title.earthSoon': '暂缺 M6',
+    'title.photosensitivity':
+      '光敏提示：游戏含闪光与快速明暗变化效果；如对此敏感，请在暂停菜单开启"减闪模式"。',
+    // PauseMenu (spec §9).
+    'pause.title': '暂停',
+    'pause.sfx': '音效',
+    'pause.ui': '界面音',
+    'pause.bgm': '音乐',
+    'pause.reduceFlashes': '减闪模式',
+    'pause.performanceMode': '性能模式',
+    'pause.build': '本局构筑',
+    'pause.resume': '继续',
+    'pause.restart': '重开',
+    'pause.toTitle': '回标题',
+    // 首局按键浮层 (spec §9): each line fades once its own action fires once.
+    'hint.move': 'WASD 移动',
+    'hint.aim': '鼠标瞄准 · 点击施法',
+    'hint.dodge': '空格闪避',
+    'hint.ult': 'F 释放禁咒'
   },
   en: {
     'run.kills': 'Kills',
@@ -74,7 +98,32 @@ export const STRINGS = {
     'verdict.behaviors': ['Swarmer', 'Spitter', 'Tank'],
     'verdict.rangedDeath': 'a spitter\'s volley — they fear the close fight',
     'verdict.elementSuffix': ' ',
-    'verdict.matchupHint': 'overcomes'
+    'verdict.matchupHint': 'overcomes',
+    'title.name': 'Wuxing: Descent',
+    'title.lore':
+      'The Five Phases have fallen from balance, and the tide devours the world — the ' +
+      'Lightbearer stands at the heart of the ritual circle, wielding the elements to ' +
+      'restore heaven and earth.',
+    'title.character': 'Character',
+    'title.sandbox': 'Sandbox Mode',
+    'title.earthSoon': 'Coming in M6',
+    'title.photosensitivity':
+      'Photosensitivity notice: this game includes flashing and rapid brightness changes. ' +
+      'If sensitive, enable Reduce Flashes in the pause menu.',
+    'pause.title': 'Paused',
+    'pause.sfx': 'SFX',
+    'pause.ui': 'UI',
+    'pause.bgm': 'Music',
+    'pause.reduceFlashes': 'Reduce Flashes',
+    'pause.performanceMode': 'Performance Mode',
+    'pause.build': 'This Run',
+    'pause.resume': 'Resume',
+    'pause.restart': 'Restart',
+    'pause.toTitle': 'Title Screen',
+    'hint.move': 'WASD to move',
+    'hint.aim': 'Aim with mouse · click to cast',
+    'hint.dodge': 'Space to dodge',
+    'hint.ult': 'F for your ultimate'
   }
 };
 

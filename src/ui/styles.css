@@ -1001,3 +1001,206 @@ body {
 .verdict h2 { font-size: 30px; letter-spacing: 0.2em; }
 .verdict__death { color: #ff8a76; }
 .verdict__hint { opacity: 0.6; }
+
+/* Title screen (spec §9/§9.5) — shown on #run instead of auto-starting a
+   run; grey-box, same tier as .upgrade-ui/.verdict above. RunHud/OrbBottles
+   hide behind body.pre-run (RunHud below; OrbBottles is a THREE object, so
+   App toggles its own .visible instead). */
+.title-screen__dim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: radial-gradient(120% 120% at 50% 30%, rgba(20, 28, 40, 0.72) 0%, rgba(3, 6, 10, 0.94) 70%);
+}
+.title-screen__panel {
+  position: fixed;
+  inset: 0;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  overflow-y: auto;
+  color: #e6edf5;
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  text-align: center;
+}
+.title-screen__logo {
+  margin: 0;
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-shadow: 0 0 24px rgba(127, 214, 255, 0.55);
+}
+.title-screen__lore {
+  max-width: 560px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #bcd7ea;
+}
+.title-screen__cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  max-width: 720px;
+}
+.title-screen__card {
+  width: 120px;
+  padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 24, 36, 0.85);
+  border: 1px solid rgba(120, 160, 210, 0.35);
+  border-radius: 12px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.title-screen__card:hover {
+  border-color: var(--accent, rgba(190, 220, 255, 0.8));
+  box-shadow: 0 0 16px 0 color-mix(in srgb, var(--accent, #7fd6ff) 40%, transparent);
+}
+.title-screen__card--disabled {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+  cursor: default;
+}
+.title-screen__glyph {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, var(--ui-accent));
+}
+.title-screen__glyph .glyph-svg {
+  width: 36px;
+  height: 36px;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.title-screen__card b { font-size: 20px; }
+.title-screen__note { font-size: 11px; opacity: 0.65; }
+.title-screen__row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 13px;
+}
+.title-screen__character select {
+  margin-left: 6px;
+  padding: 3px 6px;
+  background: rgba(16, 24, 36, 0.85);
+  color: inherit;
+  border: 1px solid rgba(120, 160, 210, 0.35);
+  border-radius: 6px;
+  font: inherit;
+}
+.title-screen__sandbox { color: #7fd6ff; text-decoration: none; }
+.title-screen__sandbox:hover { text-decoration: underline; }
+.title-screen__photosensitivity { max-width: 480px; opacity: 0.5; }
+
+/* Pause menu (spec §9) — Esc's destination in a run; a full stop sharing
+   UpgradeUi's freeze gate (see App's `_frozen` getter). Same z-index band as
+   .title-screen — the two are mutually exclusive (Esc only opens this while
+   run.active, and the title only ever shows before a run is active). */
+.pause-menu__dim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(3, 6, 10, 0.8);
+}
+.pause-menu__panel {
+  position: fixed;
+  inset: 0;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #e6edf5;
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  text-align: center;
+}
+.pause-menu__panel h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  letter-spacing: 0.2em;
+}
+.pause-menu__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 240px;
+  font-size: 13px;
+}
+.pause-menu__row input[type='range'] { flex: 1; }
+.pause-menu__lang-row { justify-content: center; width: auto; }
+.pause-menu__lang {
+  padding: 5px 14px;
+  background: rgba(16, 24, 36, 0.8);
+  border: 1px solid rgba(120, 160, 210, 0.3);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+.pause-menu__lang.is-active { border-color: #7fd6ff; color: #7fd6ff; }
+.pause-menu__build {
+  max-width: 320px;
+  margin: 6px 0;
+  padding: 10px 14px;
+  background: rgba(16, 24, 36, 0.6);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pause-menu__build b { display: block; margin-bottom: 4px; font-weight: 600; opacity: 0.7; }
+.pause-menu__actions { display: flex; gap: 10px; margin-top: 6px; }
+.pause-menu__actions button {
+  padding: 7px 16px;
+  background: rgba(16, 24, 36, 0.85);
+  border: 1px solid rgba(120, 160, 210, 0.35);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}
+.pause-menu__actions button:hover { border-color: rgba(190, 220, 255, 0.8); }
+
+/* Pre-run (title screen up): RunHud is DOM, so a body class is enough — see
+   the .title-screen/.pause-menu comment above for OrbBottles (not DOM). */
+.pre-run .run-hud {
+  display: none;
+}
+
+/* 首局按键浮层 (spec §9): fades line-by-line as each action first fires;
+   localStorage-remembered (App#_markHintDone), so a returning player never
+   sees a hint they already dismissed. */
+.run-hints {
+  position: fixed;
+  left: 22px;
+  bottom: 92px;
+  z-index: 29;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+.run-hints__line {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.45);
+  font: 600 12px/1.4 var(--ui-font);
+  color: #dfe8f2;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+.run-hints__line.is-done { opacity: 0; }
