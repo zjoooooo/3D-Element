@@ -61,6 +61,7 @@ import { CameraShake } from '../effects/CameraShake.js';
 import { ScreenFlash } from '../effects/ScreenFlash.js';
 
 import { AbilityManager } from '../abilities/AbilityManager.js';
+import { dashTarget } from '../abilities/templates/DashStrikeSkill.js';
 import { PostProcessing } from '../postprocessing/PostProcessing.js';
 
 import { HUD, LoadingScreen } from '../ui/HUD.js';
@@ -301,6 +302,15 @@ export class App {
       // same as playerState itself; the class falls back to a fixed preview
       // duration there instead of reading this.
       this.abilities.ctx.playerState = this.playerState;
+      // M6 T6: ChainBoltSkill needs raw per-entity enumeration (x/z/count) to
+      // find its first target and walk hops — the population-agnostic
+      // `Targets` facade deliberately doesn't expose that (apply-damage-to-
+      // a-point only), so this is a direct reference, same absent-in-sandbox
+      // shape as the three wirings above. DashStrikeSkill also reads it, but
+      // only to release its own damageOnce hit-memory Set on destroy (see
+      // that class's own doc) — sandbox-absent there is likewise correct
+      // (nothing was ever opened to release).
+      this.abilities.ctx.enemies = this.enemySystem;
       this.targets.register(this.enemySystem);
       // One schedule per page load, seeded off the same run rng — but
       // RunManager.start() reshuffles it every call, so a restart still deals
@@ -952,6 +962,51 @@ export class App {
     this.hud.showToast(t('run.noMana'));
   }
 
+  /**
+   * M6 T6 (弑神一闪): the physical half of a dashstrike cast. The ability
+   * class itself is pure VFX+damage, like every other ability (see
+   * DashStrikeSkill's own doc) — the caster's own teleport rides the exact
+   * displacement channel a dodge-roll already uses (`_dodgeStart`/
+   * `_dodgeTarget` lerped by `frame()`'s steer-gate) plus the same i-frames
+   * `PlayerState#tryDodge` grants, so this is the one place that has to
+   * know dashstrike is special. Deliberately *not* `playerState.tryDodge()`
+   * itself — that also gates and spends the separate dodge-roll cooldown,
+   * which has nothing to do with dashstrike's own (already-gated, five/six-
+   * field) cast pipeline.
+   *
+   * Called from every real-cast site that can construct a dashstrike
+   * ability (`_cast`, `_quickCastToward`'s plain branch and its fusion-part
+   * loop) — never from a demo cast (see `_quickCastToward`'s own `!demo`
+   * guard at its call site): the level-up hand is still open and the world
+   * still frozen the instant a demo fires, so queuing a teleport there would
+   * either be silently dropped or fire stale once the hand closes, neither
+   * of which reads as the "free instant preview" the demo is supposed to be.
+   *
+   * Run-mode only — the sandbox has no playerState/character-lerp channel
+   * to move (contract: sandbox casts are VFX-only, the character stays put).
+   */
+  _dashDisplace(direction) {
+    if (!this.runMode) return;
+    const start = this.character.root.position;
+    const target = dashTarget(
+      start.x,
+      start.z,
+      direction.x,
+      direction.z,
+      settings.dashstrike.range,
+      settings.character.roamRadius
+    );
+    this._dodgeStart.copy(start);
+    this._dodgeTarget.set(target.x, 0, target.z);
+    // The ability's own travel timing (range/speed) already lands its VFX
+    // impact at ~0.2s — inside the brief's own 0.15-0.25s dash-duration
+    // ballpark — so the physical body rides the identical window and
+    // arrives with it, rather than a second, independently-tuned duration.
+    this._dodgeDuration = Math.max(0.05, settings.dashstrike.range / Math.max(1, settings.dashstrike.speed));
+    this._dodgeT = 0;
+    this.playerState.iframes = Math.max(this.playerState.iframes, settings.run.dodgeIframes);
+  }
+
   _cast(origin, direction, distance) {
     const element = this.element;
     // 法力消费门 (M6 T3, spec 锚2.5): run-mode only — sandbox never
@@ -986,6 +1041,9 @@ export class App {
       ability.fusionMult = 1;
       ability.quenched = this.runMode ? this.modifiers.consumeQuench(element) : false;
     }
+    // M6 T6: see _dashDisplace's own doc — sandbox-safe via its own runMode
+    // guard, so this only needs the element check.
+    if (element === 'dashstrike') this._dashDisplace(direction);
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
@@ -1109,6 +1167,12 @@ export class App {
           ability.fusionMult = fusionMult;
           ability.quenched = quenched;
         }
+        // M6 T6: dashstrike isn't a real FEEDS pair with anything in the
+        // launch set (T6 brief), but a fused part still goes through this
+        // exact `abilities.cast` call generically — wiring the same hook
+        // here as _cast/the plain branch below costs one line and keeps a
+        // future fusion pair from silently forgetting to move the player.
+        if (part === 'dashstrike' && !demo) this._dashDisplace(direction);
       }
       if (!demo) {
         this.cooldowns.set(
@@ -1125,6 +1189,9 @@ export class App {
         ability.fusionMult = 1;
         ability.quenched = !demo && this.runMode ? this.modifiers.consumeQuench(element) : false;
       }
+      // M6 T6: see _dashDisplace's own doc for why !demo — autocast dashing
+      // into a crowd is a real, intentional consequence of the toggle.
+      if (element === 'dashstrike' && !demo) this._dashDisplace(direction);
       if (!demo) this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
       castAnim = c.castAnim;
     }

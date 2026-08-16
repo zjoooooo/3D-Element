@@ -9,6 +9,8 @@ import { LineSweepSkill } from './templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
 import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
 import { ShieldSkill } from './templates/ShieldSkill.js';
+import { DashStrikeSkill } from './templates/DashStrikeSkill.js';
+import { ChainBoltSkill } from './templates/ChainBoltSkill.js';
 import { ELEMENTS } from '../config/settings.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
 
@@ -22,12 +24,15 @@ import { ObjectPool } from '../utils/ObjectPool.js';
  * this, not `ELEMENTS`, or it offers something that can never actually cast.
  *
  * M6 T4 registered nine of the thirteen onto three data-driven template
- * classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill); M6 T5 adds the two
- * `shield`-kind specials onto a fourth (ShieldSkill) — several keys below
- * share the same class reference on purpose: the pool-building loop keys
- * everything by element id, not by class, so each still gets its own pool
- * and its own live instances (see the constructor below). Only dashstrike/
- * chainbolt (T6) stay unregistered now.
+ * classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill); M6 T5 added the two
+ * `shield`-kind specials onto a fourth (ShieldSkill); M6 T6 adds the last
+ * two `self`-kind specials onto a fifth and sixth (DashStrikeSkill,
+ * ChainBoltSkill — each is its own class, unlike the shared-class rows
+ * above, since a dash and a chain hop are shaped nothing alike) — several
+ * keys below share the same class reference on purpose: the pool-building
+ * loop keys everything by element id, not by class, so each still gets its
+ * own pool and its own live instances (see the constructor below). Every one
+ * of the thirteen M6 T2 ids is now registered.
  */
 export const ABILITY_TYPES = {
   ice: IceAbility,
@@ -51,7 +56,10 @@ export const ABILITY_TYPES = {
   sunwheel: OrbitAuraSkill,
 
   iceshield: ShieldSkill,
-  stoneskin: ShieldSkill
+  stoneskin: ShieldSkill,
+
+  dashstrike: DashStrikeSkill,
+  chainbolt: ChainBoltSkill
 };
 
 const MAX_CONCURRENT = 4;

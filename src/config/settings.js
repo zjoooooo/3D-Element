@@ -2204,15 +2204,30 @@ export const settings = {
   // --- 金 dashstrike: 弑神一闪, a short teleport-slash (DashStrikeSkill, T6) ---
   dashstrike: {
     range: 8, minRange: 0, speed: 40, cooldown: 7, manaCost: 30, castAnim: 'cast1',
+    // controller-ruled (T6 dispatch): 50×7s×0.8窄线 = 280; 位移+i帧 utility 由
+    // 30 蓝定价 (D-M6-1 live anchor) — self-resolved (kind:'self'), exempt
+    // from the anchor-2 band check (see check-game.mjs's EXEMPT set).
+    damage: 280,
+    width: 1.0, // implementer's choice: damageOnce sample radius along the dash line (WYSIWYG-ish with the ribbon's own visual width)
     trailLength: 2.0, flashSize: 1.0, // afterimage ribbon + slash flash
-    color: '#d4a940', colorGlow: '#fff0c0'
+    color: '#d4a940', colorGlow: '#fff0c0',
+    // M6 T6: Ability#_updateLight reads these unconditionally every active
+    // frame (NaN-poisons LightPool.damp() permanently if absent — same trap
+    // M6 T5's report flagged for ShieldSkill).
+    lightColor: '#fff0c0', lightIntensity: 10, lightRadius: 8
   },
 
   // --- 木 chainbolt: 连锁闪电, a bolt hopping between enemies (ChainBoltSkill, T6) ---
   chainbolt: {
     range: 14, minRange: 1, speed: 45, cooldown: 1.2, manaCost: 0, castAnim: 'cast1',
+    // controller-ruled (T6 dispatch): 首跳 20 平冰枪; 满链
+    // 20×(1+.85+.7225+.614+.522) ≈ 74 ≈ 预算60×1.23, 定价链条利用率 80%.
+    // Self-resolved (kind:'self'), exempt from the anchor-2 band check.
+    damage: 20, hops: 4, hopRadius: 6, hopDecay: 0.85,
     boltWidth: 0.15, arcSize: 0.3, // ribbon width + inter-hop arc glyph
-    color: '#7ee08a', colorGlow: '#e3ffe8'
+    color: '#7ee08a', colorGlow: '#e3ffe8',
+    // M6 T6: same NaN-poison guard as dashstrike above.
+    lightColor: '#e3ffe8', lightIntensity: 9, lightRadius: 7
   },
 
   // --- 木 lifebloom: 生命绽放, a healing burst with a spore DoT ---

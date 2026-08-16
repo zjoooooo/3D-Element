@@ -24,6 +24,8 @@ import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
+import { chainHops } from '../src/abilities/templates/ChainBoltSkill.js';
+import { dashTarget, dashLineHits } from '../src/abilities/templates/DashStrikeSkill.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
@@ -642,6 +644,126 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   );
 
   console.log('ok  M6 T5: shield absorption + stoneskin reflect');
+}
+
+/* ---- M6 T6: chainHops — dedup, radius cutoff, hop cap, early stop ---- */
+{
+  // Straight-line chain: from(0,0) → a(0,2) → b(0,4) → c(0,6) → d(0,8), each
+  // hop exactly 2m from the last — well inside hopRadius(6) — plus a 5th
+  // candidate e(0,10) that's ALSO in range of d but must be excluded purely
+  // by the hop-count budget (requested 4).
+  const enemies = new EnemySystem(createRng(61));
+  const from = enemies.spawnAt(0, 0, 0);
+  const a = enemies.spawnAt(0, 2, 0);
+  const b = enemies.spawnAt(0, 4, 0);
+  const c = enemies.spawnAt(0, 6, 0);
+  const d = enemies.spawnAt(0, 8, 0);
+  enemies.spawnAt(0, 10, 0); // e — in range of d, excluded only by the hop cap below
+
+  const hops = chainHops(enemies, from, 4, 6);
+  assert.deepEqual(hops, [a, b, c, d], 'chainHops: walks the chain in order');
+  assert.equal(hops.length, 4, 'chainHops: hop count ≤ the requested budget, even with a 5th in-range candidate');
+
+  // Radius cutoff, the assertion's own example: an enemy at 6.1m from the
+  // current node is not chained — and with nothing else in range, the chain
+  // stops early despite hop budget left over.
+  const enemies2 = new EnemySystem(createRng(62));
+  const from2 = enemies2.spawnAt(0, 0, 0);
+  const near2 = enemies2.spawnAt(0, 3, 0); // 3m from from2 → hop1
+  enemies2.spawnAt(0, 3 + 6.1, 0); // 6.1m from near2 — must not chain
+
+  const hops2 = chainHops(enemies2, from2, 4, 6);
+  assert.deepEqual(hops2, [near2], 'chainHops: an enemy at 6.1m from the current node is excluded (radius cutoff)');
+  assert.equal(hops2.length, 1, 'chainHops: stops early once nothing left is in range, hop budget or not');
+
+  // Dedup: the seed is nearer to hop1's position than the real hop2
+  // candidate is — without dedup this would loop straight back onto it.
+  const enemies3 = new EnemySystem(createRng(63));
+  const from3 = enemies3.spawnAt(0, 0, 0);
+  const p1 = enemies3.spawnAt(0, 2, 0); // 2m from from3 → hop1
+  const p2 = enemies3.spawnAt(0, 6, 0); // 4m from p1 (from3 is only 2m from p1 — nearer — but already seen)
+
+  const hops3 = chainHops(enemies3, from3, 4, 6);
+  assert.deepEqual(hops3, [p1, p2], 'chainHops: dedup — the already-hit seed is never revisited even when it would otherwise be nearest');
+
+  // Controller-ruled decay sequence (T6 dispatch): pure arithmetic, no
+  // EnemySystem needed — pins settings.chainbolt.damage/hops/hopDecay
+  // directly against the ruling's own stated numbers.
+  const seq = [settings.chainbolt.damage];
+  for (let i = 0; i < settings.chainbolt.hops; i++) seq.push(seq[seq.length - 1] * settings.chainbolt.hopDecay);
+  const wantSeq = [20, 17, 14.45, 12.28, 10.44];
+  assert.equal(seq.length, wantSeq.length, 'chainbolt: 1 first hit + hops(4) additional = 5 total damage terms');
+  for (let i = 0; i < wantSeq.length; i++) {
+    assert.ok(
+      Math.abs(seq[i] - wantSeq[i]) < 0.01,
+      `chainbolt damage sequence: hit ${i} is ${wantSeq[i]} (got ${seq[i].toFixed(4)})`
+    );
+  }
+
+  console.log('ok  M6 T6: chainHops (dedup, radius cutoff, hop cap, early stop, decay sequence)');
+}
+
+/* ---- M6 T6: dashTarget — arena clamp ---- */
+{
+  const free = dashTarget(0, 0, 0, 1, 8, 40);
+  assert.ok(
+    Math.abs(free.x) < 1e-9 && Math.abs(free.z - 8) < 1e-9,
+    'dashTarget: unclamped, straight range × direction, well inside the arena'
+  );
+
+  // Start 1m from a 40m roam boundary, dashing 8m further outward.
+  const edge = dashTarget(0, 39, 0, 1, 8, 40);
+  const dist = Math.hypot(edge.x, edge.z);
+  assert.ok(Math.abs(dist - 40) < 1e-6, `dashTarget: clamps to roamRadius when the raw target overshoots it (got ${dist})`);
+  assert.ok(Math.abs(edge.x) < 1e-9, 'dashTarget: clamp preserves the aim direction (x stays 0 for a pure +z dash)');
+
+  // A start already past the boundary (shouldn't happen in practice, but the
+  // clamp math must still hold, not divide by zero or invert).
+  const beyond = dashTarget(0, 45, 1, 0, 8, 40);
+  assert.ok(Math.hypot(beyond.x, beyond.z) <= 40 + 1e-6, 'dashTarget: never returns a point past roamRadius');
+
+  console.log('ok  M6 T6: dashTarget (arena clamp)');
+}
+
+/* ---- M6 T6: dashLineHits — dash path damage, self-resolved (D-M3-8) ---- */
+{
+  // Dash line: origin (0,0) → direction (0,1) [+z] → length settings.dashstrike.range.
+  const enemies = new EnemySystem(createRng(64));
+  const onLineNear = enemies.spawnAt(0, 2, 0); // 2m along the line
+  const onLineFar = enemies.spawnAt(0, 6, 0); // 6m along the line
+  const offLine = enemies.spawnAt(5, 2, 0); // 5m off to the side — must take nothing
+  // hp top-up (established pattern elsewhere in this file): dashstrike's real
+  // damage (280×mods) would one-shot a fresh swarm spawn (hp 20) and swap-
+  // remove it, which would make a post-hit hp readout meaningless.
+  enemies.hp[onLineNear] = 1000;
+  enemies.hp[onLineFar] = 1000;
+  enemies.hp[offLine] = 1000;
+
+  const stubMods = { damageMult: () => 1.25 };
+  const amt = settings.dashstrike.damage * stubMods.damageMult('dashstrike');
+  const hits = dashLineHits(
+    enemies,
+    'test-cast',
+    0, 0, 0, 1,
+    settings.dashstrike.range,
+    settings.dashstrike.width,
+    amt,
+    -1
+  );
+
+  assert.equal(hits, 2, 'dashLineHits: hits exactly the two enemies on the line, once each (overlapping samples deduped)');
+  assert.ok(
+    Math.abs(1000 - enemies.hp[onLineNear] - amt) < 1e-6,
+    `dashLineHits: near enemy takes exactly damage×mods (got Δ${1000 - enemies.hp[onLineNear]}, want ${amt})`
+  );
+  assert.ok(
+    Math.abs(1000 - enemies.hp[onLineFar] - amt) < 1e-6,
+    'dashLineHits: far enemy takes exactly damage×mods too — no falloff along the line'
+  );
+  assert.equal(enemies.hp[offLine], 1000, 'dashLineHits: an enemy off the line takes nothing');
+  assert.equal(settings.dashstrike.damage, 280, 'dashstrike: controller-ruled base damage pinned');
+
+  console.log('ok  M6 T6: dashLineHits (dash path damage)');
 }
 
 /* ---- pickups: drop, magnet, level math ---- */
