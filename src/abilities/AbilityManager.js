@@ -5,6 +5,9 @@ import { BeamAbility } from './BeamAbility.js';
 import { SnareAbility } from './SnareAbility.js';
 import { GlacierAbility } from './GlacierAbility.js';
 import { FireballAbility } from './FireballAbility.js';
+import { LineSweepSkill } from './templates/LineSweepSkill.js';
+import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
+import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
 import { ELEMENTS } from '../config/settings.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
 
@@ -16,6 +19,13 @@ import { ObjectPool } from '../utils/ObjectPool.js';
  * with no class until T4-6 register them here, and anything that offers an
  * element up for the player to pick (a draft card, a HUD slot) needs to ask
  * this, not `ELEMENTS`, or it offers something that can never actually cast.
+ *
+ * M6 T4 registers nine of the thirteen onto three data-driven template
+ * classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill) — several keys
+ * below share the same class reference on purpose: the pool-building loop
+ * keys everything by element id, not by class, so each still gets its own
+ * pool and its own live instances (see the constructor below). dashstrike/
+ * chainbolt (T6) and iceshield/stoneskin (T5) stay unregistered.
  */
 export const ABILITY_TYPES = {
   ice: IceAbility,
@@ -24,7 +34,19 @@ export const ABILITY_TYPES = {
   beam: BeamAbility,
   snare: SnareAbility,
   glacier: GlacierAbility,
-  fireball: FireballAbility
+  fireball: FireballAbility,
+
+  rockspikes: LineSweepSkill,
+
+  swordrain: ZoneBurstSkill,
+  lifebloom: ZoneBurstSkill,
+  frostnova: ZoneBurstSkill,
+  boulder: ZoneBurstSkill,
+  quake: ZoneBurstSkill,
+
+  bladeorbit: OrbitAuraSkill,
+  firering: OrbitAuraSkill,
+  sunwheel: OrbitAuraSkill
 };
 
 const MAX_CONCURRENT = 4;
@@ -56,7 +78,11 @@ export class AbilityManager {
       this.pools.set(
         element,
         new ObjectPool(() => {
-          const ability = new Type(this.ctx);
+          // The `element` second argument is only read by the M6 T4 template
+          // classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill), which
+          // register the same class under several ids — every hand-written
+          // ability's constructor takes one argument and simply ignores it.
+          const ability = new Type(this.ctx, element);
           this.ctx.scene.add(ability.group);
           ability.group.visible = false;
           return ability;
@@ -85,11 +111,21 @@ export class AbilityManager {
     if (!ABILITY_TYPES[element]) return null;
 
     // Retire the oldest cast rather than letting the scene grow without bound.
+    // M6 T4: a permanent aura (`ability.permanent` — OrbitAuraSkill) never
+    // reaches DONE on its own, so it would otherwise always BE "the oldest"
+    // and flicker out the moment a fourth unrelated spell is in flight —
+    // evict the oldest ordinary cast instead. At most three elements are
+    // ever permanent, so this can't starve: there's always a non-permanent
+    // "oldest" once four-plus casts are actually active.
     if (this.active.length >= MAX_CONCURRENT) {
-      const oldest = this.active.shift();
-      this.onRetire?.(oldest);
-      oldest.destroy();
-      this.pools.get(oldest.element).release(oldest);
+      const i = this.active.findIndex((a) => !a.permanent);
+      if (i !== -1) {
+        const oldest = this.active[i];
+        this.active.splice(i, 1);
+        this.onRetire?.(oldest);
+        oldest.destroy();
+        this.pools.get(oldest.element).release(oldest);
+      }
     }
 
     const ability = this.pools.get(element).acquire();
@@ -109,6 +145,23 @@ export class AbilityManager {
         this.pools.get(ability.element).release(ability);
       }
     }
+  }
+
+  /**
+   * Force-retire one specific active cast immediately, before it would ever
+   * finish on its own — the M6 T4 permanent-aura unseat/run-end path
+   * (`装备即常驻`: OrbitAuraSkill never reaches DONE by itself, see its own
+   * doc). Same three-step shape as every other exit point in this file
+   * (onRetire → destroy → pool release). No-op if `ability` isn't active
+   * (already retired, or never was).
+   */
+  retire(ability) {
+    const i = this.active.indexOf(ability);
+    if (i === -1) return;
+    this.active.splice(i, 1);
+    this.onRetire?.(ability);
+    ability.destroy();
+    this.pools.get(ability.element).release(ability);
   }
 
   /** Cancel everything currently in flight. */

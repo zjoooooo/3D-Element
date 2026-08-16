@@ -426,6 +426,87 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   console.log('ok  combat shapes');
 }
 
+/* ---- M6 T4: aura annulus tick math, healPlayer routing, stunTime ---- */
+{
+  // Aura: a genuine annulus, not a filled disc — and the per-tick amount is
+  // settings.combat's `dps` used directly (it already carries the ×0.7
+  // self-aura shape coefficient at balance time, per that block's own
+  // comment — this pins that CombatSystem doesn't re-apply it on top).
+  const hits = [];
+  const auraCombat = new CombatSystem({
+    damage: () => 0,
+    damageOnce: () => 0,
+    slow: () => {},
+    damageRing: (point, inner, outer, amt) => (hits.push({ inner, outer, amt }), 1)
+  });
+  const row = settings.combat.bladeorbit;
+  const bladeorbit = {
+    element: 'bladeorbit', phase: 'travel', age: 1,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1, u: 0
+  };
+  auraCombat.tick(1 / 60, [bladeorbit]);
+  assert.equal(hits.length, 1, 'aura: ticks exactly once per active cast per frame');
+  assert.ok(Math.abs(hits[0].outer - row.radius) < 1e-9, 'aura: outer edge is the combat radius');
+  assert.ok(
+    Math.abs(hits[0].inner - (row.radius - row.band)) < 1e-9,
+    'aura: inner edge is radius - band'
+  );
+  const expectedAmt = row.dps * (1 / 60);
+  assert.ok(
+    Math.abs(hits[0].amt - expectedAmt) < 1e-9,
+    `aura: per-tick amount is dps×step, not the 0.7 coefficient re-applied (got ${hits[0].amt}, want ${expectedAmt})`
+  );
+
+  // The annulus's actual geometry, against a real EnemySystem: an enemy
+  // riding the ring takes damage, one at the caster's own feet (well inside
+  // the inner edge) or well past the outer edge takes nothing.
+  {
+    const enemies = new EnemySystem(createRng(21));
+    const onRing = enemies.spawnAt(row.radius - row.band * 0.5, 0, 0);
+    const deadCentre = enemies.spawnAt(0.01, 0, 0);
+    const wellOutside = enemies.spawnAt(row.radius + 5, 0, 0);
+    const before = { ring: enemies.hp[onRing], centre: enemies.hp[deadCentre], out: enemies.hp[wellOutside] };
+    enemies.damageRing({ x: 0, z: 0 }, row.radius - row.band, row.radius, 10, -1);
+    assert.ok(enemies.hp[onRing] < before.ring, 'aura annulus: an enemy riding the ring takes damage');
+    assert.equal(enemies.hp[deadCentre], before.centre, 'aura annulus: dead centre (inside the inner edge) takes nothing');
+    assert.equal(enemies.hp[wellOutside], before.out, 'aura annulus: past the outer edge takes nothing');
+  }
+
+  // healPlayer (lifebloom): tick() reports the heal due — CombatSystem's
+  // constructor still takes no player reference; RunManager is the one
+  // place that actually spends it (see CombatSystem.tick's own doc).
+  const healCombat = new CombatSystem({ damage: () => 1, damageOnce: () => 1, slow: () => {} });
+  const lifebloom = {
+    element: 'lifebloom', phase: 'impact', age: 0.2, impactTime: 0.05, fadeTime: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1, u: 1
+  };
+  const healed = healCombat.tick(1 / 60, [lifebloom]);
+  assert.equal(healed, settings.combat.lifebloom.healPlayer, 'burst: healPlayer reports its flat amount on detonation');
+  assert.equal(healCombat.tick(1 / 60, [lifebloom]), 0, 'burst: healPlayer fires exactly once per cast');
+
+  // stunTime (boulder): a full-strength (1.0) slow, same debuff channel a
+  // plain slowFactor already rides — not a separate mechanic.
+  const slows = [];
+  const stunCombat = new CombatSystem({
+    damage: () => 1,
+    damageOnce: () => 1,
+    slow: (p, r, f, d) => slows.push({ f, d })
+  });
+  const boulder = {
+    element: 'boulder', phase: 'impact', age: 0.2, impactTime: 0.05, fadeTime: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1, u: 1
+  };
+  stunCombat.tick(1 / 60, [boulder]);
+  assert.equal(slows.length, 1, 'burst: stunTime applies exactly one slow call');
+  assert.equal(slows[0].f, 1, 'burst: stunTime is full-strength (factor 1.0)');
+  assert.equal(slows[0].d, settings.combat.boulder.stunTime, 'burst: stunTime\'s own duration, not slowTime');
+
+  console.log('ok  M6 T4: aura annulus, healPlayer routing, stunTime');
+}
+
 /* ---- pickups: drop, magnet, level math ---- */
 {
   const pickups = new PickupSystem();
@@ -1309,8 +1390,17 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
     assert.ok(card.kind !== 'passive', 'shard: passives sit out directed hands');
     assert.equal(settings.combat.wuxingOf[card.element], 2, 'shard: every card is water');
   }
-  const none = pool.draw(3, 3, 4); // earth: no earth abilities exist yet
-  assert.equal(none.length, 0, 'shard: an empty wuxing returns an empty hand');
+  // M6 T4 registered earth's own skills (rockspikes/boulder/quake) — this
+  // fixture used to pin "earth draws nothing" (no earth ability existed to
+  // draw); that gap is exactly what T4 closes, so the assertion flips to
+  // match, same shape as the water hand above rather than staying pinned to
+  // a state that's no longer true.
+  const earthHand = pool.draw(3, 3, 4); // earth shard
+  assert.ok(earthHand.length > 0, 'shard: earth offers exist (rockspikes/boulder/quake, M6 T4)');
+  for (const card of earthHand) {
+    assert.ok(card.kind !== 'passive', 'shard: passives sit out directed hands');
+    assert.equal(settings.combat.wuxingOf[card.element], 4, 'shard: every card is earth');
+  }
   console.log('ok  verdict & shards');
 }
 

@@ -37,6 +37,8 @@ export const STRINGS = {
     'run.sequenceChain': '相生轮转',
     'run.shardFizzle': '残章逸散',
     'run.noMana': '蓝量不足',
+    // 装备即常驻 (M6 T4): the badge an aura seat shows instead of a cooldown ring.
+    'run.auraBadge': '常驻',
     // 禁咒 (App#_fireUltimate / RunHud's F slot hover title).
     'ult.label': '禁咒',
     'ult.fired': '禁咒已释放',
@@ -95,6 +97,7 @@ export const STRINGS = {
     'run.sequenceChain': 'Chain Bonus',
     'run.shardFizzle': 'Page scattered',
     'run.noMana': 'Not enough mana',
+    'run.auraBadge': 'Passive',
     'ult.label': 'Ult',
     'ult.fired': 'Ultimate unleashed',
     'ult.notReady': 'Ultimate not charged',

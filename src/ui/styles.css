@@ -733,6 +733,14 @@ body {
   display: none;
 }
 
+/* 装备即常驻 (M6 T4): an aura seat's own floating label, tinted with the
+   element's own accent rather than fusion's fixed gold — the CD ring/text
+   never even runs for it (App#_seatCooldowns marks it inactive), so this is
+   the only "this seat is doing something" signal it needs. */
+.hud-slot--aura .hud-slot__name {
+  color: var(--accent, #e8c766);
+}
+
 /* 耗蓝 (structural only — no ability sets manaCost before M6) and 自动施法
    (existing feature, ported off the sandbox card it used to borrow): two
    small dots in opposite corners so they never collide. */

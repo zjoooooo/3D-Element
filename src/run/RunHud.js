@@ -121,6 +121,9 @@ export class RunHud {
       slot.root.classList.toggle('hud-slot--fusion', !!data.fusion);
       slot.root.classList.toggle('hud-slot--auto', !!data.autocast);
       slot.root.classList.toggle('hud-slot--mana', !!data.manaCost);
+      // M6 T4: 装备即常驻 — an aura seat gets its own badge state instead of
+      // a cooldown ring (see _updateCooldowns, which skips it entirely).
+      slot.root.classList.toggle('hud-slot--aura', !!data.aura);
       // Forget stale cooldowns on restart: prevRemaining from death must not
       // false-trigger a 0-crossing when cooldowns reset.
       slot.prevRemaining = 0;
@@ -133,7 +136,10 @@ export class RunHud {
       }
       slot.glyph.innerHTML = ELEMENT_SIGILS[data.element] ?? '';
       slot.root.style.setProperty('--accent', ELEMENT_META[data.element]?.accent ?? '');
-      slot.name.textContent = data.fusion ? (data.label ?? '') : '';
+      // Fusion's name and the aura badge share the one floating-label spot
+      // above the icon — a seat is never both at once (an aura can't fuse
+      // and keep its own permanent identity; see App#_syncAuras's own note).
+      slot.name.textContent = data.fusion ? (data.label ?? '') : data.aura ? t('run.auraBadge') : '';
       slot.root.title = data.label ?? data.element;
     });
   }

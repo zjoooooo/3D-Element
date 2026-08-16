@@ -188,7 +188,10 @@ export class RunManager {
     // guard then refuses to run enemies.tick() again and mutate it further.
     if (contact > 0) this.s.player.takeDamage(contact, this.s.enemies.lastContact);
     this.s.player.tick(step);
-    this.s.combat.tick(step, this.s.abilities.active);
+    // M6 T4: lifebloom's healPlayer — CombatSystem stays player-agnostic and
+    // just reports what's due; this is the one place that actually spends it.
+    const healDue = this.s.combat.tick(step, this.s.abilities.active);
+    if (healDue > 0) this.s.player.heal(healDue);
     this.s.ultimate?.tick(step, playerPos);
     this.pendingLevels += this.s.pickups.tick(step, playerPos);
 

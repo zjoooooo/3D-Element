@@ -73,9 +73,19 @@ const HDR_URL = './hdri/spruit_sunrise.hdr';
 
 const UP = new Vector3(0, 1, 0);
 const _deathPos = new Vector3();
+/** _syncAuras()'s throwaway direction — a permanent aura's cast never travels
+ * anywhere (OrbitAuraSkill pins its own position every frame instead), so any
+ * unit vector satisfies Ability.spawn()'s contract. */
+const _auraCastDir = new Vector3(0, 0, 1);
 
 /** Run-mode key badge per loadout slot, in `settings.run.loadout` order. */
 const RUN_SLOT_KEYS = ['LMB', 'RMB', 'Q', 'E', 'R', 'T'];
+
+/** The three permanent auras (M6 T4, spec §4.5 装备即常驻) — element-generic,
+ * derived from `settings.combat` rather than a hand-kept list, the same way
+ * `_quickCastDistance` already reads a kind off `settings.combat` instead of
+ * naming skills. */
+const AURA_ELEMENTS = ELEMENTS.filter((element) => settings.combat[element]?.kind === 'aura');
 
 /**
  * Run mode's keyboard half of the loadout. The six on-stage abilities sit in
@@ -381,6 +391,10 @@ export class App {
     /* ---- character ---- */
     this.character = new CharacterController(this.environment);
     this.scene.add(this.character.root);
+    // M6 T4: the one caster-position source every ability context can read
+    // regardless of mode (unlike `playerState`, sandbox-absent) — OrbitAuraSkill
+    // pins a permanent aura's position to it every frame.
+    this.abilities.ctx.character = this.character;
 
     /* ---- input & targeting ---- */
     this.input = new InputManager(canvas);
@@ -591,6 +605,7 @@ export class App {
     this.run.start();
     this._refreshResonance();
     this._syncBadges();
+    this._syncAuras(); // M6 T4: covers both a fresh start and _restart()'s replay
     document.body.classList.remove('pre-run');
     this.orbBottles.object3D.visible = true;
     this.titleScreen.hide();
@@ -842,6 +857,11 @@ export class App {
    */
   _quickCast(element) {
     if (!element) return;
+    // 光环装备即常驻 (M6 T4): no cast, no cooldown, no cast key — a seat's key
+    // press must be a no-op for an aura element, or pressing it would fire a
+    // second, ordinary-lifecycle instance through this pipeline on top of the
+    // permanent one _syncAuras() already keeps running (see its own doc).
+    if (settings.combat[element]?.kind === 'aura') return;
     if (isFusionId(element)) {
       if ((this.cooldowns.get(element) ?? 0) > 0) return;
       const [a, b] = fusionParents(element);
@@ -1026,6 +1046,10 @@ export class App {
    */
   _quickCastToward(element, tx, tz, autocast = true, demo = false) {
     if (!element || (this.cooldowns.get(element) ?? 0) > 0) return;
+    // M6 T4: see _quickCast's own copy of this guard — this is the funnel for
+    // autocast, the acquire-a-new-active demo shot, and a fusion hand-off's
+    // shared target point, so an aura seat has to be refused here too.
+    if (settings.combat[element]?.kind === 'aura') return;
 
     const origin = this.character.position;
     const dx = tx - origin.x;
@@ -1069,6 +1093,11 @@ export class App {
       // than called and discarded.
       const quenched = !demo && this.runMode ? this.modifiers.consumeQuench(b) : false;
       for (const part of [a, b]) {
+        // M6 T4: an aura half never re-casts through its fusion either — it
+        // keeps doing its permanent thing continuously; the fusion's own
+        // cast is really just the other half's, plus the combined identity/
+        // cooldown/name below.
+        if (settings.combat[part]?.kind === 'aura') continue;
         const ability = this.abilities.cast(origin, direction, this._quickCastDistance(part, rawDist), part);
         if (ability) {
           ability.autocast = autocast;
@@ -1162,10 +1191,61 @@ export class App {
         // uses — `seatElement` (not the narrowed `element` above), so a
         // fused seat reads its true fusion-max cost rather than only
         // whichever parent happens to keep the seat's icon.
-        manaCost: manaCostOf(seatElement) > 0
+        manaCost: manaCostOf(seatElement) > 0,
+        // M6 T4: 装备即常驻 — a fused-away aura parent isn't directly seated
+        // any more (see _syncAuras()'s own reasoning), so this follows the
+        // same `!fused` narrowing the rest of the row already uses.
+        aura: !fused && settings.combat[element]?.kind === 'aura'
       };
     });
     this.runHud.syncSlots(view);
+  }
+
+  /**
+   * Reconcile the permanent-aura instances (bladeorbit/firering/sunwheel)
+   * against the loadout's current seats (spec §4.5 装备即常驻: equip one and
+   * it runs, no cast, no cooldown — see OrbitAuraSkill's own doc for how
+   * "permanent" is actually implemented). Derives everything from live state
+   * — `loadout.equippedList()` for what *should* be running, `abilities.active`
+   * for what *is* — rather than a second bookkeeping map, so a `clearEffects()`
+   * wipe (restart/return-to-title, which already destroys every active cast
+   * including these) can never leave this method out of sync with what it's
+   * tracking: the next call after a wipe simply finds nothing running and
+   * spawns fresh.
+   *
+   * A seat that fuses away stops being "seated" under its own id the instant
+   * `fuse()` runs (the seat now holds the fusion id instead) — an aura
+   * parent's permanent instance is retired right along with it; see the
+   * fusion loop's own skip in `_quickCastToward` for the other half of that
+   * choice (implementer's choice — the plan doesn't specify aura+fusion).
+   *
+   * Call after anything that changes seats: `startRun()` (covers both a
+   * fresh start and `_restart()`'s replay) and `_onUpgradeChoice()`'s
+   * acquire/fuse branches.
+   */
+  _syncAuras() {
+    const seated = new Set(this.loadout.equippedList());
+    for (const element of AURA_ELEMENTS) {
+      const running = this.abilities.active.find((a) => a.element === element);
+      if (seated.has(element) && !running) {
+        // Straight through AbilityManager, never through _cast/_quickCastToward
+        // (spec: an aura lives outside the cast pipeline entirely) — no mana
+        // gate, no cooldown write, no _applySequence stamp, no consumeQuench.
+        const ability = this.abilities.cast(this.character.position, _auraCastDir, 1, element);
+        // The five-field cast invariant's other three still get an explicit
+        // value each (never left undefined for CombatSystem._amp() to read
+        // as a stale leftover from whatever this pooled instance was cast as
+        // last time) — cooldown/_applySequence are the two this cast
+        // deliberately skips, not all five.
+        if (ability) {
+          ability.autocast = false;
+          ability.fusionMult = 1;
+          ability.quenched = false;
+        }
+      } else if (!seated.has(element) && running) {
+        this.abilities.retire(running);
+      }
+    }
   }
 
   /**
@@ -1185,6 +1265,12 @@ export class App {
     this.loadout.seats.forEach((element, seat) => {
       const slot = this._slotCd[seat];
       if (!element) {
+        slot.active = false;
+        return;
+      }
+      // M6 T4: an aura has no cooldown and no mana cost to show — its badge
+      // carries its own "常驻" state instead (see _syncBadges/RunHud).
+      if (settings.combat[element]?.kind === 'aura') {
         slot.active = false;
         return;
       }
@@ -1287,6 +1373,11 @@ export class App {
       this.loadout.acquire(card.element);
       this._syncBadges();
       this._refreshResonance();
+      // M6 T4: 装备即常驻 — spawn the permanent cast the instant an aura is
+      // seated. Before the demo shot below: for an aura pick, the orbiters
+      // appearing around the caster right now *is* the "immediate demo" —
+      // _quickCastToward's own aura guard makes the demo call itself a no-op.
+      this._syncAuras();
       // 新技能即时演示 (spec §6): free auto-fire at the nearest enemy so the
       // pick is felt immediately — same nearestTo() lookup the autocast loop
       // in frame() uses, `demo: true` so it costs no cooldown/quench and
@@ -1308,6 +1399,7 @@ export class App {
       this._autocast.delete(freedSeat);
       this._refreshResonance();
       this._syncBadges();
+      this._syncAuras(); // M6 T4: a fused-away aura parent stops being seated
     } else if (card.kind === 'passive') {
       this.modifiers.bumpPassive(card.passive);
       if (card.passive === 'vitality') {

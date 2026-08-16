@@ -90,7 +90,14 @@ export class CombatSystem {
     return id;
   }
 
+  /**
+   * @returns {number} total healing due to the player this tick (lifebloom's
+   *   `healPlayer` — see the 'burst' case). RunManager is the one place that
+   *   actually calls `player.heal()` with it ("RunManager routes heal"):
+   *   CombatSystem never touches PlayerState, same as it never has.
+   */
   tick(step, active) {
+    let healDue = 0;
     for (const ability of active) {
       const c = settings.combat[ability.element];
       if (!c || c.kind === 'self') continue;
@@ -143,6 +150,13 @@ export class CombatSystem {
             const amt = c.damage * this._amp(ability);
             this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
             if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
+            // M6 T4: boulder's stun — a full-strength (1.0) slow rather than a
+            // new mechanic, same debuff channel/resonance/淤塞 interactions
+            // c.slowFactor above already rides.
+            if (c.stunTime) this.targets.slow(ability.position, radius, 1.0, c.stunTime);
+            // M6 T4: lifebloom's self-heal. CombatSystem stays player-agnostic
+            // (see tick()'s own doc) — accumulate and hand it back to the caller.
+            if (c.healPlayer) healDue += c.healPlayer * this._amp(ability);
           }
           // Meteor's lava keeps burning through the fade, but the lava stops
           // burning when the knob says so, not when the VFX happens to fade:
@@ -188,10 +202,33 @@ export class CombatSystem {
           break;
         }
 
+        case 'aura': {
+          // 装备即常驻 (M6 T4): a permanent cast that never leaves 'travel' (see
+          // OrbitAuraSkill) — always ticks while seated. `c.dps` already carries
+          // the self-aura shape coefficient (settings.combat's own comment: BASE_DPS
+          // × 0.7, baked into the constant at balance time — not re-applied here,
+          // same as every other kind above never re-derives its own baseline).
+          // The hit test is a genuine annulus — `ability.position` is the *player*
+          // (OrbitAuraSkill keeps it pinned there every frame, not the cast's
+          // origin) — because the visual is a ring the swords/flames/orbs actually
+          // occupy, not a filled disc: an enemy standing on the caster's own feet,
+          // well inside the ring, should take nothing (WYSIWYG).
+          if (ability.phase === 'idle' || ability.phase === 'done') break;
+          const inner = Math.max(0, c.radius - (c.band ?? 0));
+          const amt = c.dps * this._amp(ability) * step;
+          this._book(
+            ability.element,
+            amt,
+            this.targets.damageRing(ability.position, inner, c.radius, amt, wux)
+          );
+          break;
+        }
+
         default:
           break;
       }
     }
+    return healDue;
   }
 
   /* Accumulate fractional dot damage so tiny per-tick amounts still land.

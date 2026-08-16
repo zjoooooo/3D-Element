@@ -2183,14 +2183,22 @@ export const settings = {
     range: 14, minRange: 0, speed: 20, cooldown: 2.6, manaCost: 0, castAnim: 'cast1',
     zoneRadius: 4.0, // footprint the circle indicator measures out — matches combat.swordrain.radius
     swordCount: 14, swordSize: 0.5, dropTime: 0.4, // pre-effect: instanced blades falling (T4)
-    color: '#e8c766', colorGlow: '#fff2c2'
+    color: '#e8c766', colorGlow: '#fff2c2',
+    // M6 T4 (ZoneBurstSkill): the burst's own radius reads straight off
+    // settings.combat.swordrain.radius (WYSIWYG — one number, not two to drift).
+    dropHeight: 6.0, burstLife: 0.75,
+    lightColor: '#fff2c2', lightIntensity: 10, lightRadius: 9
   },
 
   // --- 金 bladeorbit: 剑域, five swords orbiting the caster — permanent aura ---
   bladeorbit: {
     range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
     bladeCount: 5, bladeSize: 0.4, orbitSpeed: 1.2, // revolutions/second
-    color: '#f0d885', colorGlow: '#fff6d9'
+    color: '#f0d885', colorGlow: '#fff6d9',
+    // M6 T4 (OrbitAuraSkill): orbit radius/band read off settings.combat.bladeorbit
+    // directly (same WYSIWYG reasoning as swordrain above) — a permanent effect
+    // keeps a deliberately modest light so it doesn't wash out the whole run.
+    lightColor: '#fff6d9', lightIntensity: 3.5, lightRadius: 5
   },
 
   // --- 金 dashstrike: 弑神一闪, a short teleport-slash (DashStrikeSkill, T6) ---
@@ -2212,14 +2220,18 @@ export const settings = {
     range: 10, minRange: 0, speed: 18, cooldown: 3.2, manaCost: 0, castAnim: 'cast1',
     zoneRadius: 2.2, // matches combat.lifebloom.radius
     petalCount: 8, bloomSize: 0.6,
-    color: '#5fd98f', colorGlow: '#d6ffe6'
+    color: '#5fd98f', colorGlow: '#d6ffe6',
+    burstLife: 0.8,
+    lightColor: '#d6ffe6', lightIntensity: 9, lightRadius: 8
   },
 
   // --- 水 frostnova: 寒霜新星, a self-centred ring of freeze ---
   frostnova: {
     range: 1, minRange: 0, speed: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     ringCount: 3, crystalSize: 0.4,
-    color: '#7fd4ff', colorGlow: '#e8f9ff'
+    color: '#7fd4ff', colorGlow: '#e8f9ff',
+    burstLife: 0.9,
+    lightColor: '#e8f9ff', lightIntensity: 14, lightRadius: 11
   },
 
   // --- 水 iceshield: 冰晶甲, a personal shield that sprays shards when it breaks ---
@@ -2233,21 +2245,29 @@ export const settings = {
   firering: {
     range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
     flameHeight: 0.8, ringWidth: 0.5,
-    color: '#ff8a4c', colorGlow: '#ffe0c2'
+    color: '#ff8a4c', colorGlow: '#ffe0c2',
+    lightColor: '#ffe0c2', lightIntensity: 4, lightRadius: 5.5
   },
 
   // --- 火 sunwheel: 日轮, three fireballs orbiting the caster — permanent aura ---
   sunwheel: {
     range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
     orbCount: 3, orbSize: 0.35,
-    color: '#ffb347', colorGlow: '#ffe8c2'
+    color: '#ffb347', colorGlow: '#ffe8c2',
+    lightColor: '#ffe8c2', lightIntensity: 4, lightRadius: 5.5
   },
 
   // --- 土 rockspikes: 岩刺突贯, spikes tearing up along a line (ice's skeleton, T4) ---
   rockspikes: {
     range: 15, minRange: 2.2, speed: 24, cooldown: 2.4, manaCost: 0, castAnim: 'cast1',
     spikeCount: 16, riseTime: 0.15,
-    color: '#b8875a', colorGlow: '#e6d3ba'
+    color: '#b8875a', colorGlow: '#e6d3ba',
+    // M6 T4 (LineSweepSkill — ice's skeleton, simplified to one band width read
+    // straight off settings.combat.rockspikes.width for WYSIWYG).
+    height: 1.5, heightJitter: 0.3, radius: 0.2,
+    facets: 5, taper: 0.7, roughness: 0.4, bend: 0.1, lean: 0.3,
+    lifetime: 1.6, sinkTime: 0.5,
+    lightColor: '#e6d3ba', lightIntensity: 8, lightRadius: 9
   },
 
   // --- 土 boulder: 落石, a single stunning rock dropped on a circle ---
@@ -2255,14 +2275,18 @@ export const settings = {
     range: 16, minRange: 0, speed: 16, cooldown: 3.0, manaCost: 0, castAnim: 'cast1',
     zoneRadius: 2.4, // matches combat.boulder.radius
     rockSize: 1.3, fallTime: 0.5,
-    color: '#9c6b42', colorGlow: '#d9bfa0'
+    color: '#9c6b42', colorGlow: '#d9bfa0',
+    dropHeight: 9.0, burstLife: 0.85,
+    lightColor: '#d9bfa0', lightIntensity: 9, lightRadius: 8
   },
 
   // --- 土 quake: 震地波, a self-centred shockwave with heavy knockback ---
   quake: {
     range: 1, minRange: 0, speed: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     waveCount: 2, waveSpeed: 6.0,
-    color: '#8a7355', colorGlow: '#d6c9b3'
+    color: '#8a7355', colorGlow: '#d6c9b3',
+    burstLife: 1.0,
+    lightColor: '#d6c9b3', lightIntensity: 12, lightRadius: 10
   },
 
   // --- 土 stoneskin: 石肤, rock armour that reflects a share of absorbed damage ---

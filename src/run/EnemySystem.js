@@ -277,6 +277,33 @@ export class EnemySystem {
     return hits;
   }
 
+  /** Like damage(), but only within a band [innerRadius, radius] of point —
+   * the annulus a permanent aura's orbiting ring/flames/orbs actually occupy
+   * (M6 T4). Mirrors damage()'s loop exactly, plus the inner cutoff; an
+   * enemy standing well inside the ring (nearer than innerRadius, padded by
+   * its own collision radius the same way the outer edge already is) takes
+   * nothing. */
+  damageRing(point, innerRadius, radius, amount, wuxing = -1) {
+    let hits = 0;
+    for (let i = this.count - 1; i >= 0; i--) {
+      const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
+      const dx = this.x[i] - point.x;
+      const dz = this.z[i] - point.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist >= radius + kind.radius) continue;
+      if (dist < innerRadius - kind.radius) continue;
+      hits++;
+      this.flash[i] = 1;
+      const d = dist || 1;
+      const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult;
+      this.kbX[i] += (dx / d) * kb;
+      this.kbZ[i] += (dz / d) * kb;
+      this._applyWux(i, amount, wuxing);
+    }
+    this._flushReactions();
+    return hits;
+  }
+
   damageOnce(castId, point, radius, amount, wuxing = -1) {
     let seen = this._hitMemory.get(castId);
     if (!seen) this._hitMemory.set(castId, (seen = new Set()));

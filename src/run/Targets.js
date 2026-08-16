@@ -41,4 +41,18 @@ export class Targets {
   slow(point, radius, factor, duration) {
     for (const p of this._populations) p.slow?.(point, radius, factor, duration);
   }
+
+  /** Damage only within an annulus [innerRadius, radius] of point (M6 T4:
+   * an aura's orbiting ring/flames/orbs occupy a band, not a filled disc).
+   * Populations that don't implement it degrade to a plain disc — the same
+   * quiet-degradation contract damageOnce already documents above. */
+  damageRing(point, innerRadius, radius, amount, wuxing = -1) {
+    let total = 0;
+    for (const p of this._populations) {
+      total += p.damageRing
+        ? p.damageRing(point, innerRadius, radius, amount, wuxing)
+        : p.damage(point, radius, amount, wuxing);
+    }
+    return total;
+  }
 }
