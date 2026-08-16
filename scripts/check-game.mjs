@@ -23,6 +23,7 @@ import { EnemyProjectiles } from '../src/run/EnemyProjectiles.js';
 import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
+import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
@@ -501,6 +502,67 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(player.mana, deadMana, 'mana: dead player gainMana does nothing');
 
   console.log('ok  mana');
+}
+
+/* ---- M6 T3: mana spend gate (manaGate.js) — pure pre-cast math ---- */
+{
+  const player = new PlayerState();
+
+  // legacy absent manaCost reads as free (?? 0) — every pre-M6 skill
+  assert.equal(manaCostOf('ice'), 0, 'manaGate: absent manaCost (legacy) resolves to 0');
+  assert.deepEqual(canAffordCast('ice', player), { ok: true, cost: 0 }, 'manaGate: a free skill always affords');
+
+  // tactical: real cost, gated on the pool
+  assert.equal(manaCostOf('dashstrike'), 30, 'manaGate: tactical manaCost reads through untouched');
+  assert.deepEqual(
+    canAffordCast('dashstrike', player),
+    { ok: true, cost: 30 },
+    'manaGate: affords at full mana'
+  );
+
+  // fusion: max(parents), never the sum — the same "slower parent sets the
+  // pace" reading the fusion's own cooldown already uses (_quickCastToward).
+  assert.equal(manaCostOf(fusionId('ice', 'dashstrike')), 30, 'manaGate: fusion cost is max(0, 30)');
+  assert.equal(
+    manaCostOf(fusionId('dashstrike', 'quake')),
+    30,
+    'manaGate: fusion cost is max(30, 30), not the 60-mana sum'
+  );
+
+  // demo/echo always afford, regardless of cost or an empty pool
+  player.mana = 0;
+  assert.deepEqual(
+    canAffordCast('dashstrike', player, { demo: true }),
+    { ok: true, cost: 30 },
+    'manaGate: a demo cast always affords'
+  );
+  assert.deepEqual(
+    canAffordCast('dashstrike', player, { echo: true }),
+    { ok: true, cost: 30 },
+    'manaGate: an echo re-fire always affords'
+  );
+
+  // insufficient mana blocks a real cast; exactly enough affords it
+  player.mana = 10;
+  assert.deepEqual(
+    canAffordCast('dashstrike', player),
+    { ok: false, cost: 30 },
+    'manaGate: insufficient mana blocks (no demo/echo exemption)'
+  );
+  player.mana = 30;
+  assert.ok(canAffordCast('dashstrike', player).ok, 'manaGate: exactly enough mana affords');
+
+  // purity: the helper only ever reads playerState.mana, never spends — App
+  // calls player.spendMana(cost) itself, only after ok, exactly once.
+  const before = player.mana;
+  canAffordCast('dashstrike', player);
+  canAffordCast('dashstrike', player, { demo: true });
+  canAffordCast('ice', player);
+  assert.equal(player.mana, before, 'manaGate: canAffordCast never mutates mana (pure)');
+  assert.ok(player.spendMana(30), 'manaGate: the real spend (App-side, post-ok) succeeds exactly once');
+  assert.equal(player.mana, 0, 'manaGate: that one spend deducted the full cost');
+
+  console.log('ok  mana gate');
 }
 
 /* ---- run manager: schedule, deaths feed gems, verdicts ---- */

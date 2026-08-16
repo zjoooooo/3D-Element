@@ -23,6 +23,7 @@ import { TideAtmosphere } from '../run/TideAtmosphere.js';
 import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
 import { sequenceRefund } from '../run/sequence.js';
 import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
+import { canAffordCast, manaCostOf } from '../run/manaGate.js';
 import { CombatSystem } from '../run/CombatSystem.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
@@ -251,9 +252,13 @@ export class App {
        * `_seatCooldowns()`) — six preallocated objects, mutated in place
        * every frame rather than reallocated (matches this file's other
        * per-frame scratch: `_moveDir`, `_deathPos`, `_verdict`...). */
-      this._slotCd = Array.from({ length: 6 }, () => ({ active: false, remaining: 0, total: 0 }));
+      this._slotCd = Array.from({ length: 6 }, () => ({ active: false, remaining: 0, total: 0, lowMana: false }));
       this._lastCastWux = -1;
       this._lastCastAt = -Infinity;
+      /** M6 T3: `this.run.elapsed`-keyed, matching `_lastCastAt`'s own
+       * clock — 0.5s repeat suppression on the `run.noMana` toast so
+       * mashing a cast against an empty pool doesn't flood it. */
+      this._lastNoManaToastAt = -Infinity;
       /** 微顿帧 (M5 Task 9): seconds left of the world's brief post-big-moment
        * slow. See `frame()`'s dt computation and `_triggerHitstop`. */
       this._hitstop = 0;
@@ -610,6 +615,7 @@ export class App {
     this._echoAt = null;
     this._lastCastWux = -1;
     this._lastCastAt = -Infinity;
+    this._lastNoManaToastAt = -Infinity;
   }
 
   /**
@@ -910,8 +916,38 @@ export class App {
     this._lastCastAt = this.run.elapsed;
   }
 
+  /** Throttled `run.noMana` toast (M6 T3) — checked `armAbility`'s 'Not
+   * ready' toast for a throttle to reuse and found none (that one is
+   * click-gated, not held, so it never needed one); a mana-gated cast can
+   * be mashed the same way while the pool sits empty, so this gets its own
+   * simple 0.5s repeat-suppression field instead. */
+  _toastNoMana() {
+    if (this.run.elapsed - this._lastNoManaToastAt < 0.5) return;
+    this._lastNoManaToastAt = this.run.elapsed;
+    this.hud.showToast(t('run.noMana'));
+  }
+
   _cast(origin, direction, distance) {
     const element = this.element;
+    // 法力消费门 (M6 T3, spec 锚2.5): run-mode only — sandbox never
+    // constructs `playerState`, same reason every `this.runMode ?` guard
+    // below this one exists. Sits before every side effect a real cast has
+    // (ability spawn, quench, cooldown write, sequence stamp, echo arm), so
+    // a failed gate leaves all of them untouched. `_cast` never carries a
+    // `demo` of its own (only `_quickCastToward` does), but a non-fusion
+    // echo re-fire reaches here too, through `_quickCast` → `aim.quickCast()`'s
+    // 'cast' event, while `this._echoing` is still true around that whole
+    // call (armed in `frame()`'s echo block) — exempt it the same way
+    // `_quickCastToward`'s own copy of this gate does.
+    if (this.runMode) {
+      const echo = this._echoing;
+      const { ok, cost } = canAffordCast(element, this.playerState, { echo });
+      if (!ok) {
+        this._toastNoMana();
+        return;
+      }
+      if (cost > 0 && !echo) this.playerState.spendMana(cost);
+    }
     const ability = this.abilities.cast(origin, direction, distance, element);
     // Written on every cast through here (sandbox, manual run cast, echo) so
     // a pooled instance never carries an autocast tax over from a previous
@@ -997,6 +1033,28 @@ export class App {
     const rawDist = Math.hypot(dx, dz);
     if (rawDist < 1e-6) return; // degenerate: target sits exactly on the caster
     const direction = { x: dx / rawDist, y: 0, z: dz / rawDist };
+
+    // 法力消费门 (M6 T3, spec 锚2.5): run-mode only, mirrors `_cast`'s own
+    // copy above. A fused cast is charged exactly once here — at the max of
+    // its two parents' manaCost (manaGate.js's `manaCostOf`, dispatch-
+    // authorized: same "the slower parent sets the pace" reading the
+    // fusion's own cooldown already uses a few lines down, `Math.max(a.cooldown,
+    // b.cooldown)`, rather than summing both parents' pools). Sits before
+    // consumeQuench/the ability spawn loop/cooldown write/sequence stamp/
+    // echo arm below, so a failed gate leaves every one of them untouched.
+    // Demo and echo (`this._echoing`, armed around the echo's own
+    // `_quickCast` call in frame()) always afford; a failed autocast
+    // (background seat) skips the toast — only a manual miss earns the
+    // throttled one.
+    if (this.runMode) {
+      const echo = this._echoing;
+      const { ok, cost } = canAffordCast(element, this.playerState, { demo, echo });
+      if (!ok) {
+        if (!autocast) this._toastNoMana();
+        return;
+      }
+      if (cost > 0 && !demo && !echo) this.playerState.spendMana(cost);
+    }
 
     let castAnim;
     if (isFusionId(element)) {
@@ -1100,10 +1158,11 @@ export class App {
         label: fused ? fusionName(seatElement) : (ELEMENT_META[element]?.label ?? element),
         fusion: fused,
         autocast: this._autocast.has(seat),
-        // Structural (spec §9): no ability has a manaCost yet, so this is
-        // always false until an M6 skill sets one — the dot's CSS/markup
-        // already exists, waiting on a real value here.
-        manaCost: !!settings[element]?.manaCost
+        // M6 T3: real data, off the same `manaCostOf` the spend gate itself
+        // uses — `seatElement` (not the narrowed `element` above), so a
+        // fused seat reads its true fusion-max cost rather than only
+        // whichever parent happens to keep the seat's icon.
+        manaCost: manaCostOf(seatElement) > 0
       };
     });
     this.runHud.syncSlots(view);
@@ -1116,6 +1175,11 @@ export class App {
    * fusion id itself in `this.cooldowns` (the same key `_quickCastToward`
    * writes), with `total` the slower of its two parents — same numbers the
    * old sandbox-card fusion loop in `frame()` used to compute.
+   *
+   * `lowMana` (M6 T3) reads off the exact same `canAffordCast` gate a real
+   * cast would hit right now (no demo/echo — this is a readout, not a cast
+   * attempt) — one source of truth shared with `_cast`/`_quickCastToward`,
+   * so the HUD mask can never disagree with what actually gets spent.
    */
   _seatCooldowns() {
     this.loadout.seats.forEach((element, seat) => {
@@ -1132,6 +1196,7 @@ export class App {
         slot.total = settings[element].cooldown;
       }
       slot.remaining = this.cooldowns.get(element) ?? 0;
+      slot.lowMana = !canAffordCast(element, this.playerState).ok;
     });
     return this._slotCd;
   }

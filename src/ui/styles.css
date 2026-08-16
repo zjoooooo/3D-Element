@@ -760,6 +760,27 @@ body {
   box-shadow: 0 0 4px rgba(88, 170, 255, 0.9);
 }
 
+/* 蓝量不足 (M6 T3): a flat blue veil over the whole slot — deliberately not
+   the corner-dot pseudo-elements above (both already claim ::before/::after,
+   and a low-mana seat always also carries the manaCost dot, so a real child
+   element is the only way both can render at once), and deliberately not a
+   sweep-style conic gradient like `.hud-slot__sweep`'s cooldown wash: "can't
+   afford it" has no partial/progress state to show, so a flat tint reads as
+   a different kind of blocked rather than a second cooldown ring. */
+.hud-slot__manamask {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(88, 170, 255, 0.4);
+  opacity: 0;
+  transition: opacity 0.12s linear;
+  pointer-events: none;
+}
+
+.hud-slot.is-low-mana .hud-slot__manamask {
+  opacity: 1;
+}
+
 /* 就绪弹跳: scale pop + white edge flash. App/RunHud replay it with a
    remove/reflow/add cycle, so a very short cooldown that completes twice
    inside 0.2s still gets two pops instead of the second being a no-op. */

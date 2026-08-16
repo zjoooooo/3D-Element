@@ -23,6 +23,12 @@ const SLOT_HTML = Array.from(
     '<div class="hud-slot__glyph" data-glyph></div>' +
     '<div class="hud-slot__cd" data-cd></div>' +
     '<div class="hud-slot__key" data-key></div>' +
+    // 蓝量不足蒙层 (M6 T3): pure CSS opacity toggle off the root's
+    // `is-low-mana` class (see `_updateCooldowns`) — no JS reference needed,
+    // same "root class drives a child's opacity" pattern `.hud-slot__sweep`
+    // already uses for the cooldown wash. Last child so the veil paints over
+    // everything else in the slot, not just the glyph.
+    '<div class="hud-slot__manamask"></div>' +
     '</div>'
 ).join('');
 
@@ -135,8 +141,8 @@ export class RunHud {
   /**
    * Per-frame live readout. `ultimate` is the whole `Ultimate` instance
    * (charge + its fixed home wuxing); `cooldowns` is `App#_seatCooldowns()`'s
-   * preallocated 6-entry `{active, remaining, total}` array, or omitted to
-   * leave the skill bar's cooldown visuals as they were.
+   * preallocated 6-entry `{active, remaining, total, lowMana}` array, or
+   * omitted to leave the skill bar's cooldown/mana visuals as they were.
    */
   update(player, run, pickups, tideInfo, resonanceText, ultimate, cooldowns) {
     const s = Math.floor(run.elapsed);
@@ -193,18 +199,24 @@ export class RunHud {
     );
   }
 
-  /** Sweep ratio, ≥3s countdown text, and the ready-pop transition — one
-   * seat at a time, off the preallocated cooldowns array. */
+  /** Sweep ratio, ≥3s countdown text, the ready-pop transition, and the
+   * low-mana veil (M6 T3) — one seat at a time, off the preallocated
+   * cooldowns array. `is-low-mana` is independent of `is-cooling`: a seat
+   * can be both at once (a wide cooldown that also outlasted a mana dip),
+   * each its own visual (dark conic sweep vs. flat blue veil) so neither
+   * reads as the other. */
   _updateCooldowns(cooldowns) {
     for (let i = 0; i < SLOT_COUNT; i++) {
       const slot = this._slots[i];
       const cd = cooldowns[i];
       if (!cd?.active) {
         slot.root.classList.remove('is-cooling');
+        slot.root.classList.remove('is-low-mana');
         slot.cd.textContent = '';
         slot.prevRemaining = 0;
         continue;
       }
+      slot.root.classList.toggle('is-low-mana', !!cd.lowMana);
       const remaining = Math.max(0, cd.remaining);
       const ratio = cd.total > 0 ? Math.min(1, remaining / cd.total) : 0;
       slot.root.style.setProperty('--cooldown', ratio);

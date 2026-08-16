@@ -36,6 +36,7 @@ export const STRINGS = {
     'run.tideTurn': '潮来临',
     'run.sequenceChain': '相生轮转',
     'run.shardFizzle': '残章逸散',
+    'run.noMana': '蓝量不足',
     // 禁咒 (App#_fireUltimate / RunHud's F slot hover title).
     'ult.label': '禁咒',
     'ult.fired': '禁咒已释放',
@@ -93,6 +94,7 @@ export const STRINGS = {
     'run.tideTurn': 'tide rising',
     'run.sequenceChain': 'Chain Bonus',
     'run.shardFizzle': 'Page scattered',
+    'run.noMana': 'Not enough mana',
     'ult.label': 'Ult',
     'ult.fired': 'Ultimate unleashed',
     'ult.notReady': 'Ultimate not charged',
