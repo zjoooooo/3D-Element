@@ -115,6 +115,9 @@ export class RunHud {
       slot.root.classList.toggle('hud-slot--fusion', !!data.fusion);
       slot.root.classList.toggle('hud-slot--auto', !!data.autocast);
       slot.root.classList.toggle('hud-slot--mana', !!data.manaCost);
+      // Forget stale cooldowns on restart: prevRemaining from death must not
+      // false-trigger a 0-crossing when cooldowns reset.
+      slot.prevRemaining = 0;
       if (empty) {
         slot.glyph.innerHTML = '';
         slot.name.textContent = '';
