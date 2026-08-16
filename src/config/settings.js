@@ -255,7 +255,21 @@ export const settings = {
     length: 180, // seconds per tide; 5 tides fill the 15-minute run
     bias: 0.7, // share of spawns that carry the tide's element
     goldRain: { count: 30, value: 5, radius: 6 }, // tide-end gem shower
-    eliteAt: [0.4, 0.75] // tide progress marks the elites spawn at
+    eliteAt: [0.4, 0.75], // tide progress marks the elites spawn at
+    blendSeconds: 20, // TideAtmosphere: seconds a tide turn takes to cross-fade
+    // Per-wuxing weather (M5 Task 8), index-aligned with WUXING/ELEMENT_TINTS/
+    // BEATS (same 金木水火土 order everywhere else). TideAtmosphere multiplies
+    // these onto Environment's already-updated runtime colours each frame, so
+    // they are kept close to white with one or two channels held back rather
+    // than fully saturated — a saturated tint would crush the other channels
+    // instead of just grading the scene.
+    atmosphere: [
+      { lightTint: '#ffe58c', fogTint: '#e6cc85', dustTint: '#fff2b3', dustDrift: { x: 0, z: 0 } }, // 金银屑
+      { lightTint: '#8cffa3', fogTint: '#7fd191', dustTint: '#9dffb0', dustDrift: { x: 0.15, z: 0.1 } }, // 木流萤
+      { lightTint: '#8ccdff', fogTint: '#7fb8e6', dustTint: '#dff2ff', dustDrift: { x: 0.3, z: -0.2 } }, // 水落雪
+      { lightTint: '#ff8c59', fogTint: '#e67a4d', dustTint: '#ffb066', dustDrift: { x: 0.05, z: 0.05 } }, // 火余烬
+      { lightTint: '#e6bf80', fogTint: '#d1a86e', dustTint: '#d8b878', dustDrift: { x: 0.8, z: 0.4 } } // 土沙尘
+    ]
   },
 
   /** Elemental marks and the sheng reactions they detonate into (spec §4.6). */
@@ -383,7 +397,12 @@ export const settings = {
       vulnStrong: { amount: 0.25, duration: 4 }, // 熔甲（无暴击系统，降档强易伤）
       weak: { amount: 0.3, duration: 4 }, // 熄灭：接触/弹道 −30%
       slowAmp: { mult: 2, duration: 4, cap: 0.9 } // 淤塞：所受减速翻倍; cap: total slow ceiling
-    }
+    },
+    // Threat readability (spec §5.7 亮度层级): enemy bolts + spawn telegraphs
+    // multiply their base colour by this so red threats outshine friendly VFX
+    // in a busy fight. Read by EnemyProjectiles.js and EnemyRenderer.js
+    // (telegraph rings) at material construction.
+    threatEmissive: 1.6
   },
 
   /* ------------------------------------------------------------------ */

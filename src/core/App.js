@@ -18,6 +18,7 @@ import { EnemySystem } from '../run/EnemySystem.js';
 import { EnemyRenderer } from '../run/EnemyRenderer.js';
 import { EnemyProjectiles } from '../run/EnemyProjectiles.js';
 import { Arena } from '../run/Arena.js';
+import { TideAtmosphere } from '../run/TideAtmosphere.js';
 import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
 import { sequenceRefund } from '../run/sequence.js';
 import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
@@ -197,6 +198,10 @@ export class App {
       // (no editor slider), so this is a one-time set, not a per-frame sync.
       this.arena = new Arena(this.scene);
       this.ground.setRitual(settings.arena.ritualStrength);
+      // Light/fog/dust grade toward the current tide's weather (M5 Task 8).
+      // Constructed only here — the sandbox never builds one, so it never
+      // touches environment/dust at all outside a run.
+      this.tideAtmosphere = new TideAtmosphere(this.environment, this.dust);
       this.pickups = new PickupSystem();
       this.scene.add(this.pickups.points);
       this.playerState = new PlayerState();
@@ -1183,7 +1188,15 @@ export class App {
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
-      this.arena.update(this.run.tide(), this.elapsed);
+      // Shared scratch read (TideSchedule.tideAt): one call, passed to both —
+      // a second call this same frame would still be safe (nothing rolls a
+      // spawn between here and the render tail), but there is no reason to.
+      const tideInfo = this.run.tide();
+      this.arena.update(tideInfo, this.elapsed);
+      // After environment.update() (this frame's top) and dust.update()
+      // (above) both already ran — TideAtmosphere multiplies onto their
+      // post-update runtime colours, never onto settings itself.
+      this.tideAtmosphere.update(dt, tideInfo);
       this.threatArrows.update(this.enemySystem, this.character.position);
       this.pickups.sync();
       this.enemyProjectiles.sync();

@@ -4,7 +4,9 @@ import {
   BufferAttribute,
   ShaderMaterial,
   AdditiveBlending,
-  Vector3
+  Vector3,
+  Vector2,
+  Color
 } from 'three';
 import { settings } from '../config/settings.js';
 import { noiseGLSL } from '../shaders/lib/noise.glsl.js';
@@ -48,7 +50,13 @@ export class DustMotes {
         uSize: { value: 20 },
         uPixelRatio: { value: 1 },
         uVolume: { value: VOLUME.clone() },
-        uAnchor: { value: new Vector3() }
+        uAnchor: { value: new Vector3() },
+        // Run-mode weather preset (TideAtmosphere, M5 Task 8). Identity
+        // defaults — white tint, no drift, unit density — so the sandbox,
+        // which never calls setPreset(), renders exactly as before Task 8.
+        uTint: { value: new Color(1, 1, 1) },
+        uDrift: { value: new Vector2(0, 0) }, // world-plane wind, metres/second (x, z)
+        uDensity: { value: 1 }
       },
       vertexShader: /* glsl */ `
         uniform float uTime;
@@ -56,6 +64,7 @@ export class DustMotes {
         uniform float uPixelRatio;
         uniform vec3 uVolume;
         uniform vec3 uAnchor;
+        uniform vec2 uDrift;
         attribute float aSeed;
         varying float vAlpha;
         varying float vSeed;
@@ -73,6 +82,10 @@ export class DustMotes {
           // past as you walk, re-entering on the far side once it drops out of
           // range. mod() is floor-based in GLSL, so negatives wrap correctly.
           p.xz -= uAnchor.xz;
+          // Preset wind (uDrift.y is world Z, not screen space — see uDrift's
+          // declaration above): zero by default, so this is a no-op until a
+          // run's TideAtmosphere calls setPreset() with a non-zero drift.
+          p.xz += uDrift * uTime;
           p.xz = mod(p.xz + uVolume.xz * 0.5, uVolume.xz) - uVolume.xz * 0.5;
 
           // Slow buoyant drift with a curl-noise wobble.
@@ -103,6 +116,8 @@ export class DustMotes {
       `,
       fragmentShader: /* glsl */ `
         uniform float uAmount;
+        uniform vec3 uTint;
+        uniform float uDensity;
         varying float vAlpha;
         varying float vSeed;
 
@@ -111,8 +126,8 @@ export class DustMotes {
           float d = length(uv);
           if (d > 0.5) discard;
           float mask = smoothstep(0.5, 0.02, d);
-          vec3 tint = mix(vec3(1.0, 0.93, 0.78), vec3(0.78, 0.9, 1.0), vSeed);
-          float a = mask * vAlpha * uAmount * 0.3;
+          vec3 tint = mix(vec3(1.0, 0.93, 0.78), vec3(0.78, 0.9, 1.0), vSeed) * uTint;
+          float a = mask * vAlpha * uAmount * uDensity * 0.3;
           if (a < 0.002) discard;
           gl_FragColor = vec4(tint, a);
         }
@@ -128,6 +143,21 @@ export class DustMotes {
 
   setPixelRatio(ratio) {
     this.material.uniforms.uPixelRatio.value = ratio;
+  }
+
+  /**
+   * Recolour/reweather the motes: `tint` multiplies the existing warm/cool
+   * gradient, `drift` (`{x, z}`) adds a wind vector on top of the existing
+   * rise-and-wrap motion, `density` (optional) scales visibility. Minimal
+   * parameterisation of what already exists — no new motion system.
+   *
+   * Sandbox never calls this (its uniforms stay at their constructed
+   * identity defaults); only TideAtmosphere does, once per frame in a run.
+   */
+  setPreset({ tint, drift, density = 1 }) {
+    this.material.uniforms.uTint.value.set(tint);
+    this.material.uniforms.uDrift.value.set(drift.x, drift.z);
+    this.material.uniforms.uDensity.value = density;
   }
 
   update(elapsed, anchor) {

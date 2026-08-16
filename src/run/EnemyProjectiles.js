@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Points, PointsMaterial } from 'three';
+import { BufferAttribute, BufferGeometry, Points, PointsMaterial, Color } from 'three';
 import { settings } from '../config/settings.js';
 
 /**
@@ -25,7 +25,12 @@ export class EnemyProjectiles {
     geometry.setDrawRange(0, 0);
     this.points = new Points(
       geometry,
-      new PointsMaterial({ color: 0xff4433, size: 0.5, sizeAttenuation: true })
+      new PointsMaterial({
+        // spec §5.7 亮度层级: threats outshine friendly VFX in a busy fight.
+        color: new Color(0xff4433).multiplyScalar(settings.combat.threatEmissive),
+        size: 0.5,
+        sizeAttenuation: true
+      })
     );
     this.points.frustumCulled = false;
   }

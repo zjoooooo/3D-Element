@@ -28,6 +28,8 @@ import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
 import { STRINGS, t } from '../src/ui/strings.js';
 import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
+import { mixTint } from '../src/run/TideAtmosphere.js';
+import { getColor } from '../src/utils/color.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1755,6 +1757,35 @@ import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
   assert.equal(steleGlowAt(1, lastTide, 3), a.steleGlow, 'arena: final tide\'s self-referential nextElement still reads as current');
 
   console.log('ok  arena stele glow');
+}
+
+/* ---- tide atmosphere: mixTint's pure lerp (M5 Task 8) ---- */
+{
+  const fromHex = settings.tides.atmosphere[2].lightTint; // 水
+  const toHex = settings.tides.atmosphere[3].lightTint; // 火
+  const from = getColor(fromHex);
+  const to = getColor(toHex);
+
+  // 半程 = 分量中点: halfway is the exact componentwise midpoint, not an
+  // eased curve or a hex-integer average that forgot to split channels.
+  const half = mixTint(fromHex, toHex, 0.5);
+  assert.ok(Math.abs(half.r - (from.r + to.r) / 2) < 1e-6, 'tideAtmosphere: mixTint halfway is the midpoint (r)');
+  assert.ok(Math.abs(half.g - (from.g + to.g) / 2) < 1e-6, 'tideAtmosphere: mixTint halfway is the midpoint (g)');
+  assert.ok(Math.abs(half.b - (from.b + to.b) / 2) < 1e-6, 'tideAtmosphere: mixTint halfway is the midpoint (b)');
+
+  // 潮未换 = 恒等: from === to (nothing actually changed) must return that
+  // same colour at ANY blend progress, including out-of-range t — a flipped
+  // from/to or an unclamped overshoot could still drift even though the tide
+  // never turned.
+  for (const sample of [0, 0.3, 0.5, 1, -1, 2]) {
+    const same = mixTint(fromHex, fromHex, sample);
+    assert.ok(
+      Math.abs(same.r - from.r) < 1e-6 && Math.abs(same.g - from.g) < 1e-6 && Math.abs(same.b - from.b) < 1e-6,
+      `tideAtmosphere: mixTint(x, x, ${sample}) is the identity (tide unchanged)`
+    );
+  }
+
+  console.log('ok  tide atmosphere lerp');
 }
 
 console.log('\nevery game-logic check passed');

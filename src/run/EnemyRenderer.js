@@ -4,6 +4,7 @@ import {
 } from 'three';
 import { settings } from '../config/settings.js';
 import { LAYER } from '../core/Layers.js';
+import { patchOnBeforeCompile } from '../utils/shaderPatch.js';
 
 /**
  * The horde's appearance: one InstancedMesh, colour per element, hit-flash via
@@ -32,6 +33,24 @@ export class EnemyRenderer {
       emissive: 0x94261a,
       emissiveIntensity: 0.5
     });
+    // Rim light: a matte grey-box capsule facing away from the key light can
+    // vanish into TideAtmosphere's darkest palette. Small, constant fresnel
+    // term on top of the existing emissive — independent of instance tint
+    // (that stays a diffuseColor multiply, untouched here) and of
+    // TideAtmosphere (which never touches this material) — its whole job is
+    // staying visible exactly when the scene grading dims everything else.
+    // Same onBeforeCompile shape as Ground.js's emissivemap_fragment patch.
+    patchOnBeforeCompile(material, (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+         {
+           float ndv = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
+           float rim = pow(1.0 - ndv, 2.5) * 0.4;
+           totalEmissiveRadiance += vec3(0.65, 0.78, 0.95) * rim;
+         }`
+      );
+    });
 
     this.mesh = new InstancedMesh(geometry, material, cap);
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);
@@ -50,7 +69,13 @@ export class EnemyRenderer {
 
     this.telegraphs = new InstancedMesh(
       new RingGeometry(0.5, 0.72, 24).rotateX(-Math.PI / 2),
-      new MeshBasicMaterial({ color: 0xff4433, transparent: true, opacity: 0.7, depthWrite: false }),
+      new MeshBasicMaterial({
+        // spec §5.7 亮度层级: threats outshine friendly VFX in a busy fight.
+        color: new Color(0xff4433).multiplyScalar(settings.combat.threatEmissive),
+        transparent: true,
+        opacity: 0.7,
+        depthWrite: false
+      }),
       TELEGRAPH_POOL
     );
     this.telegraphs.instanceMatrix.setUsage(DynamicDrawUsage);
