@@ -20,7 +20,7 @@ const HOME_ELEMENT = ['beam', 'thunder', 'ice', 'fireball', 'rockspikes'];
 
 /**
  * The run's front door (spec §9 / §9.5): world lore, five 本命 cards (one
- * per wuxing — four pickable, 土 a disabled placeholder), a link out to the
+ * per wuxing — all five pickable as of M6 T2), a link out to the
  * sandbox, the character dropdown (same switch path the sandbox editor's own
  * dropdown already uses), and the photosensitivity small print.
  *

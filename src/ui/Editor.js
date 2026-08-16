@@ -1,6 +1,7 @@
 import GUI from 'lil-gui';
 import { settings, ELEMENTS, CAST_ANIMATIONS } from '../config/settings.js';
 import { CHARACTERS } from '../animation/CharacterController.js';
+import { ABILITY_TYPES } from '../abilities/AbilityManager.js';
 import { PresetManager } from './PresetManager.js';
 
 /**
@@ -230,8 +231,10 @@ export class Editor {
     const r = settings.run;
 
     // One dropdown per loadout seat, labelled by the key that fires it.
+    // Filter to registered abilities only — M6 T2 added thirteen data-only ids that can't cast yet.
+    const registeredElements = ELEMENTS.filter((el) => ABILITY_TYPES[el]);
     ['LMB', 'RMB', 'Q', 'E', 'R', 'T'].forEach((label, i) => {
-      folder.add(r.loadout, i, ELEMENTS).name(label);
+      folder.add(r.loadout, i, registeredElements).name(label);
     });
 
     folder.add(r, 'draftLoadout').name('draft loadout');

@@ -582,7 +582,7 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(ultimate.charge, settings.ultimate.chargePerKill, 'ultimate: RunManager onDeath grants chargePerKill');
 
   const chargeBeforeReact = ultimate.charge;
-  enemies.onReaction(0, 4, 0, 0, 10); // 金→水 branch; wux=4 has no ledger rep yet, clear of this fake's bare combat.book
+  enemies.onReaction(0, 4, 0, 0, 10); // 金→水 branch; wux=4 (土) now has representatives as of M6 T2, safely books
   assert.equal(
     ultimate.charge,
     chargeBeforeReact + settings.ultimate.chargePerReaction,

@@ -19,8 +19,8 @@ const _reactPt = { x: 0, z: 0 };
  * knows which wuxing triggered it, so credit the first configured skill that
  * casts as that wuxing (settings.combat.wuxingOf's first match). A
  * top-3-readout approximation, same spirit as the rest of the ledger (spec's
- * own concession): no skill casts as wuxing 4 (土) yet, so a 土-triggered
- * detonation books under `undefined` until an earth skill lands (M6).
+ * own concession). Each wuxing now has at least one representative; if future
+ * additions ever lack one, this guard (_react's own check below) safely skips booking.
  */
 function wuxingRep(wux) {
   return Object.entries(settings.combat.wuxingOf).find(([, v]) => v === wux)?.[0];
@@ -232,8 +232,8 @@ export class RunManager {
       default:
         break; // not one of the five wuxing indices — nothing to route
     }
-    // No skill casts as 土 (wux 4) yet (M6), so wuxingRep(4) has no ledger
-    // entry to credit — skip the booking, not the reaction effect above.
+    // Guard against wuxing indices with no registered skill (defensive; all five
+    // now have representatives as of M6 T2, but the guard remains for future additions).
     const rep = wuxingRep(wux);
     if (rep !== undefined) combat.book(rep, amount * m.reactionMult * enemies.tuning.reactionMult);
   }
