@@ -200,6 +200,11 @@ export class App {
       this.loadout = new Loadout();
       /** Seats currently left to fight on their own (自动施法), run state — cleared on restart. */
       this._autocast = new Set();
+      /** This frame's per-seat cooldown state for RunHud's slot bar (see
+       * `_seatCooldowns()`) — six preallocated objects, mutated in place
+       * every frame rather than reallocated (matches this file's other
+       * per-frame scratch: `_moveDir`, `_deathPos`, `_verdict`...). */
+      this._slotCd = Array.from({ length: 6 }, () => ({ active: false, remaining: 0, total: 0 }));
       this._lastCastWux = -1;
       this._lastCastAt = -Infinity;
       this.upgradePool = new UpgradePool(rng, this.loadout, this.modifiers);
@@ -320,7 +325,7 @@ export class App {
     });
 
     if (this.runMode) {
-      this._syncRunHudLabels();
+      this._syncBadges();
       this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}${t('run.tideTurn')}`);
       // A shard only ever offers its own wuxing (spec 残章定向手). Reuses the
       // same upgradeUi instance — and so the same freeze gate — as a level-up
@@ -399,16 +404,17 @@ export class App {
     this.aim.on('cast', (origin, direction, distance) => this._cast(origin, direction, distance));
     this.aim.on('reject', () => this.hud.showToast('Too close — aim further out'));
 
-    // The HUD shows all seven abilities, off-stage snare included, so in run
-    // mode a click there must not arm the sandbox aim arrow — Shift+click
-    // there toggles that seat's autocast instead (mirrors Shift+digit).
-    this.hud.onAbility = (element, shiftKey) => {
-      if (!this.runMode) { this.armAbility(element); return; }
-      // _seatOf, not a raw seats.indexOf: a fused seat's card is keyed by
-      // its generating parent's element, not by anything literally sitting
-      // in the loadout array any more.
-      if (shiftKey) this._toggleAutocast(this._seatOf(element));
-    };
+    // Sandbox-only: run mode hides .hud__abilities outright (RunHud has its
+    // own six-slot bar), so this callback can never fire during a run.
+    this.hud.onAbility = (element) => this.armAbility(element);
+
+    // RunHud's own slots: Shift+click toggles that seat's autocast, mirroring
+    // Shift+digit (_handleAction's 'autocast' case). Seat-indexed already —
+    // no element→seat lookup needed, unlike the sandbox card scheme this
+    // replaces.
+    if (this.runMode) {
+      this.runHud.onSlotShiftClick = (seat) => this._toggleAutocast(seat);
+    }
   }
 
   _handleAction(action, slot) {
@@ -478,7 +484,6 @@ export class App {
           this.loadout.reset();
           this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0)); // seat 0 again (see constructor)
           this.modifiers.reset();
-          this._syncRunHudLabels();
           this._autocast.clear();
           this._syncBadges();
           this._echoAt = null;
@@ -752,66 +757,70 @@ export class App {
   }
 
   /**
-   * The ability cards must wear the run's keys, or pressing E highlights a
-   * card that still says R and the input reads as scrambled. Off-stage
-   * abilities (whatever the loadout leaves out) dim. Repeatable — unlike the
-   * one-time forEach this replaced, `Loadout.seats` changes over a run's
-   * life, so construction, every `acquire`/`fuse`, and restart all call this
-   * again.
+   * Push the loadout's current shape into RunHud's own six-slot bar (spec
+   * §9: the run HUD is a fully independent component, sharing no code with
+   * the sandbox's per-element `.ability-card`s it used to borrow). Seat-
+   * indexed already, so this is a direct map over `loadout.seats` — no
+   * element→seat lookup needed the way the borrowed cards required.
    *
-   * A fused seat (spec §4.7) has no card of its own — the HUD is built one
-   * card per real `ELEMENTS` entry, so it borrows its generating parent's:
-   * that card keeps its own key (the seat didn't move) but wears the
-   * fusion's name and a gold border; the other parent's card gets no label
-   * at all and dims off-stage like any other freed seat. Every card's label
-   * text and fusion class are rewritten every call (not just added), so a
-   * restart's plain `loadout.reset()` un-fuses the display too.
+   * Call after anything that changes seats or autocast: construction,
+   * restart, acquire, fuse, and the autocast toggle itself.
+   *
+   * A fused seat (spec §4.7) has no slot of its own — it keeps its
+   * generating parent's (that's whose icon still reads, and whose seat
+   * never moved), labelled with the fusion's name and gold-bordered
+   * instead of the parent's own name. The other parent's seat is simply
+   * empty (`fuse()` clears it), which the slot bar shows as dimmed like
+   * any other unseated key — no separate "off-stage" bookkeeping needed
+   * now that seats map 1:1 onto slots.
    * ponytail: doesn't chase editor mid-run edits to settings.run.loadout —
    * wire the editor's onChange if that stings.
    */
-  _syncRunHudLabels() {
-    const labels = {};
-    const fused = {}; // generating parent (real element) -> its fusion's display name
-    this.loadout.seats.forEach((element, seat) => {
-      if (!element) return;
-      if (isFusionId(element)) {
-        const [a] = fusionParents(element);
-        labels[a] = RUN_SLOT_KEYS[seat];
-        fused[a] = fusionName(element);
-      } else {
-        labels[element] = RUN_SLOT_KEYS[seat];
-      }
-    });
-    this.hud.setRunKeys(labels);
-    for (const [plain, card] of this.hud.cards) {
-      card.classList.toggle('ability-card--fusion', plain in fused);
-      card.querySelector('.ability-card__label').textContent = fused[plain] ?? ELEMENT_META[plain]?.label ?? plain;
-    }
-  }
-
-  /**
-   * Which loadout seat a real element's HUD card currently answers to. Direct
-   * for a plainly-seated element; for one absorbed as a fusion's generating
-   * half (its card is reused, per `_syncRunHudLabels` above), the seat that
-   * holds the fusion instead. -1 if the element isn't backing any seat.
-   */
-  _seatOf(element) {
-    const direct = this.loadout.seats.indexOf(element);
-    if (direct !== -1) return direct;
-    return this.loadout.seats.findIndex((seat) => isFusionId(seat) && fusionParents(seat)[0] === element);
-  }
-
-  /**
-   * Blue-dot every badge whose seat has autocast armed; bare otherwise.
-   * Walks every HUD card (not just seated ones) so a skill that loses its
-   * seat — draftLoadout un-drafting it on restart, or fusing it away — drops
-   * a stale dot instead of keeping one no toggle can reach any more.
-   */
   _syncBadges() {
-    for (const [element, card] of this.hud.cards) {
-      const seat = this._seatOf(element);
-      card.classList.toggle('ability-card--auto', seat !== -1 && this._autocast.has(seat));
-    }
+    const view = this.loadout.seats.map((seatElement, seat) => {
+      if (!seatElement) return { key: RUN_SLOT_KEYS[seat], element: null };
+      const fused = isFusionId(seatElement);
+      const element = fused ? fusionParents(seatElement)[0] : seatElement;
+      return {
+        key: RUN_SLOT_KEYS[seat],
+        element,
+        label: fused ? fusionName(seatElement) : (ELEMENT_META[element]?.label ?? element),
+        fusion: fused,
+        autocast: this._autocast.has(seat),
+        // Structural (spec §9): no ability has a manaCost yet, so this is
+        // always false until an M6 skill sets one — the dot's CSS/markup
+        // already exists, waiting on a real value here.
+        manaCost: !!settings[element]?.manaCost
+      };
+    });
+    this.runHud.syncSlots(view);
+  }
+
+  /**
+   * This frame's per-seat cooldown state for RunHud's slot bar — mutates
+   * the preallocated `_slotCd` array in place rather than building six
+   * fresh objects every frame. A fused seat's cooldown lives under the
+   * fusion id itself in `this.cooldowns` (the same key `_quickCastToward`
+   * writes), with `total` the slower of its two parents — same numbers the
+   * old sandbox-card fusion loop in `frame()` used to compute.
+   */
+  _seatCooldowns() {
+    this.loadout.seats.forEach((element, seat) => {
+      const slot = this._slotCd[seat];
+      if (!element) {
+        slot.active = false;
+        return;
+      }
+      slot.active = true;
+      if (isFusionId(element)) {
+        const [a, b] = fusionParents(element);
+        slot.total = Math.max(settings[a].cooldown, settings[b].cooldown);
+      } else {
+        slot.total = settings[element].cooldown;
+      }
+      slot.remaining = this.cooldowns.get(element) ?? 0;
+    });
+    return this._slotCd;
   }
 
   /**
@@ -897,7 +906,7 @@ export class App {
       this.modifiers.bumpDamage(card.element);
     } else if (card.kind === 'new') {
       this.loadout.acquire(card.element);
-      this._syncRunHudLabels();
+      this._syncBadges();
       this._refreshResonance();
     } else if (card.kind === 'fusion') {
       // The freed parent's seat index, captured before fuse() clears it —
@@ -908,7 +917,6 @@ export class App {
       const freedSeat = this.loadout.seats.indexOf(card.b);
       this.loadout.fuse(card.a, card.b);
       this._autocast.delete(freedSeat);
-      this._syncRunHudLabels();
       this._refreshResonance();
       this._syncBadges();
     } else if (card.kind === 'passive') {
@@ -1188,7 +1196,17 @@ export class App {
         settings.run.manaMax
       );
       // The verdict borrows the hp span, so a live update would stamp it out.
-      if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide(), this._resonanceText(), this.ultimate.charge);
+      if (this.run.active) {
+        this.runHud.update(
+          this.playerState,
+          this.run,
+          this.pickups,
+          this.run.tide(),
+          this._resonanceText(),
+          this.ultimate,
+          this._seatCooldowns()
+        );
+      }
     }
 
     // 自动施法: every seat left on auto fires itself at the nearest enemy,
@@ -1231,25 +1249,16 @@ export class App {
     this.post.render();
 
     /* ---- readouts ---- */
-    for (const element of ELEMENTS) {
-      this.hud.setCooldown(element, this.cooldowns.get(element) ?? 0, settings[element].cooldown);
-    }
-    if (this.runMode) {
-      // A fused seat has no card of its own (see _syncRunHudLabels) — its
-      // ring rides the generating parent's card instead, overwriting
-      // whatever the loop above just wrote for that parent's own (now
-      // unused) cooldown key.
-      for (const seatElement of this.loadout.seats) {
-        if (!isFusionId(seatElement)) continue;
-        const [a, b] = fusionParents(seatElement);
-        this.hud.setCooldown(
-          a,
-          this.cooldowns.get(seatElement) ?? 0,
-          Math.max(settings[a].cooldown, settings[b].cooldown)
-        );
+    // Sandbox-only: run mode hides .hud__abilities outright (RunHud's own
+    // slot bar, fed below, has replaced it), so driving these sandbox-card
+    // cooldown rings and the armed-pulse class would just be wasted writes
+    // to hidden DOM.
+    if (!this.runMode) {
+      for (const element of ELEMENTS) {
+        this.hud.setCooldown(element, this.cooldowns.get(element) ?? 0, settings[element].cooldown);
       }
+      this.hud.setArmed(this.aim.isArmed);
     }
-    this.hud.setArmed(this.aim.isArmed);
     this.hud.update(raw, () => ({
       particles: this.particles.countLive(this.elapsed),
       calls: gl.info.render.calls,

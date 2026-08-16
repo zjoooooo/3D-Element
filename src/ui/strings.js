@@ -20,8 +20,8 @@ import { settings } from '../config/settings.js';
 
 export const STRINGS = {
   zh: {
-    // RunHud's five live fields (spec §9 HUD).
-    'run.hp': 'HP',
+    // RunHud's live fields (spec §9 HUD). HP has no text field any more —
+    // Task 5's glass bottle is its only readout (数字不常驻).
     'run.kills': '击杀',
     'run.level': 'Lv',
     'run.tide': '潮',
@@ -29,11 +29,13 @@ export const STRINGS = {
     // The resonance readout (App#_resonanceText).
     'run.resonance': '共鸣',
     'run.cycleActive': '周天',
+    // The dodge dot's hover title (RunHud, bottom bar's left end).
+    'run.dodge': '闪避',
     // Run-mode toasts (App#_bindEvents / #_applySequence / onShardHand).
     'run.tideTurn': '潮来临',
     'run.sequenceChain': '相生轮转',
     'run.shardFizzle': '残章逸散',
-    // 禁咒 (App#_fireUltimate / RunHud's ult field).
+    // 禁咒 (App#_fireUltimate / RunHud's F slot hover title).
     'ult.label': '禁咒',
     'ult.fired': '禁咒已释放',
     'ult.notReady': '禁咒未充能',
@@ -50,13 +52,13 @@ export const STRINGS = {
     'verdict.matchupHint': '克制'
   },
   en: {
-    'run.hp': 'HP',
     'run.kills': 'Kills',
     'run.level': 'Lv',
     'run.tide': 'Tide',
     'run.nextTide': 'Next',
     'run.resonance': 'Resonance',
     'run.cycleActive': 'Full Cycle',
+    'run.dodge': 'Dodge',
     'run.tideTurn': 'tide rising',
     'run.sequenceChain': 'Chain Bonus',
     'run.shardFizzle': 'Page scattered',

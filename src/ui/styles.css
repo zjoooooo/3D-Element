@@ -278,30 +278,6 @@ body {
   color: var(--ui-text-dim);
 }
 
-/* 自动施法: a small dot marks a seat left fighting on its own (Shift+slot
-   or Shift+click toggles it). .ability-card is already position:relative. */
-.ability-card--auto::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #58aaff;
-}
-
-/* 融合 (spec §4.7): a fused seat borrows its generating parent's card,
-   renamed by App and gold-bordered — the merged pair reads as one seat.
-   Compound selector so this ties `.ability-card.is-active`'s specificity
-   (0,2,0) rather than losing to it outright — a fused card can carry both
-   classes at once (is-active is a leftover of whichever plain element was
-   last manually selected before the fuse), and the gold border should win. */
-.ability-card.ability-card--fusion {
-  border-color: #e8c766;
-  box-shadow: 0 0 10px rgba(232, 199, 102, 0.35);
-}
-
 .hud__panel {
   position: absolute;
   padding: 12px 14px;
@@ -551,19 +527,330 @@ body {
   }
 }
 
-/* M1 grey-box readouts — replaced wholesale by the real run HUD in M5. */
+/* ------------------------------------------------------------------ *
+ * Run HUD (spec §9) — entirely its own DOM/CSS, sharing nothing with the
+ * sandbox's .hud__abilities bar above (hidden outright in run mode, see
+ * the .run-mode rules further down).
+ * ------------------------------------------------------------------ */
+
 .run-hud {
   position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 18px;
-  font: 600 14px/1 'SF Mono', ui-monospace, monospace;
-  color: #dfe8f2;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  inset: 0;
   pointer-events: none;
   z-index: 30;
+  font-family: var(--ui-font);
+  color: #dfe8f2;
+}
+
+.run-hud__resonance {
+  position: absolute;
+  left: 22px;
+  top: 14px;
+  max-width: 190px;
+  font: 600 12px/1.45 var(--ui-font);
+  color: #bcd7ea;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+.run-hud__tide-row {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 13px/1 'SF Mono', ui-monospace, monospace;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+
+/* A small tinted badge for the current tide's wuxing — the countdown
+   sentence beside it (data-k="tide") still spells out current+next in
+   words, so colour is a second channel, never the only one (spec §9.5). */
+.run-hud__tide-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(20, 28, 38, 0.75);
+  background: color-mix(in srgb, var(--tint, #7fd6ff) 35%, rgba(10, 14, 20, 0.75));
+  border: 1px solid var(--tint, #7fd6ff);
+  font: 700 10px/1 var(--ui-font);
+  color: #fff;
+}
+
+.run-hud__kills {
+  position: absolute;
+  right: 22px;
+  top: 14px;
+  display: flex;
+  gap: 10px;
+  font: 600 13px/1 'SF Mono', ui-monospace, monospace;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+/* ---- the bottom bar: dodge dot, six slots, the ultimate ---- */
+
+.run-hud__row {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: auto;
+}
+
+.run-hud__slots {
+  display: flex;
+  gap: 8px;
+}
+
+.run-hud__dodge {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #eaf3ff;
+  box-shadow: 0 0 8px rgba(234, 243, 255, 0.65);
+  /* Dim right after use, back to full bright once the cooldown clears —
+     App feeds --ratio = remaining / total every frame. */
+  opacity: calc(1 - var(--ratio, 0) * 0.72);
+  transition: opacity 0.15s linear;
+}
+
+.hud-slot {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--ui-shadow);
+}
+
+.hud-slot--empty {
+  opacity: 0.32;
+  filter: grayscale(0.7);
+}
+
+.hud-slot__glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, var(--ui-accent));
+}
+
+.hud-slot__glyph .glyph-svg {
+  width: 25px;
+  height: 25px;
+  filter: drop-shadow(0 0 5px currentColor);
+  transition: opacity 0.18s ease;
+}
+
+.hud-slot.is-cooling .hud-slot__glyph {
+  opacity: 0.4;
+}
+
+/* Cooldown sweep — the sandbox card's conic-gradient pattern, reused
+   verbatim (same custom property, same shape), on the run's own slot. */
+.hud-slot__sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    rgba(5, 9, 14, 0.82) calc(var(--cooldown, 0) * 360deg),
+    transparent 0
+  );
+  opacity: 0;
+  transition: opacity 0.12s linear;
+  pointer-events: none;
+}
+
+.hud-slot.is-cooling .hud-slot__sweep {
+  opacity: 1;
+}
+
+.hud-slot__cd {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 14px/1 var(--ui-font);
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+.hud-slot__key {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ui-text-dim);
+  pointer-events: none;
+}
+
+/* 融合 (spec §4.7): a fused seat keeps its generating parent's slot — gold
+   border, and (the one slot allowed persistent text) its name floated
+   above the icon rather than fighting the countdown for the same space. */
+.hud-slot--fusion {
+  border-color: #e8c766;
+  box-shadow: 0 0 10px rgba(232, 199, 102, 0.4);
+}
+
+.hud-slot__name {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
+  color: #e8c766;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+}
+
+.hud-slot__name:empty {
+  display: none;
+}
+
+/* 耗蓝 (structural only — no ability sets manaCost before M6) and 自动施法
+   (existing feature, ported off the sandbox card it used to borrow): two
+   small dots in opposite corners so they never collide. */
+.hud-slot--mana::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #58aaff;
+  box-shadow: 0 0 4px rgba(88, 170, 255, 0.9);
+}
+
+.hud-slot--auto::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #58aaff;
+  box-shadow: 0 0 4px rgba(88, 170, 255, 0.9);
+}
+
+/* 就绪弹跳: scale pop + white edge flash. App/RunHud replay it with a
+   remove/reflow/add cycle, so a very short cooldown that completes twice
+   inside 0.2s still gets two pops instead of the second being a no-op. */
+@keyframes hud-slot-pop {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  30% {
+    transform: scale(1.18);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 18px 5px rgba(255, 255, 255, 0.6);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.hud-slot.is-ready-pop {
+  animation: hud-slot-pop 0.2s ease-out;
+}
+
+/* ---- F 禁咒: inverse fill, brightens bottom-up with charge ---- */
+
+.run-hud__ult {
+  position: relative;
+  width: 46px;
+  height: 54px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(6, 9, 14, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--ui-shadow);
+  overflow: hidden;
+}
+
+.run-hud__ult-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0%;
+  background: linear-gradient(180deg, var(--ult-tint, #e8c766), rgba(232, 199, 102, 0.3));
+  transition: height 0.2s ease-out;
+}
+
+.run-hud__ult-key {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+}
+
+/* Full charge: a slow breathing glow, visually distinct from the sandbox's
+   faster is-armed pulse — this one says "held", not "about to expire". */
+.run-hud__ult.is-full {
+  animation: ult-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes ult-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 10px 0 var(--ult-tint, #e8c766);
+  }
+  50% {
+    box-shadow: 0 0 22px 6px var(--ult-tint, #e8c766);
+  }
+}
+
+/* ---- XP ribbon: full width, the very bottom edge ---- */
+
+.run-hud__xp {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  /* auto, not the root's none: hovering it reveals the exact xp/need
+     numbers via its title, same "number on hover only" rule as the bottles. */
+  pointer-events: auto;
+}
+
+.run-hud__xp i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6fb8ff, #b98bff);
+  transition: width 0.2s ease-out;
 }
 
 /* In a run the sandbox panels fold away entirely; the arrow tabs (App builds
@@ -614,33 +901,14 @@ body {
   border-radius: 9px 0 0 9px;
 }
 
-/* The keys legend up top is sandbox coaching — the run HUD replaces it. */
-.run-mode .hud__title {
+/* The keys legend up top is sandbox coaching — the run HUD replaces it.
+   The stats box and the whole ability bar are sandbox-only debug/interactive
+   furniture too (spec §9: "run HUD 为全新独立组件" — zero shared code);
+   RunHud builds and shows its own six-slot bar instead. */
+.run-mode .hud__title,
+.run-mode .hud__stats,
+.run-mode .hud__abilities {
   display: none;
-}
-
-/* An ability the loadout leaves out sits the run out. */
-.run-mode .ability-card.is-offstage {
-  opacity: 0.3;
-  filter: grayscale(0.7);
-}
-
-/* The red bar is the primary hp read; the number rides beside it. */
-.run-hud__bar {
-  width: 150px;
-  height: 12px;
-  align-self: center;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-}
-
-.run-hud__bar i {
-  display: block;
-  height: 100%;
-  border-radius: 6px;
-  background: linear-gradient(180deg, #ff5f52, #d92c20);
-  transition: width 0.15s ease;
 }
 
 /* Edge arrows pointing at off-screen enemies — one per direction sector. */
