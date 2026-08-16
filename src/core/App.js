@@ -33,6 +33,7 @@ import { RunManager } from '../run/RunManager.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
 import { ThreatArrows } from '../run/ThreatArrows.js';
+import { OrbBottles } from '../run/OrbBottles.js';
 import { getColor } from '../utils/color.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
@@ -246,6 +247,12 @@ export class App {
       // Enemies spawn outside the frame by design; the edge arrows say from
       // where, so a pack never simply materialises at the screen edge.
       this.threatArrows = new ThreatArrows(canvas, this.camera);
+      // 血蓝玻璃瓶 (spec §9): screen-space HP/mana readout, parented straight to
+      // the camera rather than positioned in world space — see OrbBottles for
+      // why that trick needs the camera itself sitting in the scene graph.
+      this.orbBottles = new OrbBottles(canvas);
+      this.camera.add(this.orbBottles.object3D);
+      this.scene.add(this.camera);
       // A death gets a small grey pop on top of RunManager's gem/kill wiring —
       // pure look, layered over the callback it already installed. The real
       // per-element shatter is M3's job.
@@ -1169,8 +1176,17 @@ export class App {
       // mid-fight. Restart raises hp, which correctly stays silent here.
       if (this.playerState.hp < this._lastHp) {
         this.flash.trigger(getColor('#ff3226'), 0.22);
+        this.orbBottles.pulseSlosh();
       }
       this._lastHp = this.playerState.hp;
+      this.orbBottles.update(
+        raw,
+        this.camera,
+        this.playerState.hp,
+        this.playerState.maxHp,
+        this.playerState.mana,
+        settings.run.manaMax
+      );
       // The verdict borrows the hp span, so a live update would stamp it out.
       if (this.run.active) this.runHud.update(this.playerState, this.run, this.pickups, this.run.tide(), this._resonanceText(), this.ultimate.charge);
     }
@@ -1252,8 +1268,11 @@ export class App {
       this.threatArrows.dispose();
       for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
+      this.camera.remove(this.orbBottles.object3D);
+      this.orbBottles.dispose();
       this.scene.remove(this.pickups.points);
       this.scene.remove(this.enemyProjectiles.points);
+      this.scene.remove(this.camera);
       this.upgradeUi?.dispose();
       this.verdictPanel?.dispose();
     }
