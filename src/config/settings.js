@@ -265,6 +265,36 @@ export const settings = {
     bgmVolume: 0.8 // reserved; BGM lands post-v1
   },
 
+  /**
+   * Eleven ZzFX voices (spec §10 / M5 Task 10): GameAudio.js looks each one
+   * up by id, scales `params[0]` (volume) by `ui.sfxVolume` — or `.uiVolume`
+   * for a `channel: 'ui'` entry — and spreads `params` straight into
+   * `zzfx(...)` (see src/run/audio/zzfx.js for the full 21-slot signature;
+   * a row's trailing slots just take zzfx's own defaults). `priority` feeds
+   * GameAudio's per-frame throttle (>=2 survives past the base 8 plays/
+   * frame, up to a hard cap of 12): the five rare, must-land events (a
+   * sheng detonation, a level-up, getting hit, dying, winning) carry it,
+   * the six frequent ones (the five elemental casts, a plain enemy hit)
+   * don't. First-pass values, tuned by ear later via the editor — the
+   * neighbourhood is what matters here: 金 sharp/high/short, 木 crackly/
+   * mid, 水 round with a downward slide, 火 a noisy rumble, 土 low and heavy.
+   */
+  audio: {
+    sounds: {
+      castMetal: { params: [0.35, 0.02, 1300, 0, 0.02, 0.15, 1, 1.6, -40], channel: 'sfx', priority: 0 },
+      castWood: { params: [0.3, 0.15, 480, 0, 0.03, 0.12, 4, 1, 30, 0, 0, 0, 0, 0.15], channel: 'sfx', priority: 0 },
+      castWater: { params: [0.3, 0.05, 700, 0, 0.05, 0.28, 0, 1, -320], channel: 'sfx', priority: 0 },
+      castFire: { params: [0.35, 0.2, 150, 0, 0.08, 0.32, 4, 1, -20, 0, 0, 0, 0, 0.3], channel: 'sfx', priority: 0 },
+      castEarth: { params: [0.4, 0.05, 90, 0, 0.02, 0.22, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6], channel: 'sfx', priority: 0 },
+      hit: { params: [0.22, 0.25, 220, 0, 0.015, 0.09, 1, 1.8], channel: 'sfx', priority: 0 },
+      reaction: { params: [0.45, 0.1, 180, 0, 0.05, 0.35, 4, 1, -30, 0, 0, 0, 0, 0.25], channel: 'sfx', priority: 2 },
+      levelup: { params: [0.35, 0, 500, 0, 0.08, 0.3, 1, 1, 0, 0, 400, 0.05], channel: 'ui', priority: 2 },
+      hurt: { params: [0.4, 0.1, 140, 0, 0.02, 0.16, 3, 1.5], channel: 'sfx', priority: 2 },
+      death: { params: [0.5, 0, 300, 0, 0.1, 0.6, 1, 1, -220], channel: 'sfx', priority: 2 },
+      victory: { params: [0.5, 0, 400, 0, 0.15, 0.5, 1, 1, 0, 0, 320, 0.08], channel: 'sfx', priority: 2 }
+    }
+  },
+
   /** The five 3-minute tides (spec §7). Order shuffles per run, seeded. */
   tides: {
     length: 180, // seconds per tide; 5 tides fill the 15-minute run

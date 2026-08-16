@@ -37,6 +37,8 @@ import { DamageNumbers } from '../run/DamageNumbers.js';
 import { ThreatArrows } from '../run/ThreatArrows.js';
 import { OrbBottles } from '../run/OrbBottles.js';
 import { DeathShards } from '../run/DeathShards.js';
+import { GameAudio } from '../run/GameAudio.js';
+import { resumeAudio } from '../run/audio/zzfx.js';
 import { getColor } from '../utils/color.js';
 
 import { AssetLoader } from '../loaders/AssetLoader.js';
@@ -95,6 +97,12 @@ function fusionWux(element) {
     ? settings.combat.wuxingOf[fusionParents(element)[1]]
     : settings.combat.wuxingOf[element] ?? -1;
 }
+
+/** A cast's sound, by wuxing index (WUXING_LABEL order: 金木水火土) — reused
+ * by both cast sites via `fusionWux(element)`, so a fused cast's sound
+ * follows its generated half exactly the way its mark/sequence identity
+ * already does (spec §4.7 挂印取子系). */
+const CAST_SOUND = ['castMetal', 'castWood', 'castWater', 'castFire', 'castEarth'];
 
 /**
  * Application root: owns every subsystem and the frame loop.
@@ -263,10 +271,19 @@ export class App {
         rng
       });
       this.runHud = new RunHud();
+      // The run's sound layer (spec §10 / M5 Task 10). Constructed only here,
+      // like every other run-only collaborator above — every `audio.play()`
+      // call site below is either inside this same runMode block or (the two
+      // cast sites) explicitly gated on `this.runMode`, so the sandbox never
+      // makes a sound.
+      this.audio = new GameAudio();
       // Hits throw a pooled damage figure — without a number, a two-hit kill
       // reads as "no damage" against enemies that carry no health bar.
       this.damageNumbers = new DamageNumbers(canvas, this.camera);
-      this.enemySystem.onHit = (x, z, amount) => this.damageNumbers.spawn(x, z, amount);
+      this.enemySystem.onHit = (x, z, amount) => {
+        this.damageNumbers.spawn(x, z, amount);
+        this.audio.play('hit', { pitchJitter: true });
+      };
       // Enemies spawn outside the frame by design; the edge arrows say from
       // where, so a pack never simply materialises at the screen edge.
       this.threatArrows = new ThreatArrows(canvas, this.camera);
@@ -358,6 +375,7 @@ export class App {
         this.shake.add(0.25, 0.3, 20);
         this.flash.trigger(getColor('#ff3226'), 0.15);
         this._triggerHitstop();
+        this.audio.play('reaction');
       };
       // A shard only ever offers its own wuxing (spec 残章定向手). Reuses the
       // same upgradeUi instance — and so the same freeze gate — as a level-up
@@ -428,6 +446,11 @@ export class App {
   /* ------------------------------------------------------------------ */
 
   _bindEvents() {
+    // Browsers refuse to run audio before a user gesture — one pointerdown,
+    // anywhere on the page, is enough. Harmless in the sandbox too (it just
+    // builds the AudioContext; nothing there ever calls GameAudio.play()).
+    window.addEventListener('pointerdown', () => resumeAudio(), { once: true });
+
     this.renderer.onResize((width, height, pixelRatio) => {
       this.rig.resize(width, height);
       this.post.setSize(width, height, pixelRatio);
@@ -709,7 +732,10 @@ export class App {
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
-    if (this.runMode) this._applySequence(element);
+    if (this.runMode) {
+      this._applySequence(element);
+      this.audio.play(CAST_SOUND[fusionWux(element)]);
+    }
 
     // 施法回响: a run-mode cast has a chance to fire itself once more.
     if (this.runMode && !this._echoing && this.runRng() < this.modifiers.echoChance()) {
@@ -802,9 +828,12 @@ export class App {
     }
 
     // Autocast is only ever invoked from the runMode-gated loop in frame(),
-    // so this.run always exists here — no `if (this.runMode)` gate needed
-    // (same assumption _cast's cdMult/echo lines below already make).
+    // so this.run/this.audio always exist here — no `if (this.runMode)` gate
+    // needed (same assumption _cast's cdMult/echo lines below already make).
+    // A fusion cast plays one sound for the pair, keyed the same 子系 way
+    // its mark identity already is (fusionWux handles both cases).
     this._applySequence(element);
+    this.audio.play(CAST_SOUND[fusionWux(element)]);
 
     // 施法回响 applies here exactly as it does to a manual cast (spec: any
     // cast can proc it); see `_cast`'s own copy of this same roll.
@@ -1097,6 +1126,11 @@ export class App {
   frame() {
     const gl = this.renderer.gl;
     gl.info.reset();
+    // Reset before anything else this frame can call audio.play() — that
+    // includes the two DOM-event-driven cast sites (a click/keypress always
+    // lands between two frame() calls, so it counts against whichever frame
+    // runs next) and the autocast/echo sites further down this same call.
+    if (this.runMode) this.audio.beginFrame();
 
     const raw = this.time.tick();
     // 微顿帧 (M5 Task 9): a few big moments buy the world a brief slowdown —
@@ -1236,6 +1270,7 @@ export class App {
           this.pickups.level,
           sinceLevel === this.pickups.level ? this.pickups.level : sinceLevel
         );
+        this.audio.play('levelup');
         this.upgradeUi.open(hand, {
           rerolls: hand.length ? this.modifiers.passiveLevel('reroll') : 0,
           summary: this._buildSummaryLines().join('　')
@@ -1245,6 +1280,7 @@ export class App {
         this.run.stop();
         this._echoAt = null; // a pending echo must not fire over the death screen
         const won = this._verdict.value === 'won';
+        this.audio.play(won ? 'victory' : 'death');
         // Who hit last, and — unless it was the killing blow — what beats them.
         const killer = this.playerState.lastHitBy;
         let deathLine = null;
@@ -1307,6 +1343,7 @@ export class App {
         const dmgFrac = (this._lastHp - this.playerState.hp) / this.playerState.maxHp;
         this.flash.trigger(getColor('#ff3226'), MathUtils.clamp(dmgFrac * 2.5, 0.1, 1));
         this.orbBottles.pulseSlosh();
+        this.audio.play('hurt');
       }
       this._lastHp = this.playerState.hp;
       // 受击泛红 (M5 Task 9): the character's own materials flicker for as

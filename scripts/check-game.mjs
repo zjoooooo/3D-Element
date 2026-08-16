@@ -30,6 +30,7 @@ import { STRINGS, t } from '../src/ui/strings.js';
 import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
 import { mixTint } from '../src/run/TideAtmosphere.js';
 import { getColor } from '../src/utils/color.js';
+import { GameAudio } from '../src/run/GameAudio.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1801,6 +1802,88 @@ import { getColor } from '../src/utils/color.js';
   assert.equal(h, 0, 'hitstop: decays to exactly zero and never negative');
 
   console.log('ok  hitstop timer');
+}
+
+/* ---- GameAudio throttle: _shouldPlay is a pure per-frame counter (M5 Task 10) ---- */
+{
+  // No zzfx/AudioContext involved at all here — _shouldPlay only ever
+  // touches its own counter, which is exactly why it can be pinned headless.
+  const audio = new GameAudio(() => {});
+
+  for (let i = 0; i < 8; i++) {
+    assert.ok(audio._shouldPlay(0), `throttle: normal play ${i + 1}/8 must be allowed`);
+  }
+  assert.ok(!audio._shouldPlay(0), 'throttle: a 9th normal (priority 0) play this frame is dropped');
+  assert.ok(!audio._shouldPlay(1), 'throttle: priority 1 does not qualify as the >=2 overflow class either');
+
+  for (let i = 0; i < 4; i++) {
+    assert.ok(audio._shouldPlay(2), `throttle: priority>=2 overflow ${i + 1}/4 allowed up to the hard cap of 12`);
+  }
+  assert.ok(!audio._shouldPlay(2), 'throttle: even priority>=2 drops once the hard cap of 12 is spent');
+  assert.ok(!audio._shouldPlay(99), 'throttle: no priority buys past the hard cap');
+
+  audio.beginFrame();
+  assert.ok(audio._shouldPlay(0), 'throttle: beginFrame() resets the counter for the next frame');
+
+  console.log('ok  audio throttle');
+}
+
+/* ---- GameAudio.play: settings lookup, channel volume, pitch jitter, priority (M5 Task 10) ---- */
+{
+  const calls = [];
+  const audio = new GameAudio((...params) => calls.push(params));
+
+  audio.play('no-such-sound');
+  assert.equal(calls.length, 0, 'play: an unknown sound id is a silent no-op');
+
+  const savedSfx = settings.ui.sfxVolume;
+  const savedUi = settings.ui.uiVolume;
+  settings.ui.sfxVolume = 0.5;
+  settings.ui.uiVolume = 0.25;
+
+  audio.play('hit');
+  assert.ok(
+    Math.abs(calls.at(-1)[0] - settings.audio.sounds.hit.params[0] * 0.5) < 1e-9,
+    'play: an sfx-channel sound is scaled by settings.ui.sfxVolume'
+  );
+
+  audio.play('levelup');
+  assert.ok(
+    Math.abs(calls.at(-1)[0] - settings.audio.sounds.levelup.params[0] * 0.25) < 1e-9,
+    'play: a ui-channel sound (levelup) is scaled by settings.ui.uiVolume instead'
+  );
+  settings.ui.sfxVolume = savedSfx;
+  settings.ui.uiVolume = savedUi;
+
+  // Pitch jitter shakes the frequency param (index 2), only when asked.
+  const baseFreq = settings.audio.sounds.hit.params[2];
+  audio.play('hit');
+  assert.equal(calls.at(-1)[2], baseFreq, 'play: frequency is untouched without pitchJitter');
+
+  const jittered = [];
+  for (let i = 0; i < 20; i++) {
+    audio.beginFrame(); // stay under the throttle across the sample loop
+    audio.play('hit', { pitchJitter: true });
+    jittered.push(calls.at(-1)[2]);
+  }
+  assert.ok(
+    jittered.every((f) => f >= baseFreq * 0.85 - 1e-9 && f <= baseFreq * 1.15 + 1e-9),
+    'play: pitchJitter stays within ±15% of the base frequency'
+  );
+  assert.ok(jittered.some((f) => f !== baseFreq), 'play: pitchJitter actually varies the frequency across calls');
+
+  // priority: play() defaults it from the sound's own settings row (not a
+  // hardcoded 0), so a call site can just say play('reaction') and still
+  // get the table's priority:2 through the throttle — not the base-only 0.
+  const audio2 = new GameAudio((...params2) => calls2.push(params2));
+  const calls2 = [];
+  for (let i = 0; i < 8; i++) audio2.play('hit'); // fills the base 8 (priority 0 from the table)
+  audio2.play('hit'); // 9th normal: dropped
+  assert.equal(calls2.length, 8, 'play: the 9th priority-0 sound this frame does not reach the player');
+  audio2.play('reaction'); // priority 2 from settings.audio.sounds.reaction
+  assert.equal(calls2.length, 9, 'play: a priority>=2 sound still gets through once the base budget is spent');
+
+  console.log('ok  audio wiring');
 }
 
 console.log('\nevery game-logic check passed');
