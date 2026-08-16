@@ -58,6 +58,7 @@ export class RunManager {
       // never arm a reaction either, so this is the only spot that needs it.
       if (this.s.modifiers?.resonates(1)) this.s.player.heal(settings.resonance.woodKillHeal);
       this.s.player.gainMana(settings.run.manaPerKill);
+      this.s.ultimate?.gainKill();
     };
     this.s.enemies.onFire = (x, z, dx, dz, dmg) => this.s.projectiles.spawn(x, z, dx, dz, dmg);
     this.s.enemies.onReaction = (markWux, wux, x, z, amount) => this._react(markWux, wux, x, z, amount);
@@ -88,6 +89,7 @@ export class RunManager {
     this.s.player.reset();
     this.s.projectiles.clear();
     this.s.combat.resetStats?.();
+    this.s.ultimate?.reset();
   }
 
   stop() {
@@ -168,6 +170,7 @@ export class RunManager {
     if (contact > 0) this.s.player.takeDamage(contact, this.s.enemies.lastContact);
     this.s.player.tick(step);
     this.s.combat.tick(step, this.s.abilities.active);
+    this.s.ultimate?.tick(step, playerPos);
     this.pendingLevels += this.s.pickups.tick(step, playerPos);
 
     return 'playing';
@@ -185,6 +188,7 @@ export class RunManager {
     const m = settings.marks;
     _reactPt.x = x;
     _reactPt.z = z;
+    this.s.ultimate?.gainReaction();
     switch (markWux) {
       case 1: // 木→火 助燃: a splash of untyped damage around the victim
         enemies.damage(_reactPt, m.assistSplash.radius, amount * m.assistSplash.share, -1);

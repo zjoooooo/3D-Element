@@ -24,6 +24,7 @@ import { CombatSystem } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { RunManager } from '../src/run/RunManager.js';
+import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
 import { STRINGS, t } from '../src/ui/strings.js';
 
@@ -403,8 +404,9 @@ import { STRINGS, t } from '../src/ui/strings.js';
   const enemies = new EnemySystem(rng);
   const pickups = new PickupSystem();
   const player = new PlayerState();
+  const ultimate = new Ultimate({ enemies, player, combat: {}, rng });
   const run = new RunManager({
-    enemies, pickups, player, rng,
+    enemies, pickups, player, rng, ultimate,
     tides: new TideSchedule(createRng(7)),
     projectiles: new EnemyProjectiles(),
     combat: { tick: () => {}, release: () => -1 },
@@ -459,6 +461,25 @@ import { STRINGS, t } from '../src/ui/strings.js';
   enemies.damage({ x: 0, z: 0 }, 1, 1e6);
   assert.ok(run.kills > 0, 'run: the blast killed something');
   assert.equal(player.mana, manaBefore + settings.run.manaPerKill, 'mana: kill grants manaPerKill');
+
+  // Ultimate charge: RunManager's onDeath grants a kill charge, and its
+  // _react router grants a (larger) reaction charge — same fake-systems
+  // pattern as the mana-on-kill check above, proving the real wiring rather
+  // than calling Ultimate's own methods directly. run.start() also proves
+  // the reset() hookup for free.
+  run.start();
+  assert.equal(ultimate.charge, 0, 'ultimate: run.start() resets the charge');
+  enemies.spawnAt(0, 0, 0);
+  enemies.damage({ x: 0, z: 0 }, 1, 1e6);
+  assert.equal(ultimate.charge, settings.ultimate.chargePerKill, 'ultimate: RunManager onDeath grants chargePerKill');
+
+  const chargeBeforeReact = ultimate.charge;
+  enemies.onReaction(0, 4, 0, 0, 10); // 金→水 branch; wux=4 has no ledger rep yet, clear of this fake's bare combat.book
+  assert.equal(
+    ultimate.charge,
+    chargeBeforeReact + settings.ultimate.chargePerReaction,
+    'ultimate: RunManager._react grants chargePerReaction'
+  );
 
   // Verdicts.
   player.hp = 0;
@@ -1515,6 +1536,189 @@ import { STRINGS, t } from '../src/ui/strings.js';
     assert.ok(ui[key] >= 0 && ui[key] <= 1, `settings.ui: ${key} must be in [0,1] (got ${ui[key]})`);
   }
   console.log('ok  settings.ui shape');
+}
+
+/* ---- ultimate: charge curve + five field effects (spec §4.9) ---- */
+{
+  const u = settings.ultimate;
+
+  // executeBelow (the new EnemySystem primitive metal's execute rides on):
+  // an absolute hp floor, killed through _kill so onDeath still fires.
+  {
+    const enemies = new EnemySystem(createRng(1));
+    const low = enemies.spawnAt(0, 0, 0);
+    enemies.hp[low] = 25;
+    const high = enemies.spawnAt(5, 5, 0);
+    enemies.hp[high] = 50;
+    let deaths = 0;
+    enemies.onDeath = () => deaths++;
+    enemies.executeBelow({ x: 0, z: 0 }, 1e3, 30);
+    assert.equal(deaths, 1, 'executeBelow: kills exactly the enemy under the floor');
+    assert.equal(enemies.count, 1, 'executeBelow: the enemy above the floor survives');
+    assert.equal(enemies.hp[0], 50, 'executeBelow: the survivor is untouched');
+  }
+
+  // Charge curve: kills and reactions both feed the same pool, clamped.
+  {
+    const ult = new Ultimate({ enemies: new EnemySystem(createRng(1)), player: new PlayerState(), combat: {}, rng: createRng(1) });
+    assert.equal(ult.charge, 0, 'ultimate: starts empty');
+    for (let i = 0; i < 40; i++) ult.gainKill();
+    for (let i = 0; i < 12; i++) ult.gainReaction();
+    assert.equal(ult.charge, u.chargeMax, `ultimate: 40 kills + 12 reactions = ${u.chargeMax} exactly`);
+    ult.gainKill();
+    assert.equal(ult.charge, u.chargeMax, 'ultimate: charge clamps past the cap');
+    assert.ok(ult.ready(), 'ultimate: full charge is ready');
+  }
+
+  // Unready / undecided fire is refused and spends nothing.
+  {
+    const ult = new Ultimate({ enemies: new EnemySystem(createRng(1)), player: new PlayerState(), combat: {}, rng: createRng(1) });
+    ult.wuxing = 2;
+    ult.charge = u.chargeMax - 1;
+    assert.equal(ult.fire({ x: 0, z: 0 }), false, 'ultimate: fire refused below chargeMax');
+    assert.equal(ult.charge, u.chargeMax - 1, 'ultimate: a refused fire spends no charge');
+
+    ult.charge = u.chargeMax;
+    ult.wuxing = -1;
+    assert.equal(ult.fire({ x: 0, z: 0 }), false, 'ultimate: fire refused with no home element');
+    assert.equal(ult.charge, u.chargeMax, 'ultimate: a refused fire (no wuxing) spends no charge');
+  }
+
+  // Fire clears the charge to 0 on success.
+  {
+    const ult = new Ultimate({ enemies: new EnemySystem(createRng(1)), player: new PlayerState(), combat: {}, rng: createRng(1) });
+    ult.charge = u.chargeMax;
+    ult.wuxing = 2; // water — no enemies needed to prove the charge/return contract
+    assert.equal(ult.fire({ x: 0, z: 0 }), true, 'ultimate: ready fire with a decided element succeeds');
+    assert.equal(ult.charge, 0, 'ultimate: a successful fire clears the charge');
+  }
+
+  // 金 万剑归宗: full-field hit, then a low-hp execute — kills what the hit
+  // leaves standing under the floor, spares what the hit leaves comfortably
+  // above it. Both probes are metal (element 0), a neutral matchup against
+  // a metal attacker (×1), so the arithmetic is exact — not a discriminating
+  // choice, just keeps the numbers legible; the field-hit-vs-matchup wiring
+  // is the same shared _applyWux path already pinned by the matchup tests.
+  {
+    const enemies = new EnemySystem(createRng(1));
+    const player = new PlayerState();
+    const ult = new Ultimate({ enemies, player, combat: {}, rng: createRng(1) });
+    const executed = enemies.spawnAt(0, 0, 0, 0); // survives the raw hit (140-120=20) but not the execute floor (30)
+    enemies.hp[executed] = 140;
+    const survivor = enemies.spawnAt(3, 3, 0, 0); // survives both (200-120=80, comfortably above the floor)
+    enemies.hp[survivor] = 200;
+    ult.charge = u.chargeMax;
+    ult.wuxing = 0;
+    assert.ok(ult.fire({ x: 0, z: 0 }), 'ultimate: metal fires when ready');
+    assert.equal(enemies.count, 1, 'ultimate: metal execute took exactly the one enemy under the floor');
+    assert.equal(enemies.hp[0], 200 - u.metal.damage, 'ultimate: the high-hp enemy survives at hp − field damage exactly');
+  }
+
+  // 水 绝对零度: full-field freeze, factor 1.0, reaching the far edge of the
+  // arena (not just nearby) — proves the call is genuinely full-field.
+  {
+    const enemies = new EnemySystem(createRng(2));
+    const player = new PlayerState();
+    const ult = new Ultimate({ enemies, player, combat: {}, rng: createRng(2) });
+    const near = enemies.spawnAt(1, 1, 0);
+    const far = enemies.spawnAt(39, 0, 0);
+    ult.charge = u.chargeMax;
+    ult.wuxing = 2;
+    assert.ok(ult.fire({ x: 0, z: 0 }), 'ultimate: water fires when ready');
+    assert.equal(enemies.slowed[near], 1, 'ultimate: water freezes the near enemy (slowed=1)');
+    assert.equal(enemies.slowed[far], 1, 'ultimate: water freezes the far enemy too');
+  }
+
+  // 火 陨星天坠: fire() schedules three waves, tick() pays them out at
+  // waveGap spacing; total damage across all waves is exact and stops dead
+  // once they're spent (no phantom fourth wave).
+  {
+    const enemies = new EnemySystem(createRng(3));
+    const player = new PlayerState();
+    const ult = new Ultimate({ enemies, player, combat: {}, rng: createRng(3) });
+    const target = enemies.spawnAt(0, 0, 0, 1); // wood — neutral matchup vs a fire attacker
+    enemies.hp[target] = 1e6;
+    ult.charge = u.chargeMax;
+    ult.wuxing = 3;
+    assert.ok(ult.fire({ x: 0, z: 0 }), 'ultimate: fire fires when ready');
+    const before = enemies.hp[0];
+    for (let t = 0; t < 180; t++) ult.tick(1 / 60, { x: 0, z: 0 }); // 3s ≫ 3 waves × 0.4s gap
+    const dealt = before - enemies.hp[0];
+    assert.ok(
+      Math.abs(dealt - u.fire.waves * u.fire.damagePerWave) < 1e-3,
+      `ultimate: fire's three waves total ${u.fire.waves * u.fire.damagePerWave} exactly (got ${dealt})`
+    );
+    const afterWaves = enemies.hp[0];
+    for (let t = 0; t < 60; t++) ult.tick(1 / 60, { x: 0, z: 0 }); // one more second: no fourth wave
+    assert.equal(enemies.hp[0], afterWaves, 'ultimate: waves stop dead once spent');
+  }
+
+  // 木 世界树: field slow now, heal-over-time paid out by tick(). The two
+  // heal checks straddle healTime with a comfortable margin on both sides
+  // (not landing exactly on the boundary) so the assertion doesn't depend on
+  // which way a float64 timer decrement happens to round at the edge.
+  {
+    const enemies = new EnemySystem(createRng(4));
+    const player = new PlayerState();
+    const ult = new Ultimate({ enemies, player, combat: {}, rng: createRng(4) });
+    player.hp = 50;
+    ult.charge = u.chargeMax;
+    ult.wuxing = 1;
+    assert.ok(ult.fire({ x: 0, z: 0 }), 'ultimate: wood fires when ready');
+
+    for (let t = 0; t < 60; t++) ult.tick(1 / 60, { x: 0, z: 0 }); // 1s, well inside healTime
+    assert.ok(
+      Math.abs(player.hp - 50 - u.wood.healPerSecond) < 1e-3,
+      `ultimate: wood heals ≈${u.wood.healPerSecond}/s (got ${(player.hp - 50).toFixed(6)})`
+    );
+
+    for (let t = 0; t < 600; t++) ult.tick(1 / 60, { x: 0, z: 0 }); // 10 more seconds — well past healTime
+    const total = player.hp - 50;
+    const expected = u.wood.healPerSecond * u.wood.healTime;
+    const oneStep = u.wood.healPerSecond / 60;
+    assert.ok(
+      total >= expected - 1e-3 && total <= expected + oneStep + 1e-3,
+      `ultimate: wood's total heal caps at healPerSecond×healTime = ${expected} (got ${total.toFixed(4)})`
+    );
+
+    const afterHeal = player.hp;
+    for (let t = 0; t < 60; t++) ult.tick(1 / 60, { x: 0, z: 0 }); // one more second: the drip has stopped
+    assert.equal(player.hp, afterHeal, 'ultimate: wood heal stays stopped once healTime is spent');
+  }
+
+  // 土 天崩: hit + full-field stun (approximated as slow factor 1.0).
+  {
+    const enemies = new EnemySystem(createRng(5));
+    const player = new PlayerState();
+    const ult = new Ultimate({ enemies, player, combat: {}, rng: createRng(5) });
+    const target = enemies.spawnAt(2, 2, 0, 0); // metal — neutral matchup vs an earth attacker
+    enemies.hp[target] = 1000;
+    ult.charge = u.chargeMax;
+    ult.wuxing = 4;
+    assert.ok(ult.fire({ x: 0, z: 0 }), 'ultimate: earth fires when ready');
+    assert.equal(enemies.hp[0], 1000 - u.earth.damage, 'ultimate: earth deals its field damage exactly');
+    assert.equal(enemies.slowed[0], 1, 'ultimate: earth stun reads as a full slow (slowed=1)');
+  }
+
+  // reset() clears the charge and cancels any in-flight scheduled effect.
+  {
+    const enemies = new EnemySystem(createRng(6));
+    const player = new PlayerState();
+    const ult = new Ultimate({ enemies, player, combat: {}, rng: createRng(6) });
+    const target = enemies.spawnAt(0, 0, 0, 1);
+    enemies.hp[target] = 1e6;
+    ult.charge = u.chargeMax;
+    ult.wuxing = 3; // fire — schedules waves, the clearest proof reset kills in-flight state
+    ult.fire({ x: 0, z: 0 });
+    ult.reset();
+    assert.equal(ult.charge, 0, 'ultimate: reset clears the charge');
+    assert.ok(!ult.ready(), 'ultimate: reset leaves the ultimate unready');
+    const before = enemies.hp[0];
+    for (let t = 0; t < 120; t++) ult.tick(1 / 60, { x: 0, z: 0 });
+    assert.equal(enemies.hp[0], before, 'ultimate: reset also cancels the scheduled waves');
+  }
+
+  console.log('ok  ultimate');
 }
 
 console.log('\nevery game-logic check passed');

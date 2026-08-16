@@ -294,6 +294,29 @@ export const settings = {
   },
 
   /**
+   * 禁咒 (spec §4.9): one field-scale ultimate per wuxing, charged by kills
+   * and reactions. Every effect rides the existing targets API at a
+   * full-arena radius — no dedicated skill class.
+   */
+  ultimate: {
+    chargeMax: 100,
+    chargePerKill: 1,
+    chargePerReaction: 5,
+    // 万剑归宗: full-field hit, then a low-hp execute pass. `executeHp` is an
+    // ABSOLUTE hp floor, not spec's 15%-of-max-hp ratio — an enemy's max hp
+    // isn't retained past spawn, so a true ratio can't be reconstructed from
+    // its live hp alone. 30 approximates 15% of a minute-10 swarm's max hp.
+    metal: { damage: 120, executeHp: 30 },
+    wood: { slowFactor: 0.85, slowTime: 4, healPerSecond: 5, healTime: 4 }, // 世界树
+    water: { freezeTime: 3 }, // 绝对零度: full-field slow, factor 1.0
+    fire: { waves: 3, damagePerWave: 60, waveGap: 0.4 }, // 陨星天坠
+    // 天崩: 晕 approximated as a full-field slow (no stun state exists). No
+    // separate knockback field — damage()'s own knockback impulse already
+    // shoves everyone on a full-field hit.
+    earth: { damage: 40, stunTime: 1.2 }
+  },
+
+  /**
    * The growth loop's own numbers (spec §4.5 / anchors 4). The modifier layer
    * multiplies these onto the base values above — upgrades never write into
    * any other settings block, so the sandbox and the next run stay clean.

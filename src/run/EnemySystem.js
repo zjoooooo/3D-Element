@@ -428,6 +428,22 @@ export class EnemySystem {
     }
   }
 
+  /**
+   * Kills every enemy within `radius` of `point` whose hp is at or under
+   * `hpThreshold` — an absolute floor (spec §4.9 金斩杀; see
+   * settings.ultimate.metal for why it's absolute, not a %-of-max-hp ratio).
+   * Goes through `_kill` so onDeath still fires (gems/shards), unlike a bare
+   * `hp[i] = 0`. Not hot-path — Ultimate calls this once per cast, never per tick.
+   */
+  executeBelow(point, radius, hpThreshold) {
+    for (let i = this.count - 1; i >= 0; i--) {
+      if (this.hp[i] > hpThreshold) continue;
+      const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
+      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
+      this._kill(i);
+    }
+  }
+
   /** Index of the closest live enemy to (x, z); -1 when the field is empty. */
   nearestTo(x, z) {
     let best = -1;
