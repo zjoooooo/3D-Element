@@ -77,7 +77,13 @@ export class UpgradeUi {
 
   _onKey = (event) => {
     if (!this._open) return;
-    event.stopPropagation();
+    // stopImmediatePropagation, not stopPropagation: InputManager's keydown
+    // listener sits on this same window node, so the plain variant lets it
+    // fire after this handler for the very same keystroke — by which point
+    // close() has already dropped isOpen, App's _frozen guard reads false,
+    // and a digit pick alias-fires a loadout hotkey (Digit4 now reaches the
+    // 禁咒 too). Same fix, same reason as PauseMenu._onKey.
+    event.stopImmediatePropagation();
     if (event.key >= '1' && event.key <= '3') this._pick(Number(event.key) - 1);
     else if (event.key === '4') this._emit({ action: 'skip' });
     else return;

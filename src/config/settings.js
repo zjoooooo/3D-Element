@@ -364,7 +364,10 @@ export const settings = {
     // 万剑归宗: full-field hit, then a low-hp execute pass. `executeHp` is an
     // ABSOLUTE hp floor, not spec's 15%-of-max-hp ratio — an enemy's max hp
     // isn't retained past spawn, so a true ratio can't be reconstructed from
-    // its live hp alone. 30 approximates 15% of a minute-10 swarm's max hp.
+    // its live hp alone. 30 is ≈58% of a minute-10 swarm's max hp
+    // (hpBase 20 × (1 + hpPerMinute 0.16 × 10) = 52) — deliberately far
+    // above spec's 15% line, since the floor also has to matter against the
+    // 40×-hp elites the ratio was really written for.
     metal: { damage: 120, executeHp: 30 },
     wood: { slowFactor: 0.85, slowTime: 4, healPerSecond: 5, healTime: 4 }, // 世界树
     water: { freezeTime: 3 }, // 绝对零度: full-field slow, factor 1.0
