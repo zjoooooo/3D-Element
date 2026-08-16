@@ -288,7 +288,11 @@ export class App {
         });
         this.deathShards.burst(x, z, element, elite);
         // 微顿帧 (M5 Task 9): an elite kill is one of the run's big moments.
-        if (elite) this._triggerHitstop();
+        if (elite) {
+          this.shake.add(0.4, 0.48, 20);
+          this.flash.trigger(getColor('#ff3226'), 0.25);
+          this._triggerHitstop();
+        }
       };
       // Frame-loop scratch: the verdict box and the tick closure are minted
       // once here so advance() never allocates per frame.
@@ -350,7 +354,11 @@ export class App {
       this.run.onTideTurn = (element) => this.hud.showToast(`${WUXING_LABEL[element]}${t('run.tideTurn')}`);
       // 微顿帧 (M5 Task 9): a sheng detonation is a big moment. Elite kills and
       // 禁咒 fire trigger it from their own App-side call sites instead.
-      this.run.onBigMoment = () => this._triggerHitstop();
+      this.run.onBigMoment = () => {
+        this.shake.add(0.25, 0.3, 20);
+        this.flash.trigger(getColor('#ff3226'), 0.15);
+        this._triggerHitstop();
+      };
       // A shard only ever offers its own wuxing (spec 残章定向手). Reuses the
       // same upgradeUi instance — and so the same freeze gate — as a level-up
       // hand; an empty offer (no ability of that wuxing exists yet) falls back
