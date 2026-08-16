@@ -1046,8 +1046,9 @@ export class App {
     this.audio.play(CAST_SOUND[fusionWux(element)]);
 
     // 施法回响 applies here exactly as it does to a manual cast (spec: any
-    // cast can proc it); see `_cast`'s own copy of this same roll.
-    if (!this._echoing && this.runRng() < this.modifiers.echoChance() && !this._echoAt) {
+    // cast can proc it); see `_cast`'s own copy of this same roll. A demo
+    // cast must never arm a real echo — its echo proc roll is gated by !demo.
+    if (!demo && !this._echoing && this.runRng() < this.modifiers.echoChance() && !this._echoAt) {
       this._echoAt = { element, t: 0.15 };
     }
 
