@@ -45,7 +45,16 @@ export class EnemyRenderer {
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
          {
-           float ndv = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
+           // Guard the normalize: a fragment at the camera origin has a zero
+           // view vector, and normalize(0) is NaN — one NaN through the bloom
+           // mip chain can smear a persistent tint across the whole frame
+           // (the prime suspect in M5's one-off pink wash). Degenerate
+           // fragments fall back to ndv = 1, i.e. no rim, which is also what
+           // a face flush against the camera should get.
+           float vvLen = length(vViewPosition);
+           float ndv = vvLen > 1e-5
+             ? clamp(dot(vViewPosition / vvLen, normal), 0.0, 1.0)
+             : 1.0;
            float rim = pow(1.0 - ndv, 2.5) * 0.4;
            totalEmissiveRadiance += vec3(0.65, 0.78, 0.95) * rim;
          }`
