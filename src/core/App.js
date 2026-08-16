@@ -1,9 +1,10 @@
-import { Vector2, Vector3, MathUtils } from 'three';
+import { Vector2, Vector3, MathUtils, Mesh, RingGeometry, MeshBasicMaterial, AdditiveBlending } from 'three';
 
 import { Renderer } from './Renderer.js';
 import { Time } from './Time.js';
 import { CameraRig } from './CameraRig.js';
 import { frame } from './FrameUniforms.js';
+import { LAYER } from './Layers.js';
 
 import { Environment } from '../world/Environment.js';
 import { Ground } from '../world/Ground.js';
@@ -396,6 +397,28 @@ export class App {
     });
 
     if (this.runMode) {
+      // 脚下淡光圈 (spec §5.7 敌我可读性): same thin-RingGeometry +
+      // additive-MeshBasicMaterial shape EnemyRenderer's spawn telegraphs and
+      // Arena's boundary arc already use, parented straight onto
+      // `character.root` — position + yaw only (the cast lunge/lean live on
+      // the child `tilt` group instead), so the ring tracks the player for
+      // free every frame, through dodges included, without ever tilting off
+      // the floor mid-cast. Built once; `character.dispose()` already walks
+      // and disposes every descendant of `root`, so no separate teardown.
+      const footRing = new Mesh(
+        new RingGeometry(0.6, 0.75, 32).rotateX(-Math.PI / 2),
+        new MeshBasicMaterial({
+          color: 0xfff2c8,
+          transparent: true,
+          opacity: 0.4,
+          depthWrite: false,
+          blending: AdditiveBlending
+        })
+      );
+      footRing.position.y = 0.02;
+      footRing.layers.set(LAYER.VFX);
+      this.character.root.add(footRing);
+
       // No _syncBadges() here any more: the loadout is still empty at this
       // point (startRun() hasn't drafted a seat yet, whether that's about to
       // happen immediately below for #run=quick or only later, on the title
@@ -954,8 +977,18 @@ export class App {
    * `autocast` tells apart a background seat's own cast (the only caller
    * until this task) from `_quickCast`'s manual fusion hand-off, which
    * resolves a pointer-aimed target point and forwards here as `false`.
+   *
+   * `demo` (spec §6 新技能即时演示): `_onUpgradeChoice`'s free show-off shot
+   * for a freshly acquired active. Every per-ability field below is still
+   * written on every cast (pooled instances would otherwise carry a stale
+   * expando into their next life — same M1/M4 rule the comments above and
+   * in `_cast` already document), just with the inert values a cast that
+   * costs nothing should carry: no cooldown, no quench spend, and no stamp
+   * on the 相生 chain (a demo firing itself would both wrongly refund off
+   * whatever the player last cast for real, and let a later real cast wrongly
+   * chain off *it*).
    */
-  _quickCastToward(element, tx, tz, autocast = true) {
+  _quickCastToward(element, tx, tz, autocast = true, demo = false) {
     if (!element || (this.cooldowns.get(element) ?? 0) > 0) return;
 
     const origin = this.character.position;
@@ -974,7 +1007,9 @@ export class App {
       // the generated half (spec §4.7 挂印取子系), so wuxingOf[b] is exactly
       // fusionWux(element) — consumeQuench(b) is the fusion's own metal-
       // identity check and its spend in one call. Stamped onto both parents.
-      const quenched = this.runMode ? this.modifiers.consumeQuench(b) : false;
+      // A demo never spends it: consumeQuench(b) is skipped outright rather
+      // than called and discarded.
+      const quenched = !demo && this.runMode ? this.modifiers.consumeQuench(b) : false;
       for (const part of [a, b]) {
         const ability = this.abilities.cast(origin, direction, this._quickCastDistance(part, rawDist), part);
         if (ability) {
@@ -983,10 +1018,12 @@ export class App {
           ability.quenched = quenched;
         }
       }
-      this.cooldowns.set(
-        element,
-        Math.max(0, Math.max(settings[a].cooldown, settings[b].cooldown) * this.modifiers.cooldownMult())
-      );
+      if (!demo) {
+        this.cooldowns.set(
+          element,
+          Math.max(0, Math.max(settings[a].cooldown, settings[b].cooldown) * this.modifiers.cooldownMult())
+        );
+      }
       castAnim = settings[a].castAnim;
     } else {
       const c = settings[element];
@@ -994,9 +1031,9 @@ export class App {
       if (ability) {
         ability.autocast = autocast;
         ability.fusionMult = 1;
-        ability.quenched = this.runMode ? this.modifiers.consumeQuench(element) : false;
+        ability.quenched = !demo && this.runMode ? this.modifiers.consumeQuench(element) : false;
       }
-      this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
+      if (!demo) this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
       castAnim = c.castAnim;
     }
 
@@ -1005,7 +1042,7 @@ export class App {
     // needed (same assumption _cast's cdMult/echo lines below already make).
     // A fusion cast plays one sound for the pair, keyed the same 子系 way
     // its mark identity already is (fusionWux handles both cases).
-    this._applySequence(element);
+    if (!demo) this._applySequence(element);
     this.audio.play(CAST_SOUND[fusionWux(element)]);
 
     // 施法回响 applies here exactly as it does to a manual cast (spec: any
@@ -1183,6 +1220,16 @@ export class App {
       this.loadout.acquire(card.element);
       this._syncBadges();
       this._refreshResonance();
+      // 新技能即时演示 (spec §6): free auto-fire at the nearest enemy so the
+      // pick is felt immediately — same nearestTo() lookup the autocast loop
+      // in frame() uses, `demo: true` so it costs no cooldown/quench and
+      // doesn't stamp the 相生 chain, `autocast: false` so the floater reads
+      // as a normal hit rather than the autocast-taxed one. Silently does
+      // nothing if the arena is empty (no enemy to aim at yet).
+      const i = this.enemySystem.nearestTo(this.character.position.x, this.character.position.z);
+      if (i !== -1) {
+        this._quickCastToward(card.element, this.enemySystem.x[i], this.enemySystem.z[i], false, true);
+      }
     } else if (card.kind === 'fusion') {
       // The freed parent's seat index, captured before fuse() clears it —
       // an autocast flag left on it would otherwise sit there inert until

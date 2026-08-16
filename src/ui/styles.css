@@ -38,6 +38,11 @@ body {
   height: 100%;
   display: block;
   touch-action: none;
+}
+
+/* 准星光标替换系统箭头 (spec §5.7): run mode only — the sandbox keeps the
+   system arrow, since there's no cast-at-cursor combat loop to aim there. */
+.run-mode #viewport {
   cursor: crosshair;
 }
 
@@ -936,7 +941,9 @@ body {
 .upgrade-ui__dim {
   position: fixed;
   inset: 0;
-  background: rgba(3, 6, 10, 0.72);
+  /* spec 选卡暗化: 明显暗于战斗 — 0.72 read too close to combat's own darkest
+     grading to tell apart at a glance; bumped past the 0.75 floor. */
+  background: rgba(3, 6, 10, 0.85);
   z-index: 40;
 }
 .upgrade-ui__panel {
