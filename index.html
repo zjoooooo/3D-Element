@@ -31,6 +31,34 @@
     <!-- Heads-up display (populated by src/ui/HUD.js) -->
     <div id="hud" class="hud" aria-live="polite"></div>
 
+    <!--
+      WebGL2 gate: must run before src/main.js. Sets window.__gateOk, which
+      main.js checks before touching the canvas — a dynamically-injected
+      module tag looked cleaner (a gated browser would fetch nothing) but
+      Vite's build only discovers a JS entry point from a *static*
+      type="module" tag in this file; injecting one at runtime left `vite
+      build` with zero JS output (verified). The static tag has to stay, so
+      the flag main.js reads is the actual mechanism, not just a fallback.
+    -->
+    <script>
+      (function () {
+        var hasWebgl2 = !!window.WebGL2RenderingContext && !!document.createElement('canvas').getContext('webgl2');
+        var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        var smallScreen = Math.min(window.innerWidth, window.innerHeight) < 760;
+        var mobile = coarse && smallScreen;
+        window.__gateOk = hasWebgl2 && !mobile;
+        if (window.__gateOk) return;
+
+        var zh = mobile ? '请使用桌面浏览器' : '需要支持 WebGL2 的桌面浏览器';
+        var en = mobile ? 'Please use a desktop browser.' : 'This game needs a desktop browser with WebGL2.';
+        document.body.innerHTML =
+          '<div class="fatal-overlay">' +
+          '<p class="fatal-overlay__zh">' + zh + '</p>' +
+          '<p class="fatal-overlay__en">' + en + '</p>' +
+          '</div>';
+      })();
+    </script>
+
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

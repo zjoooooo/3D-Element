@@ -40,6 +40,15 @@ export class Renderer {
     this.gl.info.autoReset = false;
 
     this._onResize = null;
+
+    // A lost GPU context (driver reset, tab backgrounded on a laptop that
+    // switched GPUs, out-of-memory) freezes every future draw call with no
+    // signal of its own — the last frame just sits there, or on some drivers
+    // goes black. `preventDefault()` only tells the browser a restore is
+    // welcome; this app doesn't rebuild GL state for one, so the overlay's
+    // only way out is a full reload rather than a `webglcontextrestored`
+    // handler.
+    canvas.addEventListener('webglcontextlost', this._onContextLost, false);
   }
 
   /** Cap the pixel ratio: 4K + heavy transparency is not worth the fill rate. */
@@ -68,6 +77,23 @@ export class Renderer {
     this._onResize?.(w, h, this.gl.getPixelRatio());
   };
 
+  /** Never a black screen: put up the same bilingual dark overlay the boot
+   * gate uses (styles.css's `.fatal-overlay`), clickable this time since a
+   * reload is the only recovery. Guarded against a duplicate node in case
+   * the event ever fires twice before a reload lands. */
+  _onContextLost = (event) => {
+    event.preventDefault();
+    if (document.getElementById('gpu-lost')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'gpu-lost';
+    overlay.className = 'fatal-overlay fatal-overlay--clickable';
+    overlay.innerHTML =
+      '<p class="fatal-overlay__zh">显卡上下文丢失——点击刷新</p>' +
+      '<p class="fatal-overlay__en">GPU context lost — click to reload.</p>';
+    overlay.addEventListener('click', () => location.reload());
+    document.body.appendChild(overlay);
+  };
+
   /** Called once per frame before rendering so the editor can drive exposure. */
   syncSettings() {
     this.gl.toneMappingExposure = settings.post.exposure;
@@ -75,6 +101,7 @@ export class Renderer {
 
   dispose() {
     window.removeEventListener('resize', this.handleResize);
+    this.gl.domElement.removeEventListener('webglcontextlost', this._onContextLost);
     this.gl.dispose();
   }
 }
