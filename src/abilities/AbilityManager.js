@@ -8,8 +8,16 @@ import { FireballAbility } from './FireballAbility.js';
 import { ELEMENTS } from '../config/settings.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
 
-/** Registry: adding an ability means adding one line here. */
-const ABILITY_TYPES = {
+/**
+ * Registry: adding an ability means adding one line here.
+ *
+ * Exported (M6 T2) as the single source of truth for "does this `ELEMENTS`
+ * id actually have a class yet" — `ELEMENTS` itself carries thirteen ids
+ * with no class until T4-6 register them here, and anything that offers an
+ * element up for the player to pick (a draft card, a HUD slot) needs to ask
+ * this, not `ELEMENTS`, or it offers something that can never actually cast.
+ */
+export const ABILITY_TYPES = {
   ice: IceAbility,
   thunder: ThunderAbility,
   meteor: MeteorAbility,

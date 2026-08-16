@@ -9,10 +9,14 @@ import { t } from '../ui/strings.js';
  * loadout slot 0. Two skills share wuxing 3 (meteor, fireball both cast as
  * 火) so this can't be derived generically off `settings.combat.wuxingOf`
  * the way RunManager's own `wuxingRep()` picks a "first match" — the spec's
- * title screen names fireball specifically. Index 4 (土) has no skill until
- * M6, hence the disabled placeholder card.
+ * title screen names fireball specifically. Index 4 (土) is M6 T2's
+ * rockspikes (岩刺突贯, spec's named 土 first-skill) — data only until T4
+ * registers its class, same as the other twelve M6 T2 ids (AbilityManager's
+ * `ABILITY_TYPES` guards the cast either way, so picking this card today
+ * starts an inert-but-harmless run, exactly like the other four cards would
+ * if their class ever went missing).
  */
-const HOME_ELEMENT = ['beam', 'thunder', 'ice', 'fireball', null];
+const HOME_ELEMENT = ['beam', 'thunder', 'ice', 'fireball', 'rockspikes'];
 
 /**
  * The run's front door (spec §9 / §9.5): world lore, five 本命 cards (one

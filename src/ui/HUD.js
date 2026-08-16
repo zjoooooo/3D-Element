@@ -1,12 +1,15 @@
 import { ELEMENTS, ELEMENT_META } from '../config/settings.js';
 import { ELEMENT_SIGILS } from './glyphs.js';
+import { ABILITY_TYPES } from '../abilities/AbilityManager.js';
 
 /**
  * Heads-up display: the ability bar, controls, live stats and toasts.
  *
- * Plain DOM — no framework. The bar is built from `ELEMENTS`, so a new ability
- * appears in it on its own; the slots are the only interactive part, and they
- * mirror the keyboard shortcuts through `onAbility`.
+ * Plain DOM — no framework. The bar is built from `ELEMENTS` filtered to ids
+ * with a registered class (`ABILITY_TYPES` — M6 T2 added thirteen data-only
+ * ids that can't cast yet), so a new ability appears in it once its class
+ * lands, not the moment its data does; the slots are the only interactive
+ * part, and they mirror the keyboard shortcuts through `onAbility`.
  *
  * The cooldown sweep is a `conic-gradient` driven by a CSS custom property, so
  * updating it every frame is one `setProperty` call and never touches layout.
@@ -58,7 +61,7 @@ export class HUD {
       </div>
 
       <div class="hud__abilities">
-        ${ELEMENTS.map((element) => {
+        ${ELEMENTS.filter((element) => ABILITY_TYPES[element]).map((element) => {
           const meta = ELEMENT_META[element];
           return `
             <div class="ability-card" data-element="${element}" style="--accent:${meta.accent}">

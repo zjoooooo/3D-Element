@@ -1,5 +1,6 @@
 import { settings, ELEMENTS } from '../config/settings.js';
 import { PASSIVES } from './Modifiers.js';
+import { ABILITY_TYPES } from '../abilities/AbilityManager.js';
 
 /**
  * What the level-up can offer (spec §6 卡池).
@@ -40,6 +41,10 @@ export class UpgradePool {
 
     if (this.loadout.hasEmpty()) {
       for (const element of ELEMENTS) {
+        // M6 T2: ELEMENTS carries thirteen ids with no class yet (T4-6 land
+        // them) — offering one as a draft card would seat a skill that can
+        // never actually cast, so the pool only draws from what can.
+        if (!ABILITY_TYPES[element]) continue;
         if (this.loadout.has(element) || this.loadout.isFusedParent(element)) continue;
         candidates.push({
           weight: w.newActive,

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
-import { settings, ELEMENTS } from '../src/config/settings.js';
+import { settings, ELEMENTS, ELEMENT_META } from '../src/config/settings.js';
 import { TideSchedule, WUXING, BEATS, FEEDS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
@@ -77,6 +77,105 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.ok(new Set(r.loadout).size === 6, 'run: loadout must have no duplicates');
 
   console.log('ok  run settings');
+}
+
+/* ---- M6 T2: the thirteen v1 launch skills — data checks ---- */
+{
+  const NEW_ELEMENTS = [
+    'swordrain', 'bladeorbit', 'dashstrike', 'chainbolt', 'lifebloom',
+    'frostnova', 'iceshield', 'firering', 'sunwheel',
+    'rockspikes', 'boulder', 'quake', 'stoneskin'
+  ];
+
+  assert.equal(ELEMENTS.length, 20, 'ELEMENTS: seven original + the thirteen M6 T2 launch skills');
+  for (const element of NEW_ELEMENTS) {
+    assert.ok(ELEMENTS.includes(element), `ELEMENTS: missing ${element}`);
+    assert.ok(ELEMENT_META[element]?.label, `ELEMENT_META: ${element} needs a label`);
+    assert.ok(settings[element], `settings: no block for ${element}`);
+    assert.ok(settings.combat[element], `combat: no row for ${element}`);
+    assert.equal(typeof settings.combat.wuxingOf[element], 'number', `wuxingOf: missing ${element}`);
+  }
+
+  // 锚2.5 战术档法力: exactly the five tactical-tier skills spend 30 mana;
+  // every other new skill spends 0 (field present on all thirteen either way).
+  const TACTICAL_MANA = ['dashstrike', 'frostnova', 'iceshield', 'quake', 'stoneskin'];
+  for (const element of NEW_ELEMENTS) {
+    const expected = TACTICAL_MANA.includes(element) ? 30 : 0;
+    assert.equal(settings[element].manaCost, expected, `manaCost: ${element} should be ${expected}`);
+  }
+  assert.equal(
+    TACTICAL_MANA.filter((e) => settings[e].manaCost === 30).length,
+    5,
+    'manaCost: exactly five tactical-tier skills at 30'
+  );
+
+  // 锚2 公式带 (spec §8): damage ≈ BASE_DPS × cooldown × 形状系数. Declared list is
+  // the six new burst/sweep skills that resolve through CombatSystem's generic
+  // dispatch. 勘误 D-M6-1 (controller ruling): the seven legacy skills are
+  // exempt, alongside auras/shields/self-resolving specials — their 1.5-3.3×
+  // spread over the old paper-anchor band IS the M1-M3 feel-tuning history
+  // (per-skill cooldown cuts after damage was set), frozen by this milestone's
+  // "现有 7 个手写技能一行不动" rule, not a hand-slip in new data. The band's
+  // job — catching an order-of-magnitude mistake in a NEW entry — is fully
+  // served by checking only the thirteen. Named explicitly below rather than
+  // inferred, so a future kind change can't silently drop a skill out of the
+  // check instead of out of the band.
+  const EXEMPT = new Set([
+    'ice', 'thunder', 'meteor', 'beam', 'snare', 'glacier', 'fireball', // legacy — 勘误 D-M6-1
+    'dashstrike', 'chainbolt', // self — resolve their own hits (T6)
+    'bladeorbit', 'firering', 'sunwheel', // aura — no cooldown, budgeted directly (BASE_DPS×0.7)
+    'iceshield', 'stoneskin' // shield — absorption, not damage/dps
+  ]);
+  const CHECKED = ELEMENTS.filter((e) => !EXEMPT.has(e));
+  assert.equal(CHECKED.length, 6, 'anchor2: expected six formula-checkable new skills');
+
+  // spec's shape coefficients (窄线1.3/宽线1.0/小圈1.1/大圈0.8/自身光环0.7/弹道1.2).
+  // A lookup, not a numeric threshold classifier — shape is a design category a
+  // skill's kind/width/radius don't determine on their own.
+  const SHAPE_COEF = {
+    swordrain: 0.8, // 大圈 radius 4.0
+    lifebloom: 1.1, // 小圈 radius 2.2
+    frostnova: 1.1, // 小圈 radius 3.0 (self-centred ring)
+    rockspikes: 1.0, // 宽线 width 1.8
+    boulder: 1.1, // 小圈 radius 2.4
+    quake: 0.8 // 大圈 radius 5.0 (self-centred shockwave)
+  };
+
+  // 勘误 D-M6-1: the anchor is the metronome skill as actually tuned, not spec
+  // §8's paper value; feel-tuning moved the CD axis. Computed live so it can
+  // never drift out of sync with settings.js again (was hardcoded 20/1.2).
+  const BASE_DPS = settings.combat.ice.damage / settings.ice.cooldown;
+
+  /** Pure resolver: a checkable skill's sustained DPS. Persistent kinds
+   * (lineTick/zoneTick) already carry a `dps` field that spreads its own
+   * damage over time — used directly, no cooldown division. Everything else
+   * (sweep/burst) is one hit per cast, so dps = damage / cooldown. */
+  function dpsOf(element) {
+    const row = settings.combat[element];
+    return row.dps !== undefined ? row.dps : row.damage / settings[element].cooldown;
+  }
+
+  const violations = [];
+  for (const element of CHECKED) {
+    const coef = SHAPE_COEF[element];
+    assert.ok(coef, `anchor2: ${element} needs a shape coefficient`);
+    const baseline = BASE_DPS * coef;
+    const actual = dpsOf(element);
+    const lo = baseline * 0.6, hi = baseline * 1.4;
+    if (actual < lo || actual > hi) {
+      violations.push(
+        `${element}: dps ${actual.toFixed(2)} outside [${lo.toFixed(2)}, ${hi.toFixed(2)}]` +
+        ` (baseline ${baseline.toFixed(2)} = ${BASE_DPS.toFixed(2)}×${coef}, ratio ${(actual / baseline).toFixed(2)}x)`
+      );
+    }
+  }
+  assert.equal(
+    violations.length,
+    0,
+    `anchor2: ${violations.length} skill(s) outside the \xb140% DPS band:\n  ${violations.join('\n  ')}`
+  );
+
+  console.log('ok  M6 T2: thirteen launch skills (elements/mana/anchor2)');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
@@ -415,7 +514,10 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
     enemies, pickups, player, rng, ultimate,
     tides: new TideSchedule(createRng(7)),
     projectiles: new EnemyProjectiles(),
-    combat: { tick: () => {}, release: () => -1 },
+    // M6 T2: wuxingOf now has an 土 (wux 4) representative, so a wux-4-triggered
+    // reaction reaches RunManager._react's combat.book(...) call for the first
+    // time (previously dead per wuxingRep's own doc comment) — book needs a stub.
+    combat: { tick: () => {}, release: () => -1, book: () => {} },
     targets: { register: () => {} },
     abilities: { active: [] }
   });
@@ -677,7 +779,10 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
     enemies: enemies2, pickups: pickups2, player: player2, rng: rng2,
     tides: new TideSchedule(createRng(11)),
     projectiles: new EnemyProjectiles(),
-    combat: { tick: () => {}, release: () => -1 },
+    // M6 T2: wuxingOf now has an 土 (wux 4) representative, so a wux-4-triggered
+    // reaction reaches RunManager._react's combat.book(...) call for the first
+    // time (previously dead per wuxingRep's own doc comment) — book needs a stub.
+    combat: { tick: () => {}, release: () => -1, book: () => {} },
     targets: { register: () => {} },
     abilities: { active: [], onRetire: null }
   });
@@ -897,7 +1002,7 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   const run2 = new RunManager({
     enemies: enemies2, pickups: new PickupSystem(), player: new PlayerState(),
     rng: createRng(4), tides: new TideSchedule(createRng(4)), projectiles: shots2,
-    combat: { tick: () => {}, release: () => -1, resetStats: () => {} },
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {}, book: () => {} },
     targets: { register: () => {} },
     abilities: { active: [], onRetire: null }
   });
@@ -1033,7 +1138,7 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   const shots = new EnemyProjectiles();
   const run = new RunManager({
     enemies, pickups, player, rng, tides, projectiles: shots,
-    combat: { tick: () => {}, release: () => -1, resetStats: () => {} },
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {}, book: () => {} },
     targets: { register: () => {} },
     abilities: { active: [], onRetire: null }
   });
@@ -1355,10 +1460,16 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(pickups.count, gems + settings.marks.sinterGems, 'react: 烧结 pays a gem');
   enemies.onReaction(4, 0, 0, 0, 10);
   assert.ok(mods.consumeQuench('beam'), 'react: 淬炼 arms the latch');
-  // Booking credits whichever skill first casts as the triggering wuxing —
-  // 土 (wux 4, the 火→土 call just above) has no skill casting as earth yet
-  // (M6), so that one detonation is the deliberate skip among these three.
-  assert.equal(booked.length, 2, 'react: detonations book under their ledger rep, skipping wux 4 (no rep yet)');
+  // Booking credits whichever skill first casts as the triggering wuxing, in
+  // call order (not switch-case order) — the 火→土 call above is the second
+  // of these three, so its credit is booked[1]. M6 T2 gave 土 (wux 4) its
+  // first representatives (rockspikes leads settings.combat.wuxingOf's
+  // insertion order, so wuxingRep(4) picks it) — that call now books too,
+  // where it used to be the deliberate skip (wuxingRep had no 土 entry
+  // before this milestone).
+  assert.equal(booked.length, 3, 'react: all three detonations book under their ledger rep');
+  assert.equal(booked[1][0], 'rockspikes', 'react: wux 4 credits rockspikes (wuxingOf\'s first 土 entry)');
+  assert.ok(Math.abs(booked[1][1] - 10 * settings.marks.reactionMult) < 1e-9, 'react: wux 4 books amount × reactionMult');
 
   // Wood resonance turns kills into drops of life.
   mods.computeResonance([1, 1]);

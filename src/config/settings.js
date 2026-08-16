@@ -443,8 +443,44 @@ export const settings = {
     snare: { kind: 'zoneTick', dps: 28, slowFactor: 0.45, slowTime: 0.4 },
     glacier: { kind: 'burst', damage: 70, slowFactor: 0.6, slowTime: 2.5 },
     fireball: { kind: 'self' }, // FireballAbility already resolves its own hits
+
+    // --- M6 T2: the thirteen v1 launch skills (data only; classes land T4-6) ---
+    // 锚2, recalibrated (勘误 D-M6-1): damage ≈ BASE_DPS × cooldown × 形状系数
+    // (窄线1.3/宽线1.0/小圈1.1/大圈0.8/自身光环0.7/弹道1.2), where BASE_DPS is
+    // ice-as-played (settings.combat.ice.damage / settings.ice.cooldown = 50),
+    // not spec §8's paper value (20/1.2 ≈ 16.7) — the seven legacy skills'
+    // damage matches spec but their cooldowns were feel-tuned down across
+    // M1-M3 (ice: spec 1.2s → live 0.4s), so live DPS runs ≈3× the paper
+    // anchor. Budgeting new skills on the paper number would land them at
+    // ~1/3 of legacy power. Auras have no cooldown, so they budget dps
+    // directly: 50 × 0.7自身光环 = 35. Shields and the two self-resolving
+    // specials (dashstrike/chainbolt) carry no damage/dps at all — see the
+    // anchor-2 check in check-game.mjs for the exempt list (which now also
+    // holds the seven legacy skills themselves, per the same ruling).
+    swordrain: { kind: 'burst', damage: 104, radius: 4.0 }, // 50×0.8大圈×2.6 = 104
+    bladeorbit: { kind: 'aura', dps: 35, radius: 2.2, band: 0.6 }, // 50×0.7自身光环 = 35
+    dashstrike: { kind: 'self' }, // DashStrikeSkill (T6) resolves its own hits — mirrors fireball
+    chainbolt: { kind: 'self' }, // ChainBoltSkill (T6) resolves its own hits — mirrors fireball
+    lifebloom: { kind: 'burst', damage: 176, radius: 2.2, healPlayer: 8 }, // 50×1.1小圈×3.2 = 176
+    frostnova: { kind: 'burst', self: true, damage: 440, radius: 3.0, slowFactor: 0.5, slowTime: 2 }, // 50×1.1小圈×8 = 440
+    iceshield: { kind: 'shield', amount: 40, duration: 6 }, // exempt — shield, no damage/dps
+    firering: { kind: 'aura', dps: 35, radius: 2.6, band: 0.7 }, // 50×0.7自身光环 = 35
+    sunwheel: { kind: 'aura', dps: 35, radius: 3.0, band: 0.8 }, // 50×0.7自身光环 = 35
+    rockspikes: { kind: 'sweep', damage: 120, width: 1.8 }, // 50×1.0宽线×2.4 = 120
+    boulder: { kind: 'burst', damage: 165, radius: 2.4, stunTime: 1.6 }, // 50×1.1小圈×3.0 = 165
+    quake: { kind: 'burst', self: true, damage: 320, radius: 5.0, knockback: 9 }, // 50×0.8大圈×8 = 320
+    stoneskin: { kind: 'shield', amount: 55, duration: 7, reflectShare: 0.3 }, // exempt — shield, no damage/dps
+
     // 相克 lookup into TideSchedule's BEATS: which wuxing index each skill casts as.
-    wuxingOf: { ice: 2, glacier: 2, thunder: 1, snare: 1, meteor: 3, fireball: 3, beam: 0 },
+    wuxingOf: {
+      ice: 2, glacier: 2, thunder: 1, snare: 1, meteor: 3, fireball: 3, beam: 0,
+      // M6 T2: 金金金木木水水火火土土土土
+      swordrain: 0, bladeorbit: 0, dashstrike: 0,
+      chainbolt: 1, lifebloom: 1,
+      frostnova: 2, iceshield: 2,
+      firering: 3, sunwheel: 3,
+      rockspikes: 4, boulder: 4, quake: 4, stoneskin: 4
+    },
     matchup: { advantage: 1.25, disadvantage: 0.8 }, // spec §1 克制/被克
     debuffs: {
       vuln: { amount: 0.15, duration: 4 }, // 断枝/破土
@@ -2115,6 +2151,127 @@ export const settings = {
     colorFlash: '#ffb066'
   },
 
+  /* ================================================================== */
+  /* M6 T2 — the thirteen v1 launch skills (data only; classes land T4-6) */
+  /* ================================================================== */
+  /**
+   * Every block below carries the same floor every ability block in this file
+   * does — `range`, `minRange`, `speed`, `cooldown`, `castAnim` (+ `zoneRadius`
+   * on the three `CastShape.ZONE` ones) — plus `manaCost` (spec 锚2.5) and a
+   * deliberately small set of VFX knobs (size/count/radius); the rest of each
+   * skill's VFX is composed from existing systems when its class lands.
+   *
+   * No `Ability` subclass reads any of this yet — `AbilityManager`'s
+   * `ABILITY_TYPES` registry, not `ELEMENTS`, gates what can actually cast
+   * (AbilityManager.js) — so `range`/`minRange`/`speed` on the seven
+   * `CastShape.SELF` blocks carry no gameplay meaning today. They still hold
+   * real numbers rather than `undefined`, because `AimController._resolve()`
+   * runs for *any* armed element regardless of its cast shape or whether it
+   * has a class, and reads `c.minRange`/`c.range` unconditionally; leaving
+   * either one out turns every aim update into `NaN` (and, once the geometry
+   * update reaches it, a real console error) the moment the element is armed
+   * — which the title screen's now-live earth card (rockspikes) can do today.
+   *
+   * `damage`/`dps` numbers are spec 锚2 against the live ice-as-played anchor
+   * (勘误 D-M6-1, not spec §8's paper value — see the comment in
+   * `settings.combat` above), shown per row there; everything else here is
+   * flavour, sized by eye against the existing seven.
+   */
+
+  // --- 金 swordrain: 万剑诀, a falling rain of blades on a dropped circle ---
+  swordrain: {
+    range: 14, minRange: 0, speed: 20, cooldown: 2.6, manaCost: 0, castAnim: 'cast1',
+    zoneRadius: 4.0, // footprint the circle indicator measures out — matches combat.swordrain.radius
+    swordCount: 14, swordSize: 0.5, dropTime: 0.4, // pre-effect: instanced blades falling (T4)
+    color: '#e8c766', colorGlow: '#fff2c2'
+  },
+
+  // --- 金 bladeorbit: 剑域, five swords orbiting the caster — permanent aura ---
+  bladeorbit: {
+    range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
+    bladeCount: 5, bladeSize: 0.4, orbitSpeed: 1.2, // revolutions/second
+    color: '#f0d885', colorGlow: '#fff6d9'
+  },
+
+  // --- 金 dashstrike: 弑神一闪, a short teleport-slash (DashStrikeSkill, T6) ---
+  dashstrike: {
+    range: 8, minRange: 0, speed: 40, cooldown: 7, manaCost: 30, castAnim: 'cast1',
+    trailLength: 2.0, flashSize: 1.0, // afterimage ribbon + slash flash
+    color: '#d4a940', colorGlow: '#fff0c0'
+  },
+
+  // --- 木 chainbolt: 连锁闪电, a bolt hopping between enemies (ChainBoltSkill, T6) ---
+  chainbolt: {
+    range: 14, minRange: 1, speed: 45, cooldown: 1.2, manaCost: 0, castAnim: 'cast1',
+    boltWidth: 0.15, arcSize: 0.3, // ribbon width + inter-hop arc glyph
+    color: '#7ee08a', colorGlow: '#e3ffe8'
+  },
+
+  // --- 木 lifebloom: 生命绽放, a healing burst with a spore DoT ---
+  lifebloom: {
+    range: 10, minRange: 0, speed: 18, cooldown: 3.2, manaCost: 0, castAnim: 'cast1',
+    zoneRadius: 2.2, // matches combat.lifebloom.radius
+    petalCount: 8, bloomSize: 0.6,
+    color: '#5fd98f', colorGlow: '#d6ffe6'
+  },
+
+  // --- 水 frostnova: 寒霜新星, a self-centred ring of freeze ---
+  frostnova: {
+    range: 1, minRange: 0, speed: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
+    ringCount: 3, crystalSize: 0.4,
+    color: '#7fd4ff', colorGlow: '#e8f9ff'
+  },
+
+  // --- 水 iceshield: 冰晶甲, a personal shield that sprays shards when it breaks ---
+  iceshield: {
+    range: 1, minRange: 0, speed: 0, cooldown: 9, manaCost: 30, castAnim: 'cast1',
+    shieldSize: 1.1, crystalCount: 6,
+    color: '#9fe8ff', colorGlow: '#eefbff'
+  },
+
+  // --- 火 firering: 燃阵, a ring of ground fire around the caster — permanent aura ---
+  firering: {
+    range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
+    flameHeight: 0.8, ringWidth: 0.5,
+    color: '#ff8a4c', colorGlow: '#ffe0c2'
+  },
+
+  // --- 火 sunwheel: 日轮, three fireballs orbiting the caster — permanent aura ---
+  sunwheel: {
+    range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
+    orbCount: 3, orbSize: 0.35,
+    color: '#ffb347', colorGlow: '#ffe8c2'
+  },
+
+  // --- 土 rockspikes: 岩刺突贯, spikes tearing up along a line (ice's skeleton, T4) ---
+  rockspikes: {
+    range: 15, minRange: 2.2, speed: 24, cooldown: 2.4, manaCost: 0, castAnim: 'cast1',
+    spikeCount: 16, riseTime: 0.15,
+    color: '#b8875a', colorGlow: '#e6d3ba'
+  },
+
+  // --- 土 boulder: 落石, a single stunning rock dropped on a circle ---
+  boulder: {
+    range: 16, minRange: 0, speed: 16, cooldown: 3.0, manaCost: 0, castAnim: 'cast1',
+    zoneRadius: 2.4, // matches combat.boulder.radius
+    rockSize: 1.3, fallTime: 0.5,
+    color: '#9c6b42', colorGlow: '#d9bfa0'
+  },
+
+  // --- 土 quake: 震地波, a self-centred shockwave with heavy knockback ---
+  quake: {
+    range: 1, minRange: 0, speed: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
+    waveCount: 2, waveSpeed: 6.0,
+    color: '#8a7355', colorGlow: '#d6c9b3'
+  },
+
+  // --- 土 stoneskin: 石肤, rock armour that reflects a share of absorbed damage ---
+  stoneskin: {
+    range: 1, minRange: 0, speed: 0, cooldown: 10, manaCost: 30, castAnim: 'cast1',
+    shieldSize: 1.2, crackCount: 5,
+    color: '#a68968', colorGlow: '#e3d3bd'
+  },
+
   /* ------------------------------------------------------------------ */
   /* Training dummies — the things that can be hit                       */
   /* ------------------------------------------------------------------ */
@@ -2255,10 +2412,19 @@ export const settings = {
  * going to take. Both resolve to the same `cast(origin, direction, distance)`
  * event, so an ability never has to care which one aimed it; a zone ability
  * simply reads its target as `pointAt(1)` and works outward from there.
+ *
+ * `SELF` (M6 T2) is a caster-centred cast with no aiming at all — bladeorbit,
+ * frostnova, firering, sunwheel, quake, iceshield and stoneskin. Declared as
+ * data only here: AimController's short-circuit (arm-and-fire from the
+ * caster, any direction) is future work, so a SELF ability still resolves
+ * through the shared line-arrow path today, which is why every SELF block in
+ * `settings` still carries real `range`/`minRange` numbers rather than
+ * omitting them.
  */
 export const CastShape = Object.freeze({
   LINE: 'line',
-  ZONE: 'zone'
+  ZONE: 'zone',
+  SELF: 'self'
 });
 
 /**
@@ -2268,13 +2434,25 @@ export const CastShape = Object.freeze({
  * array, and the index is the slot the keyboard binds to — adding a third
  * ability is a new file, an entry here and a settings block above.
  */
-export const ELEMENTS = ['ice', 'thunder', 'meteor', 'beam', 'snare', 'glacier', 'fireball'];
+export const ELEMENTS = [
+  'ice', 'thunder', 'meteor', 'beam', 'snare', 'glacier', 'fireball',
+  // M6 T2: the thirteen v1 launch skills, 金金金木木水水火火土土土土 (see
+  // settings.combat.wuxingOf). Data only — AbilityManager's ABILITY_TYPES
+  // registry, not this array, gates what can actually cast (AbilityManager.js),
+  // so every id below stays inert until its class lands in T4-6.
+  'swordrain', 'bladeorbit', 'dashstrike', 'chainbolt', 'lifebloom',
+  'frostnova', 'iceshield', 'firering', 'sunwheel',
+  'rockspikes', 'boulder', 'quake', 'stoneskin'
+];
 
 /**
  * Registry metadata: how an ability is presented, and how it is aimed.
  *
  * `key` must match `InputManager`. `cast` is read by `AimController` to pick
  * between the arrow and the circle; omit it and the ability is a line cast.
+ * The thirteen M6 T2 rows below omit `key` on purpose — they aren't on the
+ * sandbox's fixed keyboard layout, and run mode binds by loadout seat, not
+ * by this field.
  */
 export const ELEMENT_META = {
   ice: { label: 'Frost Lance', accent: '#5fd0ff', key: 'Q', hint: 'Frost Lance' },
@@ -2295,7 +2473,26 @@ export const ELEMENT_META = {
     hint: 'Glacial Crown',
     cast: CastShape.ZONE
   },
-  fireball: { label: 'Ember Bolt', accent: '#ffa23c', key: 'T', hint: 'Ember Bolt' }
+  fireball: { label: 'Ember Bolt', accent: '#ffa23c', key: 'T', hint: 'Ember Bolt' },
+
+  // --- M6 T2: 金 ---
+  swordrain: { label: 'Sword Rain', accent: '#e8c766', hint: 'Sword Rain', cast: CastShape.ZONE },
+  bladeorbit: { label: 'Blade Orbit', accent: '#f0d885', hint: 'Blade Orbit', cast: CastShape.SELF },
+  dashstrike: { label: 'God-Killing Flash', accent: '#d4a940', hint: 'God-Killing Flash' },
+  // --- 木 ---
+  chainbolt: { label: 'Chain Bolt', accent: '#7ee08a', hint: 'Chain Bolt' },
+  lifebloom: { label: 'Life Bloom', accent: '#5fd98f', hint: 'Life Bloom', cast: CastShape.ZONE },
+  // --- 水 ---
+  frostnova: { label: 'Frost Nova', accent: '#7fd4ff', hint: 'Frost Nova', cast: CastShape.SELF },
+  iceshield: { label: 'Crystal Ward', accent: '#9fe8ff', hint: 'Crystal Ward', cast: CastShape.SELF },
+  // --- 火 ---
+  firering: { label: 'Cinder Ring', accent: '#ff8a4c', hint: 'Cinder Ring', cast: CastShape.SELF },
+  sunwheel: { label: 'Sun Wheel', accent: '#ffb347', hint: 'Sun Wheel', cast: CastShape.SELF },
+  // --- 土 ---
+  rockspikes: { label: 'Stone Spikes', accent: '#b8875a', hint: 'Stone Spikes' },
+  boulder: { label: 'Boulder Fall', accent: '#9c6b42', hint: 'Boulder Fall', cast: CastShape.ZONE },
+  quake: { label: 'Quake', accent: '#8a7355', hint: 'Quake', cast: CastShape.SELF },
+  stoneskin: { label: 'Stone Skin', accent: '#a68968', hint: 'Stone Skin', cast: CastShape.SELF }
 };
 
 /** How the given ability is aimed. Line unless its metadata says otherwise. */

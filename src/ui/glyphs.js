@@ -119,6 +119,116 @@ const FIREBALL = WRAP(`
   <path d="M20 82L8 94M30 88L24 96M12 70L4 76"/>
 `);
 
+/**
+ * M6 T2 — the thirteen v1 launch skills. Each of the five 五行 families
+ * shares one base motif so the set reads as five groups at a glance; the
+ * per-skill path on top of it is the one thing that tells its members apart.
+ * Same 100×100 stroke-only contract as the seven above — authored blind,
+ * visual polish (spacing, weight) is a browser-verification pass, not this one.
+ *
+ * 金 — a blade (lens). 木 — chain links / a bloom. 水 — a ring, burst or closed.
+ * 火 — a ring, flame or wheel. 土 — jagged rock strokes.
+ */
+
+/** Sword Rain — three falling blades over their ground-impact ticks. */
+const SWORDRAIN = WRAP(`
+  <path d="M28 6L22 40L28 50L34 40Z"/>
+  <path d="M52 2L45 38L52 50L59 38Z"/>
+  <path d="M74 12L68 44L74 54L80 44Z"/>
+  <path d="M14 66L26 60M40 70L52 64M62 68L74 62M84 66L92 60"/>
+`);
+
+/** Blade Orbit — five blades riding an orbit ring around the caster. */
+const BLADEORBIT = WRAP(`
+  <ellipse cx="50" cy="55" rx="32" ry="13"/>
+  <path d="M50 30L46 42L50 48L54 42Z"/>
+  <path d="M83 44L77 53L81 60L87 53Z"/>
+  <path d="M70 76L64 82L69 88L75 82Z"/>
+  <path d="M30 76L24 82L29 88L35 82Z"/>
+  <path d="M17 44L11 53L15 60L21 53Z"/>
+`);
+
+/** God-Killing Flash — one big blade on the slash, trailed by its own speed lines. */
+const DASHSTRIKE = WRAP(`
+  <path d="M20 80L58 18L68 26L34 90Z"/>
+  <path d="M8 60L26 68M4 44L20 50M12 76L28 84"/>
+`);
+
+/** Chain Bolt — a zigzag bolt strung through its four hop targets. */
+const CHAINBOLT = WRAP(`
+  <path d="M20 15L45 40L30 45L75 85"/>
+  <circle cx="20" cy="15" r="6"/>
+  <circle cx="45" cy="40" r="6"/>
+  <circle cx="30" cy="45" r="6"/>
+  <circle cx="75" cy="85" r="6"/>
+`);
+
+/** Life Bloom — a four-petal flower opening around its own centre. */
+const LIFEBLOOM = WRAP(`
+  <path d="M50 50C50 50 42 30 50 15C58 30 50 50 50 50Z"/>
+  <path d="M50 50C50 50 70 42 85 50C70 58 50 50 50 50Z"/>
+  <path d="M50 50C50 50 58 70 50 85C42 70 50 50 50 50Z"/>
+  <path d="M50 50C50 50 30 58 15 50C30 42 50 50 50 50Z"/>
+  <circle cx="50" cy="50" r="8"/>
+`);
+
+/** Frost Nova — spikes bursting outward through the ring, the nova mid-expansion. */
+const FROSTNOVA = WRAP(`
+  <circle cx="50" cy="50" r="22"/>
+  <path d="M50 8L50 22M50 78L50 92M8 50L22 50M78 50L92 50"/>
+  <path d="M21 21L30 30M79 21L70 30M21 79L30 70M79 79L70 70"/>
+`);
+
+/** Crystal Ward — the same ring, closed over a hexagonal plate instead: armour, not a burst. */
+const ICESHIELD = WRAP(`
+  <circle cx="50" cy="50" r="24"/>
+  <path d="M50 28L69 39V61L50 72L31 61V39Z"/>
+`);
+
+/** Cinder Ring — flame tongues licking up off the ground ring. */
+const FIRERING = WRAP(`
+  <ellipse cx="50" cy="62" rx="30" ry="11"/>
+  <path d="M50 51C46 40 46 30 52 20C56 32 58 42 50 51Z"/>
+  <path d="M78 58C76 48 80 40 88 34C88 46 86 54 78 58Z"/>
+  <path d="M22 58C24 48 20 40 12 34C12 46 14 54 22 58Z"/>
+`);
+
+/** Sun Wheel — a hub of rays with its three orbiting fireballs. */
+const SUNWHEEL = WRAP(`
+  <circle cx="50" cy="50" r="10"/>
+  <path d="M50 30V16M65 39L76 28M70 50H84M65 61L76 72M50 70V84M35 61L24 72M30 50H16M35 39L24 28"/>
+  <circle cx="50" cy="20" r="7"/>
+  <circle cx="76" cy="65" r="7"/>
+  <circle cx="24" cy="65" r="7"/>
+`);
+
+/** Stone Spikes — jagged spikes rising in sequence along the ground line. */
+const ROCKSPIKES = WRAP(`
+  <path d="M10 80H90"/>
+  <path d="M18 80L26 45L34 80"/>
+  <path d="M40 80L50 30L60 80"/>
+  <path d="M66 80L74 50L82 80"/>
+`);
+
+/** Boulder Fall — the rock, cracked, under its own fall lines. */
+const BOULDER = WRAP(`
+  <path d="M20 20L26 34M34 14L38 30M46 20L48 32"/>
+  <circle cx="55" cy="60" r="26"/>
+  <path d="M55 38L48 60L62 58L50 82M35 55L55 60L72 50"/>
+`);
+
+/** Quake — a jagged shockwave ring tearing the ground open on its diagonals. */
+const QUAKE = WRAP(`
+  <path d="M76 50L62.7 62.7L50 76L37.3 62.7L24 50L37.3 37.3L50 24L62.7 37.3Z"/>
+  <path d="M68 68L82 82M32 68L18 82M68 32L82 18M32 32L18 18"/>
+`);
+
+/** Stone Skin — two overlapping plates, scaled like armour. */
+const STONESKIN = WRAP(`
+  <path d="M50 12L74 24V50L50 62L26 50V24Z"/>
+  <path d="M50 40L74 52V78L50 90L26 78V52Z"/>
+`);
+
 /** Keyed by the ids in `ELEMENTS`. */
 export const ELEMENT_SIGILS = {
   ice: ICE,
@@ -127,5 +237,20 @@ export const ELEMENT_SIGILS = {
   beam: BEAM,
   snare: SNARE,
   glacier: GLACIER,
-  fireball: FIREBALL
+  fireball: FIREBALL,
+
+  // M6 T2
+  swordrain: SWORDRAIN,
+  bladeorbit: BLADEORBIT,
+  dashstrike: DASHSTRIKE,
+  chainbolt: CHAINBOLT,
+  lifebloom: LIFEBLOOM,
+  frostnova: FROSTNOVA,
+  iceshield: ICESHIELD,
+  firering: FIRERING,
+  sunwheel: SUNWHEEL,
+  rockspikes: ROCKSPIKES,
+  boulder: BOULDER,
+  quake: QUAKE,
+  stoneskin: STONESKIN
 };
