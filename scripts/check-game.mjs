@@ -618,6 +618,29 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.ok(player2.shield < settings.combat.iceshield.amount, 'reflect: iceshield still absorbs the contact');
   assert.equal(enemies2.hp[toucher2], hp2Before, 'reflect: iceshield (reflectShare 0) sends nothing back');
 
+  // 勘误 D-M6-2, end to end: a toucher glued to the player across many
+  // fixed-step ticks must land only one bite per contactMercy window (≈0.5s,
+  // settings.run.iframes), not one per 1/60s tick.
+  const enemiesGrind = new EnemySystem(createRng(53));
+  const playerGrind = new PlayerState();
+  const runGrind = new RunManager({
+    enemies: enemiesGrind, pickups: new PickupSystem(), player: playerGrind, rng: createRng(53),
+    tides: new TideSchedule(createRng(53)),
+    projectiles: new EnemyProjectiles(),
+    combat: { tick: () => {}, release: () => -1, resetStats: () => {}, book: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [] }
+  });
+  runGrind.start();
+  playerGrind.addShield(settings.combat.iceshield.amount, settings.combat.iceshield.duration);
+  enemiesGrind.spawnAt(0.3, 0, 0, 0, 0); // stays glued — well inside contact range every tick
+  for (let t = 0; t < 20; t++) runGrind.tick(1 / 60, { x: 0, z: 0 }); // 1/3s, inside the 0.5s window throughout
+  assert.equal(
+    playerGrind.shield,
+    settings.combat.iceshield.amount - settings.enemies.swarm.contactDamage,
+    'contactMercy: twenty ticks of continuous contact land only one bite, not twenty'
+  );
+
   console.log('ok  M6 T5: shield absorption + stoneskin reflect');
 }
 
@@ -698,6 +721,42 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(player.shield, 55, 'shield: an equal-or-bigger cast overwrites the pool');
   assert.equal(player.shieldT, 7, 'shield: ...and its own duration comes with it');
   assert.equal(player.reflectShare, 0.3, 'shield: ...and its own reflectShare, same bundle');
+
+  // 勘误 D-M6-2: contact's own mercy window, separate from iframes — a
+  // landed CONTACT hit (shield, hp, or both) rate-limits further CONTACT
+  // hits to one per iframes-length window; a shield-absorbed hit arms no
+  // iframes (盾不触发无敌帧), so without this a swarm toucher would grind a
+  // shield down at 60Hz instead of the "one bite per window" every other
+  // contact hit already gets for free via iframes.
+  player.reset();
+  player.addShield(40, 6);
+  assert.ok(player.takeDamage(8, null, true), 'contactMercy: first contact hit lands');
+  assert.equal(player.shield, 32, 'contactMercy: it drains the shield normally');
+  assert.equal(player.iframes, 0, 'contactMercy: fully absorbed — still no iframes');
+  assert.ok(player.contactMercyT > 0, 'contactMercy: a landed contact hit arms the window regardless of outcome');
+  assert.ok(!player.takeDamage(8, null, true), 'contactMercy: a second contact hit in-window is refused');
+  assert.equal(player.shield, 32, 'contactMercy: ...and the pool never moves');
+  assert.ok(player.takeDamage(8), 'contactMercy: a bolt (contact=false) in the same window still lands');
+  assert.equal(player.shield, 24, 'contactMercy: ...and still drains the pool — bolts ride a different channel');
+  for (let t = 0; t < 60; t++) player.tick(1 / 60); // clear the window
+  assert.ok(player.takeDamage(8, null, true), 'contactMercy: contact bites again once the window clears');
+  assert.equal(player.shield, 16, 'contactMercy: ...and drains the pool once more');
+
+  // Bolt into shield arms nothing at all — a contact hit right after a
+  // bolt, with no wait, still lands (contactMercyT was never touched).
+  player.reset();
+  player.addShield(40, 6);
+  assert.ok(player.takeDamage(8), 'contactMercy: a bolt into shield lands');
+  assert.equal(player.contactMercyT, 0, 'contactMercy: ...and arms no contact window at all');
+  assert.ok(player.takeDamage(8, null, true), 'contactMercy: a contact hit right after that bolt still lands');
+  assert.equal(player.shield, 24, 'contactMercy: ...and drains the pool too (8 from the bolt, 8 from contact)');
+
+  // Pierce-through still arms iframes AND contactMercy together.
+  player.reset();
+  assert.ok(player.takeDamage(10, null, true), 'contactMercy: an unshielded contact hit pierces straight to hp');
+  assert.equal(player.hp, settings.run.playerHp - 10, 'contactMercy: ...hp actually drops');
+  assert.ok(player.iframes > 0, 'contactMercy: ...and arms iframes same as today');
+  assert.ok(player.contactMercyT > 0, 'contactMercy: ...and arms the contact window too');
 
   console.log('ok  player state');
 }

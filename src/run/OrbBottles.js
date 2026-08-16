@@ -84,33 +84,39 @@ const FRAGMENT = /* glsl */ `
     float wobble = sin(p.x * 15.0 + uTime * 2.0) * 0.006
                  + snoise(vec3(p.x * 2.2, uTime * 0.45, 4.0)) * 0.006;
     float slosh = sin(p.x * 6.0 - uTime * 6.5) * uSlosh * 0.045;
-    float liquidTop = mix(bodyBottom, fillTop, clamp(uRatio, 0.0, 1.0)) + wobble + slosh;
+    float liquidTopBase = mix(bodyBottom, fillTop, clamp(uRatio, 0.0, 1.0));
+    float liquidTop = liquidTopBase + wobble + slosh;
 
     float edge = fwidth(p.y) + 0.0025;
     // Clipped to the glass interior — this is also what narrows the liquid
     // for free as it rises past the shoulder into the neck.
     float liquidMask = (1.0 - smoothstep(liquidTop - edge, liquidTop + edge, p.y)) * step(d, 0.0);
 
-    // M6 T5: 冰晶甲/石肤 — a cap hanging down from the bottle's own brim
-    // (fillTop, the same line a full hp reading already sits at), sized by
-    // shieldRatio against that same bodyBottom..fillTop ruler hp uses.
-    // Deliberately pinned to the brim rather than stacked above the *current*
-    // liquid top: hp is very often already full when a defensive shield goes
-    // up, and stacking above uRatio there would have nowhere left to grow
-    // (uRatio+uShield clamps at the rim same as uRatio alone) — the shield
-    // would be invisible exactly when it's most likely to be cast. Anchoring
-    // at the brim instead means it always reads, overlaying the liquid's own
-    // top (armor sitting on the surface) whenever hp reaches that high, and
-    // overlaying bare glass above a lower liquid line otherwise — both still
-    // land as "a plate capping the bottle," never as a second liquid.
+    // M6 T5 (勘误 fix round 1): 冰晶甲/石肤 — a cap flush on the *live* liquid
+    // surface, sized by shieldRatio against the same bodyBottom..fillTop
+    // ruler hp uses, capped so it never grows past the brim. The first pass
+    // hung the band from the brim unconditionally — reads fine at full hp,
+    // but leaves a bare-glass gap between the liquid surface and a
+    // brim-anchored band whenever hpRatio+shieldRatio < 1 (the common
+    // panic-shield case), which reads as a detached floating plate rather
+    // than armor sitting on the blood. Anchoring off liquidTopBase (wobble-
+    // free, so the min() cutover below doesn't jitter every frame — wobble/
+    // slosh are folded back in once, after, same as liquidTop above) fixes
+    // that: shieldBottom = min(fillTop, liquidTopBase+shieldBandH) -
+    // shieldBandH = min(fillTop-shieldBandH, liquidTopBase) <= liquidTopBase
+    // always, so the band's own lower edge can never sit above the liquid's
+    // — no gap possible at any fill level. At 100% hp (liquidTopBase ==
+    // fillTop) this reduces to exactly the brim-anchored behaviour the first
+    // pass had, so that fix is preserved.
     // Gated to exactly 0 whenever uShield is ~0 (not just thin) — otherwise
     // smoothstep's own antialiasing would leave a faint ghost line sitting
     // at the brim even with no shield up (and on the mana bottle, which
     // never feeds this uniform at all).
     float hasShield = step(0.0015, uShield);
     float shieldBandH = clamp(uShield, 0.0, 1.0) * (fillTop - bodyBottom);
-    float shieldBottom = max(bodyBottom, fillTop - shieldBandH) + wobble + slosh;
-    float shieldTop = fillTop + wobble + slosh;
+    float shieldTopBase = min(fillTop, liquidTopBase + shieldBandH);
+    float shieldTop = shieldTopBase + wobble + slosh;
+    float shieldBottom = shieldTopBase - shieldBandH + wobble + slosh;
     float shieldMask = (1.0 - smoothstep(shieldTop - edge, shieldTop + edge, p.y))
                       * step(shieldBottom, p.y) * step(d, 0.0) * hasShield;
     // A crisp seam at the band's own lower edge — the "sits above the blood

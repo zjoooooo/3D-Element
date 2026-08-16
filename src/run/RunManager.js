@@ -200,7 +200,11 @@ export class RunManager {
       // takeDamage zeroes it right alongside the pool if this hit empties it.
       const shieldBefore = this.s.player.shield;
       const reflectShare = this.s.player.reflectShare;
-      this.s.player.takeDamage(contact, this.s.enemies.lastContact);
+      // 勘误 D-M6-2: the third arg marks this as a CONTACT hit, arming
+      // PlayerState's own contactMercyT — the one call site in the codebase
+      // that ever passes true (the projectile hit two lines above stays the
+      // default false: a bolt is never rate-limited by this window).
+      this.s.player.takeDamage(contact, this.s.enemies.lastContact, true);
       const absorbed = shieldBefore - this.s.player.shield;
       // Contact only — a projectile's shooter carries no position to reflect
       // at (the `shot > 0` branch above hits with the anonymous
