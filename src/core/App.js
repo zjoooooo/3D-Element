@@ -17,6 +17,7 @@ import { createRng } from '../run/rng.js';
 import { EnemySystem } from '../run/EnemySystem.js';
 import { EnemyRenderer } from '../run/EnemyRenderer.js';
 import { EnemyProjectiles } from '../run/EnemyProjectiles.js';
+import { Arena } from '../run/Arena.js';
 import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
 import { sequenceRefund } from '../run/sequence.js';
 import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
@@ -191,6 +192,11 @@ export class App {
       this.gameClock = new GameClock(settings.run.tickRate);
       this.enemySystem = new EnemySystem(rng);
       this.enemyRenderer = new EnemyRenderer(this.scene);
+      // 五行法阵 (M5 Task 7): five steles + the boundary arc, replacing
+      // EnemyRenderer's old M1 rim. Ritual strength never changes mid-run
+      // (no editor slider), so this is a one-time set, not a per-frame sync.
+      this.arena = new Arena(this.scene);
+      this.ground.setRitual(settings.arena.ritualStrength);
       this.pickups = new PickupSystem();
       this.scene.add(this.pickups.points);
       this.playerState = new PlayerState();
@@ -1177,6 +1183,7 @@ export class App {
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
+      this.arena.update(this.run.tide(), this.elapsed);
       this.threatArrows.update(this.enemySystem, this.character.position);
       this.pickups.sync();
       this.enemyProjectiles.sync();
@@ -1277,6 +1284,7 @@ export class App {
       this.threatArrows.dispose();
       for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
+      this.arena.dispose();
       this.camera.remove(this.orbBottles.object3D);
       this.orbBottles.dispose();
       this.scene.remove(this.pickups.points);

@@ -27,6 +27,7 @@ import { RunManager } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
 import { STRINGS, t } from '../src/ui/strings.js';
+import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -1719,6 +1720,41 @@ import { STRINGS, t } from '../src/ui/strings.js';
   }
 
   console.log('ok  ultimate');
+}
+
+/* ---- arena: steleGlowAt's three glow bands (spec 五行法阵, M5 Task 7) ---- */
+{
+  const a = settings.arena;
+  const tide = { index: 0, element: 2, progress: 0.5, timeLeft: 90, nextElement: 3 };
+
+  assert.equal(steleGlowAt(2, tide, 0), a.steleGlow, 'arena: the current tide\'s stele burns at steleGlow');
+  assert.equal(steleGlowAt(2, tide, 12.3), a.steleGlow, 'arena: current stays pinned at steleGlow regardless of the clock');
+
+  // The next tide's stele breathes between the dim floor and preheatGlow —
+  // sample across a couple of cycles and check it never leaves that band,
+  // and that it actually moves rather than sitting flat at one end.
+  const samples = Array.from({ length: 60 }, (_, i) => steleGlowAt(3, tide, i * 0.23));
+  assert.ok(
+    samples.every((v) => v >= DIM_GLOW - 1e-6 && v <= a.preheatGlow + 1e-6),
+    'arena: next tide\'s stele stays within [dim, preheatGlow]'
+  );
+  assert.ok(
+    Math.max(...samples) - Math.min(...samples) > 0.1,
+    'arena: next tide\'s stele actually breathes instead of sitting flat'
+  );
+
+  // Every other wuxing sits at the dim floor, unaffected by the clock.
+  for (const w of [0, 1, 4]) {
+    assert.equal(steleGlowAt(w, tide, 0), DIM_GLOW, 'arena: an idle stele sits at the dim floor');
+    assert.equal(steleGlowAt(w, tide, 7.77), DIM_GLOW, 'arena: an idle stele stays flat over time');
+  }
+
+  // The final tide's degenerate nextElement === element (TideSchedule.tideAt
+  // clamps there) must still read as "current", not fall through to preheat.
+  const lastTide = { index: 4, element: 1, progress: 0.9, timeLeft: 5, nextElement: 1 };
+  assert.equal(steleGlowAt(1, lastTide, 3), a.steleGlow, 'arena: final tide\'s self-referential nextElement still reads as current');
+
+  console.log('ok  arena stele glow');
 }
 
 console.log('\nevery game-logic check passed');

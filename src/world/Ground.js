@@ -66,7 +66,13 @@ export class Ground {
       uTexTint: { value: settings.environment.floorTexTint },
       uSheen: { value: settings.environment.floorSheen },
       uPool: { value: settings.environment.floorPool },
-      uTime: { value: 0 }
+      uTime: { value: 0 },
+      // The 五行法阵 ritual-circle layer (M5 Task 7). 0 in the sandbox — only
+      // App's run-mode block ever calls setRitual() — so this stays inert
+      // there. uArenaRadius never changes at runtime (no editor slider), so
+      // it's read once rather than synced every frame like the rest above.
+      uRitual: { value: 0 },
+      uArenaRadius: { value: settings.run.arenaRadius }
     };
 
     environment.registerShadowCasterWithPatch(this.material, (shader) => {
@@ -76,6 +82,8 @@ export class Ground {
       shader.uniforms.uSheen = this.uniforms.uSheen;
       shader.uniforms.uPool = this.uniforms.uPool;
       shader.uniforms.uTime = this.uniforms.uTime;
+      shader.uniforms.uRitual = this.uniforms.uRitual;
+      shader.uniforms.uArenaRadius = this.uniforms.uArenaRadius;
 
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\nvarying vec3 vGroundWorld;`)
@@ -95,6 +103,8 @@ export class Ground {
            uniform float uSheen;
            uniform float uPool;
            uniform float uTime;
+           uniform float uRitual;
+           uniform float uArenaRadius;
            ${noiseGLSL}`
         )
         .replace(
@@ -141,6 +151,40 @@ export class Ground {
              // of the roughness map when one is present.
              float polish = smoothstep(0.3, 0.85, fbm3(vGroundWorld * 0.06 + 3.0) * 0.5 + 0.5);
              roughnessFactor *= mix(1.0, 0.45, polish * clamp(uSheen, 0.0, 1.0));
+           }`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+           {
+             // 五行法阵 ritual circle (M5 Task 7): one big ring near the arena
+             // edge plus five rune discs at the steles' bearings (same
+             // 72°×i placement Arena.js uses). uRitual is 0 in the sandbox
+             // — only App's run-mode block ever calls setRitual() — so this
+             // whole branch is a no-op there (uniform, not per-pixel,
+             // branch: free on any GPU this runs on).
+             if (uRitual > 0.0001) {
+               vec2 p = vGroundWorld.xz;
+               float r = length(p);
+
+               float ring = 1.0 - smoothstep(0.0, 1.1, abs(r - uArenaRadius * 0.9));
+
+               float runes = 0.0;
+               for (int i = 0; i < 5; i++) {
+                 float bearing = float(i) * 1.2566370614; // 2π/5
+                 vec2 c = vec2(sin(bearing), cos(bearing)) * uArenaRadius;
+                 float d = length(p - c);
+                 float disc = 1.0 - smoothstep(1.8, 3.0, d);
+                 float etch = 0.55 + 0.45 * sin(d * 3.2 - uTime * 0.5);
+                 runes = max(runes, disc * etch);
+               }
+
+               // Battle-centre readability: nothing shows inside r<10, and
+               // the pattern is only ever near the ring/rune radii anyway,
+               // so it naturally reads strongest toward the arena's edge.
+               float pattern = max(ring, runes) * smoothstep(6.0, 10.0, r);
+               totalEmissiveRadiance += vec3(0.55, 0.78, 1.0) * pattern * uRitual * 1.6;
+             }
            }`
         );
     });
@@ -196,6 +240,15 @@ export class Ground {
     if (repeat === this._repeat) return;
     this._repeat = repeat;
     for (const texture of Object.values(this.textures)) texture.repeat.set(repeat, repeat);
+  }
+
+  /**
+   * Set the ritual-circle layer's strength. Ground is shared between the
+   * sandbox and a run, so it never reads settings.arena or runMode itself —
+   * App calls this once, only from its run-mode block.
+   */
+  setRitual(strength) {
+    this.uniforms.uRitual.value = strength;
   }
 
   /** Attach or detach the stone maps. Flipping this recompiles once (USE_MAP). */

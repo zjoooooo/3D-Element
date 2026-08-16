@@ -316,6 +316,15 @@ export const settings = {
     earth: { damage: 40, stunTime: 1.2 }
   },
 
+  /** 五行法阵竞技场 (M5 Task 7): ground ritual ring + the five wuxing steles. */
+  arena: {
+    steleHeight: 4, // crystal stele height, metres
+    steleGlow: 2.2, // emissiveIntensity of the current tide's stele
+    preheatGlow: 0.7, // peak of the next tide's stele's breathing pulse
+    ritualStrength: 0.35, // uRitual fed to Ground in run mode (0 in the sandbox)
+    arcOpacity: 0.5 // boundary arc opacity
+  },
+
   /**
    * The growth loop's own numbers (spec §4.5 / anchors 4). The modifier layer
    * multiplies these onto the base values above — upgrades never write into
