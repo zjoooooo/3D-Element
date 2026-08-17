@@ -5,6 +5,8 @@ import { BeamAbility } from './BeamAbility.js';
 import { SnareAbility } from './SnareAbility.js';
 import { GlacierAbility } from './GlacierAbility.js';
 import { FireballAbility } from './FireballAbility.js';
+import { PierceLanceSkill } from './PierceLanceSkill.js';
+import { StormFieldSkill } from './StormFieldSkill.js';
 import { LineSweepSkill } from './templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
 import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
@@ -70,6 +72,11 @@ export const ABILITY_TYPES = {
   // (NOT seated-means-standing; see permanentAuraElements).
   cyclonecut: TimedAuraSkill,
   sandfield: TimedAuraSkill,
+
+  // M8 T4: two assembled specials — a line that finishes what it wounds,
+  // and a field that keeps calling the sky down (both kind:'self').
+  piercelance: PierceLanceSkill,
+  stormfield: StormFieldSkill,
 
   bladeorbit: OrbitAuraSkill,
   firering: OrbitAuraSkill,

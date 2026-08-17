@@ -449,7 +449,14 @@ export class CombatSystem {
           // delivering a twentieth of its budget. A row that leaves kbMult
           // out keeps the plain baseline shove (`?? 1`, no scaling) — that
           // is the permanent rings' shipped behaviour and must not move.
-          const kbScale = c.kbMult === undefined ? 1 : c.kbMult * step;
+          // Every aura row states its own shove RATE (per second), the three
+          // permanent rings included at 60 — which is 60 × 1/60 = the exact
+          // baseline impulse they have always applied, now written in the
+          // same units as everyone else. The `?? 60` is a guard for a row
+          // that forgets the field (an assertion pins that none do), not a
+          // second unit convention: this milestone's own rule is that a
+          // per-tick channel declares rate-or-impulse once, at the channel.
+          const kbScale = (c.kbMult ?? 60) * step;
           this._book(
             ability.element,
             amt,

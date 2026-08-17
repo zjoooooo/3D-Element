@@ -42,6 +42,8 @@ import { FUSION_CLASSES, ABILITY_TYPES } from '../src/abilities/AbilityManager.j
 import { LineSweepSkill } from '../src/abilities/templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from '../src/abilities/templates/ZoneBurstSkill.js';
 import { TimedAuraSkill } from '../src/abilities/templates/TimedAuraSkill.js';
+import { PierceLanceSkill } from '../src/abilities/PierceLanceSkill.js';
+import { StormFieldSkill } from '../src/abilities/StormFieldSkill.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -499,9 +501,15 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   // --- aura.slowFactor (沙暴领域's 转向迟钝, approximated as a slow) ---
   {
     const slows = [];
+    const rings = [];
     const combat = new CombatSystem({
-      damage: () => 0, damageOnce: () => 0, slow: (p, r, f, d) => slows.push({ r, f, d }),
-      damageRing: () => 1, applyVuln: () => {}
+      damage: () => 0, damageOnce: () => 0,
+      // Every argument captured on purpose (review catch): a stub that drops
+      // the tail silently un-pins whatever the tail carries — the inner
+      // radius here, the knockback scale on damageRing below.
+      slow: (p, r, f, d, inner) => slows.push({ r, f, d, inner }),
+      damageRing: (p, i, o, amt, wux, wuxB, kb) => (rings.push({ inner: i, outer: o, kb }), 1),
+      applyVuln: () => {}
     });
     const sand = {
       element: 'sandfield', phase: 'impact', impactTime: 0.5, fadeTime: 0,
@@ -525,6 +533,42 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     };
     combat.tick(1 / 60, [orbit]);
     assert.equal(slows.length, 0, 'aura: a row without slowFactor never slows (bladeorbit regression)');
+
+    // The permanent rings' shove must survive the rate conversion untouched:
+    // every aura row now states a per-second rate, and the three rings state
+    // 60 — which is exactly the one-impulse-per-tick they always applied.
+    // Unpinned, "simplifying" the expression divides their shove by sixty and
+    // three shipped skills change feel in silence (review catch).
+    assert.ok(
+      Math.abs(rings[rings.length - 1].kb - 1) < 1e-9,
+      `aura: a permanent ring still shoves at the plain baseline (got ${rings[rings.length - 1].kb})`
+    );
+    assert.ok(
+      Math.abs(rings[0].kb - settings.combat.sandfield.kbMult / 60) < 1e-9,
+      'aura: a field states its shove as a rate, applied per step'
+    );
+    // Completeness: no aura row may leave the field out — the `?? 60` in
+    // CombatSystem is a guard, not a second convention.
+    for (const el of ELEMENTS) {
+      if (settings.combat[el]?.kind !== 'aura') continue;
+      assert.equal(typeof settings.combat[el].kbMult, 'number', `aura row ${el} must state its own kbMult rate`);
+    }
+
+    // The slow's inner radius really reaches the population (three ways to
+    // break the thread — the row argument, the guard, the facade — all sailed
+    // through before this): a solid field passes 0, a ring passes its edge.
+    slows.length = 0; // the bladeorbit regression above emptied it
+    combat.tick(1 / 60, [sand]);
+    assert.equal(slows[0].inner, 0, 'aura slow: a solid field slows its whole disc');
+    {
+      const ringRow = { ...settings.combat.sandfield, radius: 4, band: 1 };
+      const saved = settings.combat.sandfield;
+      settings.combat.sandfield = ringRow;
+      slows.length = 0;
+      combat.tick(1 / 60, [sand]);
+      assert.equal(slows[0].inner, 3, 'aura slow: a ring-shaped field slows only its band, never the eye');
+      settings.combat.sandfield = saved;
+    }
   }
 
   // --- 磁暴's negative kbMult: the ring PULLS instead of shoving ---
@@ -591,7 +635,7 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     const decalOpts = [];
     const ctx = {
       lights: { acquire: () => (acquired++, { n: acquired }), release: (h) => { if (h) released++; }, set: () => {} },
-      decals: { spawn: (type, pos, opts) => (decalOpts.push(opts), { mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
+      decals: { spawn: (type, pos, opts) => (decalOpts.push({ type, ...opts }), { mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
       particles: {
         get: () => ({
           uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
@@ -620,6 +664,11 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     // the ground mark is the ROW's radius, and the shard ring rides the
     // band's own middle, not the outer rim.
     assert.equal(decalOpts.length, 1, `${el}: one ground mark per cast`);
+    // A standing field needs a mark that HOLDS: the CRACK family keeps full
+    // alpha for the first 55% of its life, while SHOCKWAVE/DUSTRING animate
+    // as one-shot expanding rings and would paint the floor ahead of where
+    // the field actually bites (review catch — this pin guards that fix).
+    assert.equal(decalOpts[0].type, DecalType.CRACK, `${el}: the mark is a family that stands still`);
     assert.ok(
       Math.abs(decalOpts[0].radius - settings.combat[el].radius) < 1e-9,
       `${el}: the mark on the floor is the footprint that gets hit (got ${decalOpts[0].radius}, row ${settings.combat[el].radius})`
@@ -677,6 +726,158 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M8 T3: aura slow field, magnet pull, TimedAuraSkill lifecycle');
+}
+
+/* ---- M8 T4: 破军贯穿 (execute line) + 雷暴领域 (random sky) ---- */
+{
+  assert.equal(ABILITY_TYPES.piercelance, PierceLanceSkill, 'registry: piercelance');
+  assert.equal(ABILITY_TYPES.stormfield, StormFieldSkill, 'registry: stormfield');
+
+  const mkCtx = (enemies, extra = {}) => ({
+    targets: enemies,
+    enemies,
+    stats: { book: () => {} },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    decals: { spawn: () => ({ mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
+    bursts: { spawn: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {}, emit() {}
+      })
+    },
+    mods: null,
+    ...extra
+  });
+
+  // --- 破军贯穿: one hit per body down a long narrow line, then execute ---
+  {
+    const enemies = new EnemySystem(createRng(91));
+    const cfg = settings.piercelance;
+    // 木 bodies (wuxing 1): 金克木 → the lance's own advantage applies, so
+    // the amounts below are the matchup'd ones; the execute threshold is an
+    // absolute hp floor and doesn't care.
+    const near = enemies.spawnAt(3, 0, 0, 1);
+    const far = enemies.spawnAt(11, 0, 0, 1);
+    const offLine = enemies.spawnAt(6, 3.5, 0, 1); // well outside width 0.8
+    const doomed = enemies.spawnAt(8, 0, 0, 1);
+    const spared = enemies.spawnAt(9, 0, 0, 1);
+    for (const i of [near, far, offLine]) enemies.hp[i] = 50000;
+    enemies.hp[doomed] = settings.combat.piercelance.executeBelow - 1; // under the floor
+    // Comfortably over the floor even after a matchup'd hit (金克木 ×1.25
+    // turns 320 into 400 — the first fixture landed exactly ON the floor).
+    enemies.hp[spared] = settings.combat.piercelance.executeBelow + 700;
+    const idDoomed = enemies.id[doomed];
+    const idSpared = enemies.id[spared];
+    const hp0 = [enemies.hp[near], enemies.hp[far], enemies.hp[offLine]];
+
+    const lance = new PierceLanceSkill(mkCtx(enemies), 'piercelance');
+    lance.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, cfg.range);
+    lance.autocast = false; lance.fusionMult = 1; lance.quenched = false;
+    for (let i = 0; i < 30; i++) lance.update(1 / 60);
+
+    const dealtNear = hp0[0] - enemies.hp[near];
+    const dealtFar = hp0[1] - enemies.hp[far];
+    assert.ok(dealtNear > 0, 'lance: a body on the line is run through');
+    assert.ok(
+      Math.abs(dealtNear - dealtFar) < 1e-2,
+      `lance: every body on the line takes the same single hit (near ${dealtNear.toFixed(1)}, far ${dealtFar.toFixed(1)})`
+    );
+    assert.equal(enemies.hp[offLine], hp0[2], 'lance: nothing off the line is touched');
+    const alive = new Set(Array.from({ length: enemies.count }, (_, i) => enemies.id[i]));
+    assert.ok(!alive.has(idDoomed), 'lance: a body under the execute floor is finished outright');
+    assert.ok(alive.has(idSpared), 'lance: a body over the floor survives its hit');
+
+    // Hitting once means once: a second sweep over the same cast adds nothing.
+    const settled = enemies.hp[near];
+    for (let i = 0; i < 30; i++) lance.update(1 / 60);
+    assert.equal(enemies.hp[near], settled, 'lance: the line resolves exactly once per cast (dedup)');
+    while (!lance.isFinished) lance.update(0.1);
+    lance.destroy();
+    assert.equal(enemies._hitMemory.size, 0, 'lance: its dedup set goes back with the cast — no leak');
+  }
+
+  // --- 雷暴领域: a bolt every boltEvery seconds, inside the field only ---
+  {
+    const enemies = new EnemySystem(createRng(92));
+    const cfg = settings.stormfield;
+    const inField = enemies.spawnAt(9, 0, 0, 2);
+    const alsoIn = enemies.spawnAt(10.5, 1.5, 0, 2);
+    const outside = enemies.spawnAt(30, 0, 0, 2);
+    for (const i of [inField, alsoIn, outside]) enemies.hp[i] = 50000;
+    const before = enemies.hp[inField] + enemies.hp[alsoIn];
+
+    const storm = new StormFieldSkill(mkCtx(enemies), 'stormfield');
+    storm.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+    storm.autocast = false; storm.fusionMult = 1; storm.quenched = false;
+    storm.update(1 / 60);
+    assert.equal(storm.phase, 'impact', 'storm: the field stands on the first tick');
+    assert.equal(storm.impactDuration, cfg.life, "storm: the field's window is its own life");
+
+    for (let i = 0; i < 40; i++) storm.update(1 / 60); // ≈0.68s — before the first bolt
+    assert.equal(enemies.hp[inField] + enemies.hp[alsoIn], before, 'storm: no bolt before the first interval');
+    for (let i = 0; i < 10; i++) storm.update(1 / 60); // ≈0.85s — past 0.75
+    const afterOne = enemies.hp[inField] + enemies.hp[alsoIn];
+    assert.ok(
+      Math.abs(before - afterOne - cfg.boltDamage) < 1e-2,
+      `storm: one bolt strikes one body for boltDamage (got ${(before - afterOne).toFixed(2)}, want ${cfg.boltDamage})`
+    );
+
+    while (!storm.isFinished) storm.update(1 / 60);
+    const total = before - (enemies.hp[inField] + enemies.hp[alsoIn]);
+    const wantBolts = Math.floor(cfg.life / cfg.boltEvery);
+    assert.ok(
+      Math.abs(total - wantBolts * cfg.boltDamage) < 1e-1,
+      `storm: ${wantBolts} bolts over the field's life (got ${(total / cfg.boltDamage).toFixed(2)} bolts' worth)`
+    );
+    assert.equal(enemies.hp[outside], 50000, 'storm: nothing outside the field is ever struck');
+    storm.destroy();
+  }
+
+  // --- both are seeded when a run supplies rng, deterministic without ---
+  {
+    const roll = (rng) => {
+      const enemies = new EnemySystem(createRng(93));
+      for (let i = 0; i < 5; i++) enemies.spawnAt(8 + i * 0.7, (i % 2 ? 1 : -1) * 0.9, 0, 2);
+      for (let i = 0; i < enemies.count; i++) enemies.hp[i] = 50000;
+      const hits = [];
+      const ctx = mkCtx(enemies, { targets: { damage: (p, r, amt) => (hits.push(Math.round(p.x * 1000)), 0) }, rng });
+      const s = new StormFieldSkill(ctx, 'stormfield');
+      s.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+      s.autocast = false; s.fusionMult = 1; s.quenched = false;
+      while (!s.isFinished) s.update(1 / 60);
+      s.destroy();
+      return hits;
+    };
+    const a = roll(undefined);
+    const b = roll(undefined);
+    assert.deepEqual(a, b, 'storm: with no rng the strike sequence is deterministic (replayable headless)');
+    const seeded = roll(createRng(7));
+    assert.equal(seeded.length, a.length, 'storm: a seeded run strikes just as often');
+    const seededAgain = roll(createRng(7));
+    assert.deepEqual(seeded, seededAgain, 'storm: the same seed replays the same sky');
+  }
+
+  // --- sandbox shape ---
+  for (const [Klass, el] of [[PierceLanceSkill, 'piercelance'], [StormFieldSkill, 'stormfield']]) {
+    const bare = new Klass({
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {}, emit() {}
+        })
+      }
+    }, el);
+    bare.autocast = false; bare.fusionMult = 1; bare.quenched = false;
+    assert.doesNotThrow(() => {
+      bare.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+      for (let i = 0; i < 600; i++) bare.update(1 / 60);
+      bare.destroy();
+    }, `${el}: a bare-VFX ctx never throws`);
+  }
+
+  console.log('ok  M8 T4: pierce lance (line/execute/dedup) + storm field (cadence/bounds/seed)');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

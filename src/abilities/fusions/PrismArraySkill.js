@@ -61,6 +61,12 @@ const SPARK_RATE = 16; // grinding sparks per second, whole array
  * the frame, so a manually-cast array IS observed once in TRAVEL — the disc
  * must already sit on the target, not on the caster's feet.
  *
+ * Sibling: `templates/TimedAuraSkill.js` is the same machine for plain
+ * elements (磁暴/沙暴领域). It was distilled from this class at M8 T3 and
+ * deliberately left this one alone — the timing contract (park at spawn,
+ * never move, impactDuration IS the row's life) is shared by both, so a
+ * change here wants reading there too.
+ *
  * Pooled per AbilityManager's contract: one shared crystal geometry + one
  * gold material for all five prisms, built once at construction; a cast
  * only repositions/rescales them (zero per-cast allocation).

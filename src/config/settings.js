@@ -466,14 +466,14 @@ export const settings = {
     // anchor-2 check in check-game.mjs for the exempt list (which now also
     // holds the seven legacy skills themselves, per the same ruling).
     swordrain: { kind: 'burst', damage: 104, radius: 4.0 }, // 50×0.8大圈×2.6 = 104
-    bladeorbit: { kind: 'aura', dps: 35, radius: 2.2, band: 0.6 }, // 50×0.7自身光环 = 35
+    bladeorbit: { kind: 'aura', dps: 35, radius: 2.2, band: 0.6, kbMult: 60 }, // 50×0.7自身光环 = 35
     dashstrike: { kind: 'self' }, // DashStrikeSkill (T6) resolves its own hits — mirrors fireball
     chainbolt: { kind: 'self' }, // ChainBoltSkill (T6) resolves its own hits — mirrors fireball
     lifebloom: { kind: 'burst', damage: 176, radius: 2.2, healPlayer: 8 }, // 50×1.1小圈×3.2 = 176
     frostnova: { kind: 'burst', self: true, damage: 440, radius: 3.0, slowFactor: 0.5, slowTime: 2 }, // 50×1.1小圈×8 = 440
     iceshield: { kind: 'shield', amount: 40, duration: 6 }, // exempt — shield, no damage/dps
-    firering: { kind: 'aura', dps: 35, radius: 2.6, band: 0.7 }, // 50×0.7自身光环 = 35
-    sunwheel: { kind: 'aura', dps: 35, radius: 3.0, band: 0.8 }, // 50×0.7自身光环 = 35
+    firering: { kind: 'aura', dps: 35, radius: 2.6, band: 0.7, kbMult: 60 }, // 50×0.7自身光环 = 35
+    sunwheel: { kind: 'aura', dps: 35, radius: 3.0, band: 0.8, kbMult: 60 }, // 50×0.7自身光环 = 35
     rockspikes: { kind: 'sweep', damage: 120, width: 1.8 }, // 50×1.0宽线×2.4 = 120
     boulder: { kind: 'burst', damage: 165, radius: 2.4, stunTime: 1.6 }, // 50×1.1小圈×3.0 = 165
     quake: { kind: 'burst', self: true, damage: 320, radius: 5.0, knockback: 9 }, // 50×0.8大圈×8 = 320
