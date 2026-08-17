@@ -4,10 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Elemental Sandbox — Procedural Ice &amp; Lightning VFX Playground</title>
-    <link rel="preload" as="fetch" href="./models/Standing%20Idle.fbx" crossorigin />
-    <link rel="preload" as="fetch" href="./models/Fast%20Run-2.fbx" crossorigin />
-    <!-- `crossorigin` to match TextureLoader, which requests anonymously. -->
-    <link rel="preload" as="image" href="./models/diffuse2.png" crossorigin />
     <link rel="stylesheet" href="./src/ui/styles.css" />
   </head>
   <body>
@@ -47,7 +43,26 @@
         var smallScreen = Math.min(window.innerWidth, window.innerHeight) < 760;
         var mobile = coarse && smallScreen;
         window.__gateOk = hasWebgl2 && !mobile;
-        if (window.__gateOk) return;
+        if (window.__gateOk) {
+          // Preload the heavy first-paint assets only for a visitor who
+          // cleared the gate — static <link rel=preload> tags would have
+          // fetched these for every visitor, including the WebGL2-less/
+          // mobile ones this gate turns away (M5 T13 leftover).
+          [
+            ['fetch', './models/Standing%20Idle.fbx'],
+            ['fetch', './models/Fast%20Run-2.fbx'],
+            // `crossOrigin` to match TextureLoader, which requests anonymously.
+            ['image', './models/diffuse2.jpg']
+          ].forEach(function (asset) {
+            var link = document.createElement('link');
+            link.rel = 'preload';
+            link.as = asset[0];
+            link.href = asset[1];
+            link.crossOrigin = 'anonymous';
+            document.head.appendChild(link);
+          });
+          return;
+        }
 
         var zh = mobile ? '请使用桌面浏览器' : '需要支持 WebGL2 的桌面浏览器';
         var en = mobile ? 'Please use a desktop browser.' : 'This game needs a desktop browser with WebGL2.';

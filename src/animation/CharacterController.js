@@ -28,12 +28,12 @@ import { clamp, damp } from '../utils/math.js';
 export const CHARACTERS = {
   classic: {
     model: 'Idle.fbx',
-    texture: 'diffuse.png',
+    texture: 'diffuse.jpg',
     clips: { run: 'run.fbx', cast1: 'cast1.fbx', cast2: 'cast2.fbx', cast3: 'cast3.fbx' }
   },
   sorcerer: {
     model: 'Standing Idle.fbx',
-    texture: 'diffuse2.png',
+    texture: 'diffuse2.jpg',
     clips: {
       run: 'Fast Run-2.fbx',
       cast1: 'Standing 1H Magic Attack 02.fbx',

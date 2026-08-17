@@ -88,7 +88,7 @@ Seven binary assets are served from `public/` and loaded automatically at boot:
 | File | Purpose |
 | --- | --- |
 | `public/models/Idle.fbx` | Rigged character **and** its idle animation clip |
-| `public/models/diffuse.png` | The character's colour map |
+| `public/models/diffuse.jpg` | The character's colour map |
 | `public/models/run.fbx` | Run cycle, blended against the idle by travel speed |
 | `public/models/cast1.fbx` | Cast animation |
 | `public/models/cast2.fbx` | Cast animation |
@@ -112,7 +112,7 @@ the idle puts it. That is the failure worth catching, because the hips track is 
 centimetres and a clip from a differently proportioned character can quietly float or sink the whole
 body.
 
-The rig ships no material, so `diffuse.png` is loaded beside it and assigned as the colour map when
+The rig ships no material, so `diffuse.jpg` is loaded beside it and assigned as the colour map when
 the imported materials are converted to PBR — an FBX that *does* carry an embedded texture keeps its
 own, since that map is authored against its own UVs.
 
