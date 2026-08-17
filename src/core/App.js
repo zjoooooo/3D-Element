@@ -1920,7 +1920,11 @@ export class App {
         const topSkills = Object.entries(this.combat.damageDealt)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 3)
-          .map(([el, amt]) => [ELEMENT_META[el]?.label ?? el, amt]);
+          // M7 T7: a fused seat books under its fusion id — resolve it to the
+          // spell's own name the way the loadout badge already does
+          // (fusionName), instead of leaking the raw 'fusion:a+b' string
+          // onto the death screen (T2-T6 erratas' shared observation).
+          .map(([el, amt]) => [isFusionId(el) ? fusionName(el) : ELEMENT_META[el]?.label ?? el, amt]);
         this.verdictPanel.show({
           won,
           elapsed: this.run.elapsed,
