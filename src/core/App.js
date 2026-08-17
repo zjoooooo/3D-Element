@@ -25,7 +25,7 @@ import { sequenceRefund } from '../run/sequence.js';
 import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
 import { canAffordCast, manaCostOf } from '../run/manaGate.js';
 import { CombatSystem } from '../run/CombatSystem.js';
-import { bpFlag, bpScale } from '../run/breakpoints.js';
+import { bpFlag } from '../run/breakpoints.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
 import { Modifiers } from '../run/Modifiers.js';
@@ -62,7 +62,7 @@ import { CameraShake } from '../effects/CameraShake.js';
 import { ScreenFlash } from '../effects/ScreenFlash.js';
 
 import { AbilityManager } from '../abilities/AbilityManager.js';
-import { dashTarget } from '../abilities/templates/DashStrikeSkill.js';
+import { dashTarget, scaledDashRange } from '../abilities/templates/DashStrikeSkill.js';
 import { PostProcessing } from '../postprocessing/PostProcessing.js';
 
 import { HUD, LoadingScreen } from '../ui/HUD.js';
@@ -1036,15 +1036,16 @@ export class App {
    *
    * Run-mode only — the sandbox has no playerState/character-lerp channel
    * to move (contract: sandbox casts are VFX-only, the character stays put).
+   *
+   * @param {number} range M6 T12 fix round: the caller's own already-scaled
+   *   `scaledDashRange(level)` (DashStrikeSkill.js) — the SAME number it
+   *   passed to `abilities.cast()` as this cast's `distance`, so the body
+   *   lands exactly where the damage line/ribbon/flash already reached
+   *   (reviewer-caught: this used to recompute its own scaling here while
+   *   the cast distance stayed unscaled elsewhere, and the two could drift).
    */
-  _dashDisplace(direction) {
+  _dashDisplace(direction, range) {
     if (!this.runMode) return;
-    // M6 T12 (弑神一闪 Lv3 冲程×1.3): scales the physical teleport distance —
-    // implementer's choice, needs review: the ability's own cast `distance`
-    // (its ribbon/damage-line length) still comes from AimController's
-    // unscaled aim-drag, out of this task's file scope, so a max-range Lv3+
-    // dash can physically land a little past where the damage line swept.
-    const range = settings.dashstrike.range * bpScale('dashstrike', 'range', this.loadout.levelOf('dashstrike'));
     const start = this.character.root.position;
     const target = dashTarget(start.x, start.z, direction.x, direction.z, range, settings.character.roamRadius);
     this._dodgeStart.copy(start);
@@ -1121,7 +1122,16 @@ export class App {
       }
       if (cost > 0 && !echo) this.playerState.spendMana(cost);
     }
-    const ability = this.abilities.cast(origin, direction, distance, element);
+    // M6 T12 fix round: dashstrike's cast distance and its physical
+    // teleport must share the exact same scaled range (scaledDashRange's
+    // own doc) — resolved once, before the spawn, so `abilities.cast()`
+    // and `_dashDisplace()` below can never disagree the way they used to
+    // (reviewer-caught: the teleport scaled, the cast distance didn't).
+    const castDistance =
+      element === 'dashstrike'
+        ? scaledDashRange(this.loadout ? this.loadout.levelOf('dashstrike') : 1)
+        : distance;
+    const ability = this.abilities.cast(origin, direction, castDistance, element);
     // Written on every cast through here (sandbox, manual run cast, echo) so
     // a pooled instance never carries an autocast tax over from a previous
     // life (M1 勘误 same shape) — only `_quickCastToward` ever writes true.
@@ -1136,10 +1146,10 @@ export class App {
     }
     // M6 T6: see _dashDisplace's own doc — sandbox-safe via its own runMode
     // guard, so this only needs the element check.
-    if (element === 'dashstrike') this._dashDisplace(direction);
+    if (element === 'dashstrike') this._dashDisplace(direction, castDistance);
     // M6 T12: see _maybeCastTwice's own doc — sandbox-safe (this.loadout is
     // undefined there, reading as a constant Lv1/never armed).
-    this._maybeCastTwice(element, ability, origin, direction, distance);
+    this._maybeCastTwice(element, ability, origin, direction, castDistance);
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
@@ -1263,7 +1273,17 @@ export class App {
         // cast is really just the other half's, plus the combined identity/
         // cooldown/name below.
         if (settings.combat[part]?.kind === 'aura') continue;
-        const ability = this.abilities.cast(origin, direction, this._quickCastDistance(part, rawDist), part);
+        // M6 T12 fix round: same shared-scale rule as _cast/the plain
+        // branch below — a fused dashstrike part's cast distance and its
+        // displacement must agree. Moot in practice today (fusing deletes
+        // the parent's own `_levels` entry, so `levelOf('dashstrike')`
+        // reads 0 here and the scale is always identity) but kept correct
+        // rather than silently relying on that staying true.
+        const partDist =
+          part === 'dashstrike'
+            ? scaledDashRange(this.loadout ? this.loadout.levelOf('dashstrike') : 1)
+            : this._quickCastDistance(part, rawDist);
+        const ability = this.abilities.cast(origin, direction, partDist, part);
         if (ability) {
           ability.autocast = autocast;
           ability.fusionMult = fusionMult;
@@ -1274,7 +1294,7 @@ export class App {
         // exact `abilities.cast` call generically — wiring the same hook
         // here as _cast/the plain branch below costs one line and keeps a
         // future fusion pair from silently forgetting to move the player.
-        if (part === 'dashstrike' && !demo) this._dashDisplace(direction);
+        if (part === 'dashstrike' && !demo) this._dashDisplace(direction, partDist);
       }
       if (!demo) {
         this.cooldowns.set(
@@ -1285,7 +1305,13 @@ export class App {
       castAnim = settings[a].castAnim;
     } else {
       const c = settings[element];
-      const dist = this._quickCastDistance(element, rawDist);
+      // M6 T12 fix round: same shared-scale rule as _cast above — dashstrike's
+      // cast distance and its physical teleport share the exact same
+      // scaledDashRange(level), resolved once, before the spawn.
+      const dist =
+        element === 'dashstrike'
+          ? scaledDashRange(this.loadout ? this.loadout.levelOf('dashstrike') : 1)
+          : this._quickCastDistance(element, rawDist);
       const ability = this.abilities.cast(origin, direction, dist, element);
       if (ability) {
         ability.autocast = autocast;
@@ -1294,7 +1320,7 @@ export class App {
       }
       // M6 T6: see _dashDisplace's own doc for why !demo — autocast dashing
       // into a crowd is a real, intentional consequence of the toggle.
-      if (element === 'dashstrike' && !demo) this._dashDisplace(direction);
+      if (element === 'dashstrike' && !demo) this._dashDisplace(direction, dist);
       // M6 T12: see _maybeCastTwice's own doc — reachable here via autocast
       // (a Lv5 ice seat with autocast toggled on) or a demo (moot in
       // practice: a demo only ever fires right after acquiring a skill,

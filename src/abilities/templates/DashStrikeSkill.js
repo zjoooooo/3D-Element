@@ -90,6 +90,21 @@ export function dashTarget(originX, originZ, dirX, dirZ, range, roamRadius) {
 }
 
 /**
+ * M6 T12 fix round (reviewer-caught): the single source of truth for
+ * dashstrike's Lv3+ reach ("冲程×1.3"). App's three cast-time call sites
+ * (`_cast`, `_quickCastToward`'s plain and fusion branches) each compute
+ * this once and pass the SAME number as both the ability's own cast
+ * `distance` (so the damage line/ribbon/slash-flash reach exactly where the
+ * body lands) and `_dashDisplace`'s physical teleport range — one
+ * computation, threaded through, not two independent ones that can drift
+ * apart the way the original T12 cut let them (the teleport scaled, the
+ * cast distance didn't, so a Lv3+ dash could overshoot its own damage line).
+ */
+export function scaledDashRange(level) {
+  return settings.dashstrike.range * bpScale('dashstrike', 'range', level);
+}
+
+/**
  * DashStrikeSkill — dashstrike (弑神一闪), the one `self`-kind (D-M3-8)
  * line special that also displaces the caster. Per the brief: this class is
  * pure VFX+damage, exactly like every other ability — the *player's own*

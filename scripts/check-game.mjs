@@ -25,7 +25,7 @@ import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
 import { chainHops, resolveTarget } from '../src/abilities/templates/ChainBoltSkill.js';
-import { dashTarget, dashLineHits } from '../src/abilities/templates/DashStrikeSkill.js';
+import { dashTarget, dashLineHits, scaledDashRange } from '../src/abilities/templates/DashStrikeSkill.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -724,6 +724,43 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.ok(Math.hypot(beyond.x, beyond.z) <= 40 + 1e-6, 'dashTarget: never returns a point past roamRadius');
 
   console.log('ok  M6 T6: dashTarget (arena clamp)');
+}
+
+/* ---- M6 T12 fix round (reviewer-caught): scaledDashRange — single source
+   of truth for both the ability's own cast distance and _dashDisplace's
+   teleport, so a Lv3+ dash can never again overshoot its own damage line ---- */
+{
+  // Lv1/Lv2: identity — the 8m base every pre-T12 dashTarget case above
+  // already assumes.
+  assert.ok(Math.abs(scaledDashRange(1) - settings.dashstrike.range) < 1e-9, 'scaledDashRange: Lv1 identity');
+  assert.ok(Math.abs(scaledDashRange(2) - settings.dashstrike.range) < 1e-9, 'scaledDashRange: Lv2 identity');
+
+  // Lv3+: ×1.3 — the exact number App's three cast-time call sites (_cast,
+  // _quickCastToward's plain and fusion branches) must each pass as BOTH
+  // abilities.cast()'s `distance` and _dashDisplace's teleport `range`.
+  const wantLv3 = settings.dashstrike.range * 1.3;
+  assert.ok(
+    Math.abs(scaledDashRange(3) - wantLv3) < 1e-9,
+    `scaledDashRange: Lv3 ×1.3 (want ${wantLv3}, got ${scaledDashRange(3)})`
+  );
+  assert.ok(
+    Math.abs(scaledDashRange(5) - wantLv3) < 1e-9,
+    "scaledDashRange: Lv5 keeps Lv3's range (dashstrike carries no lv5 range entry, only damage)"
+  );
+
+  // Downstream: feeding the scaled range into dashTarget (the exact function
+  // _dashDisplace calls) lands the teleport at the scaled distance, not the
+  // base one — pins the actual regression the reviewer caught (the teleport
+  // used to scale independently while the cast distance stayed raw).
+  const atLv1 = dashTarget(0, 0, 0, 1, scaledDashRange(1), 100);
+  const atLv3 = dashTarget(0, 0, 0, 1, scaledDashRange(3), 100);
+  assert.ok(Math.abs(atLv1.z - settings.dashstrike.range) < 1e-9, 'scaledDashRange: Lv1 dashTarget lands at the base range');
+  assert.ok(
+    Math.abs(atLv3.z - wantLv3) < 1e-9,
+    'scaledDashRange: Lv3 dashTarget lands ×1.3 further out — the same number the cast distance now shares'
+  );
+
+  console.log('ok  M6 T12 fix round: scaledDashRange (single source for cast distance + teleport)');
 }
 
 /* ---- M6 T6: dashLineHits — dash path damage, self-resolved (D-M3-8) ---- */

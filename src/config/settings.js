@@ -2249,11 +2249,11 @@ export const settings = {
 
   // --- 金 dashstrike: 弑神一闪, a short teleport-slash (DashStrikeSkill, T6) ---
   dashstrike: {
-    // M6 T12: 冲程 (reach) scales `range`, read only at the physical-teleport
-    // call site (App#_dashDisplace) — implementer's choice, needs review: the
-    // ability's own cast `distance` (ribbon/damage-line length) still comes
-    // from AimController's unscaled drag, out of this task's file scope, so a
-    // max-range Lv3+ dash can teleport slightly past where the line swept.
+    // M6 T12: 冲程 (reach) scales `range` — a single source of truth
+    // (DashStrikeSkill.js's exported `scaledDashRange(level)`, fix round)
+    // feeds both the ability's own cast distance (damage line/ribbon/flash)
+    // and App#_dashDisplace's physical teleport, so the body always lands
+    // exactly where the line already reached.
     breakpoints: { lv3: { range: 1.3 }, lv5: { damage: 1.4 } },
     range: 8, minRange: 0, speed: 40, cooldown: 7, manaCost: 30, castAnim: 'cast1',
     // controller-ruled (T6 dispatch): 50×7s×0.8窄线 = 280; 位移+i帧 utility 由
