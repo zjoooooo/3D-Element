@@ -1,0 +1,96 @@
+# M8 第二波主动 + 系统清账 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: subagent-driven-development(或按 CLAUDE.md 的 SDD 循环手工执行)。逐任务:断言先行(RED)→ 实现 → 双套件绿 → 浏览器逐项 → 独立评审 diff → 修复轮 → 提交。
+
+**Goal:** spec §12 v2 首批——十个新主动(每系两个,§4.3 矩阵内),全部踩既有机器落地;同时清 M7 移交的系统债(ctx.rng 接线、marsh 字面量入行、负拉力 pin)。
+
+**Architecture:** 零新依赖、零新模板类膨胀:四技纯数据挂现有模板(ZoneBurstSkill/LineSweepSkill),两技共享一个新的 TimedAuraSkill 小模板(T4 锋岩星阵机器的登记化),三技各一个小类(处决线/随机落雷/迫击弹幕——全部由 M6/M7 已建构件拼装),**唯一的新判定形状是扇形**('coneTick' kind + `EnemySystem.damageCone`,烈焰喷吐)。CombatSystem 三个 case 各加一个可选行字段(sweep.knockback / lineTick.slowFactor / aura.slowFactor),全部 boulder-式"可选字段,缺省语义零变"先例。
+
+**Tech Stack:** 既有 Three.js + 手写 GLSL;程序化几何/贴花/粒子/丝带复用。
+
+## Global Constraints
+
+- 数值分层铁律:生效值 = settings 基值 × 局内修正层;任何代码不写 settings。
+- 五字段施放不变量(cooldown/_applySequence/autocast/fusionMult/quenched);光环(装备即常驻)豁免;**本批"限时光环型"(磁暴/沙暴)是普通施放**,不豁免(锋岩星阵先例)。
+- 固定步长、零分配热路径、771ba02 scratch 铁律、InstancedMesh 世界系 `frustumCulled = false`、池化合约、沙盒纯净(新类 bare-ctx 500 tick 不炸)。
+- 锚2:新技 damage ≈ BASE_DPS(50) × cd × 形状系数(窄线1.3/宽线1.0/小圈1.1/大圈0.8/弹道1.2);**扇形系数本计划裁 1.1**(小圈级:波及小、贴脸风险高,待复核);持续型(dps×寿命)对同一预算折算;带检查表(check-game 锚2)EXEMPT/SHAPE_COEF 同步扩容,新技必须入检不许静默豁免。
+- 法力档:本批六个"强档"技 manaCost 30(磁暴/破军贯穿/冰雹风暴/流火雨/雷暴领域/石柱擎天),四个"持续/轻档"0(荆棘之路/潮汐涌浪/沙暴领域/烈焰喷吐);既有"exactly five tactical @30"断言**有意**改写为档位表驱动(裁定待复核)。
+- 双语 strings;提交规范同 M7(自然句 subject + Co-Authored-By 尾注);每任务提交,推送按环境交付要求走 claude/* 分支。
+- 浏览器验证纪律(M7 勘误):pump 模式;测试敌 hp 抬高防换索引;机制窗对齐敌滞留时段;量测窗严格跨界;**验证在飞时禁改 src/settings/check-game**(vite 全量重载)。
+
+## 数值表(锚定;dps 型按 dps×寿命≈预算折算;utility 重的行伤害占预算 55-75%)
+
+| id | 名 | 系 | 形 | kind | cd | mana | 关键数值(预算) |
+|---|---|---|---|---|---|---|---|
+| cyclonecut | 磁暴 | 金0 | 小圈1.1 | aura(timed) | 6 | 30 | life 2.5, radius 3.0, band 0.8(环带), dps 80(200/330), **kbMult -1.2 拽向圆心** |
+| piercelance | 破军贯穿 | 金0 | 窄线1.3 | self | 8 | 30 | 线长 14, width 0.8, damage 320(/520), **executeBelow 90**(绝对斩杀线,金禁咒同语义) |
+| stormfield | 雷暴领域 | 木1 | 大圈0.8 | self | 9 | 30 | life 6, radius 4.5, 每 0.75s 一雷单击 52(7-8 雷 ≈390/360, 略超以补无控) |
+| thornroad | 荆棘之路 | 木1 | 持续线 | lineTick | 7 | 0 | life 4(类相位), width 1.2, dps 55(220), **slowFactor 0.3/1s 缠绕**(lineTick 新可选字段) |
+| tidalsurge | 潮汐涌浪 | 水2 | 宽线1.0 | sweep | 5 | 0 | damage 190(/250), width 2.6, **knockback 7 水墙推退**(sweep 新可选字段) |
+| hailstorm | 冰雹风暴 | 水2 | 大圈0.8 | burst | 8 | 30 | waves 6×{delay 0.35k, damageMult 1/6, radiusMult 0.6→1.0}, 总 320(/320), radius 3.8, slowFactor 0.25/1s |
+| flamebreath | 烈焰喷吐 | 火3 | 扇形1.1 | **coneTick** | 6 | 0 | life 1.2, halfAngle 0.55rad, range 5.5, dps 200(240/330, 贴脸补偿) |
+| mortarrain | 流火雨 | 火3 | 弹道1.2 | burst+waves | 7 | 30 | 5 弹×80(400/420), bombRadius 1.6, 散布 ≤3.5m(类挪 position, 地心火山机器), burn 无 |
+| sandfield | 沙暴领域 | 土4 | 大圈0.8 | aura(timed) | 9 | 0 | life 4, radius 4.2, band=radius 实心, dps 55(220/360), **slowFactor 0.3/0.8s 迟钝**(aura 新可选字段), kbMult 0 研磨 |
+| stonepillar | 石柱擎天 | 土4 | 小圈1.1 | burst | 7 | 30 | damage 300(/385), radius 2.6, **knockback 12 抛飞**, stunTime 0.5 |
+
+预算核对:磁暴 200+聚怪 ✓;破军 320+处决 ✓;雷暴 390 纯伤无控 ✓;荆棘 220+缠绕 ✓;潮汐 190+全线推退 ✓;冰雹 320 ✓;喷吐 240+熄灭近战联动 ✓;流火 400 ✓;沙暴 220+迟钝+研磨挂印 ✓;石柱 300+抛飞+晕 ✓。战术档强度一致。
+
+---
+
+### Task 1: 清账 + 十技骨架(ELEMENTS/settings/strings/带检查)
+
+**Files:** `src/core/App.js`(run ctx 注入 `rng: this.runRng` — 沙盒不注)/ `src/abilities/fusions/VineBlazeSkill.js`+`ThunderMarshSkill.js`(rng 在场时走随机支,回退保留)/ `src/config/settings.js`(marsh 0.5 → `combat.fusions['2+1'].slowHold`;十技顶层块+combat 行+wuxingOf+ELEMENTS+ELEMENT_META;`settings.combat` 带检查所需字段齐)/ `src/ui/strings.js`(十技 zh+en)/ `src/run/CombatSystem.js`(marsh 读 slowHold)/ `scripts/check-game.mjs`(锚2 SHAPE_COEF/EXEMPT 扩容;mana 档位表断言改写;rng 注入断言:沙盒 ctx 无 rng pin)
+
+- [ ] 断言 RED:wuxingOf 十行;ELEMENT_META 十行含双语;锚2 新表逐技带内;mana 档位表;marsh slowHold 行为逐字节等价(0.5);ctx.rng:假 rng 注入后 forkPlacement/雷种子走随机支、不注入回退确定性(既有断言不动)。
+- [ ] 实现(kind 未实现的技先由 registry null 安全 no-op——M7 T1 先例);双套件绿;浏览器:升级池能刷出新技卡(至少抽查 2 张)、施放 null-op 不炸、沙盒零变化。
+- [ ] Commit `Seed ten new arts on the roster and pay the machine debts down`
+
+### Task 2: 纯数据四技(冰雹风暴/石柱擎天 → ZoneBurstSkill;潮汐涌浪/荆棘之路 → LineSweepSkill)
+
+**Files:** `src/abilities/AbilityManager.js`(四注册)/ `src/run/CombatSystem.js`(sweep 增可选 `knockback`(burst 同构);lineTick 增可选 `slowFactor/slowTime`(zoneTick 同构))/ `scripts/check-game.mjs`
+
+- [ ] 断言 RED:sweep-kb(潮汐行敌被推、无 kb 行零回归)/lineTick-slow(荆棘减速、beam 行零回归)/冰雹六波时点与总额/石柱 kb+晕;四技经 CombatSystem 全链 dps 落账。
+- [ ] 实现+双套件+浏览器(四技逐个施放:水墙推退可见/雹幕六响/石柱抛飞/荆棘藤路缠绕)→ Commit `Four arts ride the old templates: surge, hail, thorn and pillar`
+
+### Task 3: TimedAuraSkill 模板 + 磁暴/沙暴领域
+
+**Files:** Create `src/abilities/templates/TimedAuraSkill.js`(锋岩星阵机器登记化:onSpawn 停点/静置/impactDuration=life/棱晶换风沙与刃环两套外观参数化)/ `src/abilities/AbilityManager.js` / `src/run/CombatSystem.js`(aura 增可选 `slowFactor/slowTime`)/ `scripts/check-game.mjs`
+
+- [ ] 断言 RED:aura-slow 字段(沙暴敌迟钝、bladeorbit 零回归);磁暴负 kbMult 拉向圆心(kbX 指向圆心 pin,T4 kbScale 负值语义首用);环带 0.8 环切几何;沙暴实心盘+kbMult 0;两技 3s/4s 到期回收;PrismArraySkill 不受模板化影响(如提取共性,锋岩星阵断言逐字节不动)。
+- [ ] 实现+双套件+浏览器 → Commit `One timed-ring template, two new fields: the magnet and the sandstorm`
+
+### Task 4: 破军贯穿 + 雷暴领域(两小类)
+
+**Files:** Create `src/abilities/PierceLanceSkill.js`(dashLineHits 采样 + `enemies.executeBelow(线上各采样点, 90)`——金禁咒机器)/ Create `src/abilities/StormFieldSkill.js`(ThunderMarsh 雷机器去池化:每 0.75s 单击 52,rng 种子,T1 接线后随机)/ 注册 / `scripts/check-game.mjs`
+
+- [ ] 断言 RED:破军线伤 once 去重+斩杀线(89hp 敌死、91hp 敌活);雷暴 6s ≈8 雷、单击无链、域外不落;两类 bare-ctx 500 tick。
+- [ ] 实现+双套件+浏览器 → Commit `A lance that finishes and a field where the sky keeps answering`
+
+### Task 5: 扇形判定全链 + 烈焰喷吐
+
+**Files:** `src/run/EnemySystem.js`(`damageCone(origin, dirX, dirZ, halfAngle, range, amt, wux, wuxB)`——角度判定 `cos⁻¹(dot)`≤halfAngle 且 dist≤range+敌半径 pad;damage 循环同构含 kb/flash/_applyWux)/ `src/run/Targets.js`(透传)/ `src/run/CombatSystem.js`(新 case 'coneTick':travel+impact 窗,dps×step,读 ability.position+direction)/ Create `src/abilities/FireBreathSkill.js`(1.2s 引导,锥形粒子+光)/ 注册 / `scripts/check-game.mjs`
+
+- [ ] 断言 RED:锥几何(正前中/侧缘 pad 内中/背后与超距不中);coneTick dps 记账;窗外(fade)不判;沙盒退化;喷吐全链落账。
+- [ ] 实现+双套件+浏览器(龙息扇面所见即所判)→ Commit `Teach the horde what a cone of fire means`
+
+### Task 6: 流火雨(迫击弹幕)
+
+**Files:** Create `src/abilities/MortarRainSkill.js`(地心火山 waves+散布机器:类挪 position 至各弹落点,无锥无熔岩)/ 注册 / `scripts/check-game.mjs`
+
+- [ ] 断言 RED:五弹时点/散布 ≤3.5(rng 注入与回退双支)/waveIndex 手交;浏览器五响五圈。
+- [ ] Commit `Let the sky mortar the field five shells deep`
+
+### Task 7: 回归 + 勘误 + 收官
+
+- [ ] 三套件 + sim(带内即过,越带停下报数——十技入池改变 build 空间,重点看基线中位与熟练胜率)/ README 技能矩阵段更新 / 浏览器全项(十技逐个+两三个旧技抽查+融合回归抽查+沙盒)/ 勘误节回填+CLAUDE.md 状态行 → Commit `Ten more arts take the field and the ledger closes clean`
+
+## Self-Review 结论(已执行)
+
+- **Spec 覆盖**:十技全部出自 §4.3 矩阵原文,机制描述逐条对应(拽向圆心+环切/处决残血/随机落雷/缠绕/水墙推退/持续轰击/扇形龙息/迫击炮弹幕/研磨+迟钝/石柱抛飞——「转向迟钝」以 slow 近似,裁定待复核);§12 分期顺序(其余主动分批第一批)与「模板类×数据配置」实现分层原文一致。
+- **机器复用核对**:aura-timed(T4)/waves(T3)/散布挪位(T3)/chainbolt 雷(T6)/executeBelow(M5 禁咒)/dashLineHits(M6)/kbScale(T4)全部既有;新增仅 'coneTick' 一个 kind、三个可选行字段、一个登记化模板类。
+- **占位符扫描**:无 TBD;数值全表;每任务断言列表含 RED 判别点与零回归 pin。
+- **风险自查**:mana 档位断言改写是既有测试的**有意**变更(表驱动+注释,勘误标注);TimedAuraSkill 提取不许动锋岩星阵一字节(断言锁);扇形系数 1.1 是本计划新裁(锚2 表原无扇形)。
+
+## 执行后勘误(执行会话填写)
+
+(待回填)
