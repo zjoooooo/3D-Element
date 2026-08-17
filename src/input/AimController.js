@@ -58,6 +58,14 @@ export class AimController extends EventEmitter {
     /** Unit vector on the ground plane. */
     this.direction = new Vector3(0, 0, 1);
     this.distance = 0;
+    /** M7 T1 fix round: the ground distance `_resolve()` computed BEFORE
+     * clamping it into `distance` — a fusion cast has no single element's
+     * `config` to clamp against (it clamps against its own row's `range`
+     * itself, in App.js), so it needs the honest raw number, not the
+     * already-clamped-to-someone-else's-range one. Sticky same as
+     * `direction`/`yaw`: left untouched on a degenerate/no-pointer resolve
+     * rather than snapped to 0. */
+    this.rawDistance = 0;
     this.yaw = 0;
     /** False while the pointer is nearer than the ability's `minRange`. */
     this.valid = true;
@@ -185,6 +193,7 @@ export class AimController extends EventEmitter {
           this.direction.copy(this._flat).multiplyScalar(1 / raw);
           this.yaw = Math.atan2(this.direction.x, this.direction.z);
           this.valid = raw >= c.minRange;
+          this.rawDistance = raw;
           this.distance = MathUtils.clamp(raw, Math.max(0.2, c.minRange), Math.max(0.4, c.range));
           return;
         }

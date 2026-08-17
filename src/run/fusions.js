@@ -13,6 +13,14 @@ export const isFusionId = (id) => typeof id === 'string' && id.startsWith('fusio
 export const fusionParents = (id) => id.slice('fusion:'.length).split('+'); // [elementA, elementB]
 export const fusionId = (a, b) => `fusion:${a}+${b}`;
 
+/** pairKeyOf's own memo — `id` → its computed key. Unbounded by construction
+ * but not in practice: a fusion id is `fusion:${a}+${b}` over a fixed, small
+ * element roster, so the whole id space (every FEEDS-legal (a, b) pair that
+ * could ever exist) is a small constant, not something that grows with
+ * playtime — CombatSystem#tick() calls pairKeyOf() once per fused ability
+ * per tick (M7 T1 fix round: was re-splitting the id string every time). */
+const _pairKeyCache = new Map();
+
 /**
  * A fusion id's pair-key into `settings.fusions`/`settings.combat.fusions`
  * (spec §4.7 table) — '母wux+子wux', e.g. `fusion:thunder+fireball` → '1+3'.
@@ -22,6 +30,11 @@ export const fusionId = (a, b) => `fusion:${a}+${b}`;
  * FEEDS check), so this never has to sort or guess which half is which.
  */
 export function pairKeyOf(id) {
-  const [a, b] = fusionParents(id);
-  return fusionKey(settings.combat.wuxingOf[a], settings.combat.wuxingOf[b]);
+  let key = _pairKeyCache.get(id);
+  if (key === undefined) {
+    const [a, b] = fusionParents(id);
+    key = fusionKey(settings.combat.wuxingOf[a], settings.combat.wuxingOf[b]);
+    _pairKeyCache.set(id, key);
+  }
+  return key;
 }

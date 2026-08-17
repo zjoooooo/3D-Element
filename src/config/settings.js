@@ -490,9 +490,13 @@ export const settings = {
      * (waves/vulnAmt/vulnTime/the 'marsh' kind itself) already sit here
      * inert — `tick()`'s switch `default`s to a no-op for a kind it doesn't
      * know yet, so an unimplemented row never throws, just does nothing.
+     * The two self-resolved rows carry an explicit `kind: 'self'` sentinel,
+     * same as `fireball`/`dashstrike`/`chainbolt` above — documents "this
+     * class resolves its own hits" on purpose rather than leaving `tick()`
+     * skip it as an accidental side effect of an empty object.
      */
     fusions: {
-      '1+3': {}, // 业火燎原 (T2, self-resolved — mirrors fireball/dashstrike/chainbolt's kind:'self')
+      '1+3': { kind: 'self' }, // 业火燎原 (T2, self-resolved — mirrors fireball/dashstrike/chainbolt)
       '3+4': {
         // 地心火山: one bomb's own stats; T3 repeats this 3× via `waves`
         // (extraWave's data-table generalisation) at the given delays.
@@ -507,7 +511,7 @@ export const settings = {
         burnDps: 30, burnTime: 4 // 熔岩池 — rides the existing burst-kind burn channel
       },
       '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3 }, // 锋岩星阵 (T4); band===radius degenerates damageRing to a solid disc already
-      '0+2': {}, // 霜刃洪流 (T5, self-resolved — fireball precedent)
+      '0+2': { kind: 'self' }, // 霜刃洪流 (T5, self-resolved — fireball precedent)
       '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, healInside: 6 } // 回春雷泽 (T6) — 'marsh' isn't a case in tick()'s switch yet, so this row no-ops safely until then
     },
 

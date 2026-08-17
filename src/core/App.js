@@ -908,10 +908,20 @@ export class App {
       // neither. So resolving on whatever element `aim` currently happens to
       // be armed with is already correct — nothing to swap out and restore.
       // The fusion's own range now lives in settings.fusions, not a parent.
+      //
+      // M7 T1 fix round (reviewer-caught): the target point must land where
+      // the cursor actually is, clamped to the fusion's own range — same
+      // "zone" contract every other point/zone cast follows (spec, and
+      // _quickCastToward's own doc a few lines down) — not always thrown to
+      // max range. `aim.distance` is already clamped to *whatever element
+      // is currently armed*, which is the wrong range for a fusion, so this
+      // reads the pre-clamp `aim.rawDistance` (AimController's own fix
+      // round addition) and clamps it against the fusion's row instead.
       const row = settings.fusions[pairKeyOf(element)];
       this.aim._resolve();
-      const tx = this.aim.origin.x + this.aim.direction.x * row.range;
-      const tz = this.aim.origin.z + this.aim.direction.z * row.range;
+      const dist = Math.min(this.aim.rawDistance, row.range);
+      const tx = this.aim.origin.x + this.aim.direction.x * dist;
+      const tz = this.aim.origin.z + this.aim.direction.z * dist;
       this._quickCastToward(element, tx, tz, false);
       return;
     }
@@ -1198,14 +1208,23 @@ export class App {
    * `_resolve()` applies to every aimed distance so a cast can never be
    * asked to land closer than the ability's own minimum.
    *
-   * A fusion seat (spec §4.7) fires both parents at this same point,
-   * back-to-back, each independently clamped to its own range — the run's
-   * fusion budget (scaled by the fusion's own level) rides as
-   * `ability.fusionMult`, and the cooldown/sequence/echo bookkeeping below
-   * happens once, on the fusion id, never on either parent's own key.
-   * `autocast` tells apart a background seat's own cast (the only caller
-   * until this task) from `_quickCast`'s manual fusion hand-off, which
-   * resolves a pointer-aimed target point and forwards here as `false`.
+   * A fusion seat (spec §4.7, M7 T1) casts ONE bespoke ability at this
+   * point — `element` is the fusion id itself, not a parent, and it spawns
+   * exactly once, not per-parent back-to-back the way the pre-M7 skeleton
+   * did. Its row (`settings.fusions[pairKeyOf(element)]`) supplies the
+   * cooldown/range/castAnim a plain element would otherwise read off its
+   * own `settings[element]`; `fusionMult` scales off the fusion's OWN level
+   * (`1 + settings.fusion.levelMult × (lv-1)`, the retired per-cast ×budget
+   * folded into each row's Lv1 numbers instead); `quenched` spends once
+   * against the generated half (子系, spec §4.7 挂印取子系), never per
+   * parent. A plain element's per-parent aura skip is gone along with the
+   * loop it guarded — an aura half used to be excluded here only because
+   * the old loop would otherwise recast it, and there's no loop left to
+   * recast anything. `autocast` tells apart a background seat's own cast
+   * (the only caller until this task) from `_quickCast`'s manual fusion
+   * hand-off, which resolves a pointer-aimed target point (clamped to the
+   * fusion's own range, same zone contract as the paragraph above) and
+   * forwards here as `false`.
    *
    * `demo` (spec §6 新技能即时演示): `_onUpgradeChoice`'s free show-off shot
    * for a freshly acquired active. Every per-ability field below is still
