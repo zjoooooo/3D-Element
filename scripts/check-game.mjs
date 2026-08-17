@@ -36,6 +36,7 @@ import {
 } from '../src/abilities/fusions/VineBlazeSkill.js';
 import { VolcanoSkill } from '../src/abilities/fusions/VolcanoSkill.js';
 import { PrismArraySkill } from '../src/abilities/fusions/PrismArraySkill.js';
+import { BladeTideSkill } from '../src/abilities/fusions/BladeTideSkill.js';
 import { FUSION_CLASSES } from '../src/abilities/AbilityManager.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
@@ -3514,6 +3515,221 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   ability.destroy();
 
   console.log('ok  M7 T4: PrismArraySkill lifecycle (park/static/3s window/prism recycle), headless');
+}
+
+/* ---- M7 T5: BladeTideSkill (霜刃洪流) — headless lifecycle against the real horde ---- */
+{
+  assert.equal(FUSION_CLASSES['0+2'], BladeTideSkill, "AbilityManager: '0+2' resolves to BladeTideSkill");
+
+  const cfg = settings.fusions['0+2'];
+  assert.equal(cfg.width, 1.6, "settings.fusions['0+2']: 数值表 width");
+  assert.equal(cfg.outDamage, 85, "settings.fusions['0+2']: 去程 85");
+  assert.equal(cfg.backDamage, 125, "settings.fusions['0+2']: 回程 125");
+  assert.equal(cfg.backSlowedMult, 2, "settings.fusions['0+2']: slowed 回程 ×2 (必暴 250)");
+  assert.equal(cfg.outTime, 0.5, "settings.fusions['0+2']: 去程 0.5s");
+  assert.equal(cfg.hoverTime, 0.2, "settings.fusions['0+2']: 悬停 0.2s");
+  assert.equal(cfg.backTime, 0.5, "settings.fusions['0+2']: 回程 0.5s");
+  for (const key of ['lightColor', 'lightIntensity', 'lightRadius']) {
+    assert.ok(cfg[key] !== undefined, `settings.fusions['0+2']: ${key} present (NaN-poison guard)`);
+  }
+
+  const enemies = new EnemySystem(createRng(41));
+  const burstCalls = [];
+  const ctx = {
+    targets: enemies, // duck-typed: damageOnce is all the tide needs
+    enemies,
+    stats: { book: () => {} },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    bursts: { spawn: (mode) => burstCalls.push(mode) },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    },
+    mods: null
+  };
+
+  // Water (元素 2) bodies: neutral to BOTH the tide's candidates (子 2 水 is
+  // its own element — no self-overcome; 母 0 金: BEATS[0]=1 ≠ 2, BEATS[2]=3
+  // ≠ 0) — every landed amount below asserts EXACT (×1 matchup).
+  const e1 = enemies.spawnAt(2.7, 0, 0, 2); // on the line, unslowed
+  const e2 = enemies.spawnAt(5.4, 0, 0, 2); // on the line, SLOWED — the crit target
+  const e3 = enemies.spawnAt(4.5, 2.5, 0, 2); // 2.5m lateral: past width+pad, never touched
+  const e4 = enemies.spawnAt(6.3, 1.9, 0, 2); // 1.9m lateral: outside the nominal 1.6 width, inside via its own 0.45 body pad
+  for (const i of [e1, e2, e3, e4]) enemies.hp[i] = 5000;
+  enemies.slowed[e2] = 0.4;
+  enemies.slowT[e2] = 9;
+  const hp0 = [enemies.hp[e1], enemies.hp[e2], enemies.hp[e3], enemies.hp[e4]];
+
+  const ability = new BladeTideSkill(ctx, fusionId('dashstrike', 'iceshield')); // 金(0)+水(2) → '0+2'
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+
+  ability.update(1 / 60);
+  assert.equal(ability.phase, 'impact', 'BladeTide: reaches IMPACT on the very first tick (the class owns its own timeline)');
+  assert.ok(
+    Math.abs(ability.impactDuration - (cfg.outTime + cfg.hoverTime + cfg.backTime)) < 1e-9,
+    'BladeTide: impact window = out + hover + back'
+  );
+
+  // ---- 去程: 0.533s in, the outbound sweep is complete ----
+  for (let i = 0; i < 32; i++) ability.update(1 / 60);
+  assert.ok(Math.abs(hp0[0] - enemies.hp[e1] - cfg.outDamage) < 1e-3, '去程: on-line enemy takes exactly one 85 (damageOnce dedup across overlapping samples)');
+  assert.ok(Math.abs(hp0[1] - enemies.hp[e2] - cfg.outDamage) < 1e-3, '去程: the slowed enemy takes the same flat 85 outbound');
+  assert.equal(enemies.hp[e3], hp0[2], '去程: past the band takes nothing');
+  assert.ok(Math.abs(hp0[3] - enemies.hp[e4] - cfg.outDamage) < 1e-3, '去程: inside the band via body pad takes one 85');
+
+  // ---- 悬停: no damage moves ----
+  const hover = [enemies.hp[e1], enemies.hp[e2], enemies.hp[e4]];
+  for (let i = 0; i < 8; i++) ability.update(1 / 60); // ≈0.533 → 0.667, still hovering
+  assert.deepEqual([enemies.hp[e1], enemies.hp[e2], enemies.hp[e4]], hover, '悬停: the 0.2s hold deals nothing');
+
+  // ---- 回程: slowed ×2 (必暴 250), everyone else 125, each exactly once ----
+  for (let i = 0; i < 40; i++) ability.update(1 / 60); // → ≈1.33s, back sweep complete
+  assert.ok(
+    Math.abs(hp0[1] - enemies.hp[e2] - cfg.outDamage - cfg.backDamage * cfg.backSlowedMult) < 1e-3,
+    '回程: the slowed enemy eats 250 — 必暴 (out 85 + back 250 total)'
+  );
+  assert.ok(
+    Math.abs(hp0[0] - enemies.hp[e1] - cfg.outDamage - cfg.backDamage) < 1e-3,
+    '回程: an unslowed enemy eats 125 (out 85 + back 125 — two casts of the same tide, two ids)'
+  );
+  assert.ok(
+    Math.abs(hp0[3] - enemies.hp[e4] - cfg.outDamage - cfg.backDamage) < 1e-3,
+    '回程: the band-pad enemy eats its own 125 exactly once'
+  );
+  assert.equal(enemies.hp[e3], hp0[2], '回程: past the band still takes nothing');
+  assert.ok(burstCalls.length > 0, '回程: the slowed crit pops an ice flower (bursts.spawn fired)');
+
+  // ---- cleanup: both cast ids leave _hitMemory with the cast ----
+  assert.ok(enemies._hitMemory.size >= 2, 'BladeTide: two live dedup sets while the cast runs (out id + back id)');
+  while (!ability.isFinished) ability.update(0.1);
+  ability.destroy();
+  assert.equal(enemies._hitMemory.size, 0, 'BladeTide: destroy releases BOTH cast ids — no _hitMemory leak');
+
+  // ---- pooled re-cast, quenched: every landed amount ×1.5 ----
+  const q = enemies.spawnAt(3.6, 0, 0, 2);
+  enemies.hp[q] = 5000;
+  const qhp = enemies.hp[q];
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = true;
+  for (let i = 0; i < 90; i++) ability.update(1 / 60);
+  assert.ok(
+    Math.abs(qhp - enemies.hp[q] - (cfg.outDamage + cfg.backDamage) * 1.5) < 1e-3,
+    'BladeTide: a quenched re-cast lands (85+125)×1.5 on a fresh unslowed enemy'
+  );
+  ability.destroy();
+
+  // Hugging-pair cross-frame corner (review fix round): a SLOWED body one
+  // frame window down-line of a plain one, inside point-splash reach
+  // (<0.5m). Without the slowed pass's window lookahead, the plain body's
+  // 125 splash claims the slowed one a frame early and it is UNDER-paid its
+  // crit. The pin: the slowed body lands exactly 85+250; the plain hugger
+  // may legitimately be OVER-paid by the crit's own splash (allowed error
+  // direction) so it only pins a floor.
+  {
+    const hug = new EnemySystem(createRng(43));
+    const hugCtx = { ...ctx, targets: hug, enemies: hug };
+    const uPlain = hug.spawnAt(5.0, 0, 0, 2);
+    const sSlow = hug.spawnAt(4.7, 0.25, 0, 2); // 0.39m from the plain body — inside splash reach
+    hug.hp[uPlain] = 5000;
+    hug.hp[sSlow] = 5000;
+    hug.slowed[sSlow] = 0.4;
+    hug.slowT[sSlow] = 9;
+    const tide = new BladeTideSkill(hugCtx, fusionId('dashstrike', 'iceshield'));
+    tide.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+    tide.autocast = false;
+    tide.fusionMult = 1;
+    tide.quenched = false;
+    for (let i = 0; i < 90; i++) tide.update(1 / 60);
+    tide.destroy();
+    assert.ok(
+      Math.abs(5000 - hug.hp[sSlow] - (cfg.outDamage + cfg.backDamage * cfg.backSlowedMult)) < 1e-3,
+      'BladeTide: a slowed body hugging a plain one is NEVER under-paid its 250 (slowed-pass window lookahead)'
+    );
+    assert.ok(
+      5000 - hug.hp[uPlain] >= cfg.outDamage + cfg.backDamage - 1e-3,
+      'BladeTide: the plain hugger gets at least its own 85+125 (over-pay via crit splash is the allowed direction)'
+    );
+  }
+
+  console.log('ok  M7 T5: BladeTideSkill lifecycle (out dedup/hover/back crit/double id/release/quench/hug corner), headless');
+}
+
+/* ---- M7 T5: wux threading — 子2水 + 母0金 (f901b73 convention; the plan
+   body's own (子0, 母2) line was the backwards twin it already fixed once) ---- */
+{
+  const calls = [];
+  const fakeTargets = {
+    damageOnce: (castId, p, r, amt, wux, wuxB) => (calls.push({ amt, wux, wuxB }), 0)
+  };
+  const enemies = new EnemySystem(createRng(42));
+  enemies.spawnAt(4, 0, 0, 2); // one body on the line so the back sweep judges someone
+  const ctx = {
+    targets: fakeTargets,
+    enemies,
+    stats: { book: () => {} },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    },
+    mods: null
+  };
+  const ability = new BladeTideSkill(ctx, fusionId('dashstrike', 'iceshield'));
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  for (let i = 0; i < 90; i++) ability.update(1 / 60);
+  ability.destroy();
+  assert.ok(calls.length > 0, 'BladeTide: the tide actually swept the fake targets');
+  assert.ok(
+    calls.every((c) => c.wux === 2 && c.wuxB === 0),
+    'BladeTide: every hit carries wux=2 (子 water), wuxB=0 (母 metal) — pairKeyOf 母+子 order, NOT the plan body\'s backwards line'
+  );
+  // Both programs explicitly ran (review catch: every() alone is vacuously
+  // green if a broken gate silently skips one whole sweep).
+  const cfgT5 = settings.fusions['0+2'];
+  assert.ok(calls.some((c) => Math.abs(c.amt - cfgT5.outDamage) < 1e-9), 'BladeTide: the OUT sweep is represented in the recorded calls (85s present)');
+  assert.ok(calls.some((c) => Math.abs(c.amt - cfgT5.backDamage) < 1e-9), 'BladeTide: the BACK sweep is represented in the recorded calls (125s present)');
+  console.log('ok  M7 T5: BladeTide wux threading (子2水/母0金)');
+}
+
+/* ---- M7 T5: BladeTideSkill sandbox null-safety — VFX only, zero errors ---- */
+{
+  const ctx = {
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    }
+    // no targets, no enemies, no stats, no bursts, no camera — the sandbox
+    // shape (fusions unreachable there; the class must tick pure-VFX without
+    // throwing, and the back sweep must skip its slowed reads entirely).
+  };
+  const ability = new BladeTideSkill(ctx, fusionId('dashstrike', 'iceshield'));
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  assert.doesNotThrow(() => ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9), 'BladeTide: spawn is null-safe');
+  assert.doesNotThrow(() => {
+    for (let i = 0; i < 500; i++) ability.update(1 / 60);
+  }, 'BladeTide: a full cast ticks with no targets/enemies/camera and never throws');
+  assert.doesNotThrow(() => ability.destroy(), 'BladeTide: destroy is null-safe');
+  console.log('ok  M7 T5: BladeTideSkill sandbox null-safety (VFX only, zero errors)');
 }
 
 /* ---- M7 T4: PrismArraySkill sandbox null-safety — VFX only, zero errors ---- */

@@ -17,6 +17,7 @@ import { isFusionId, pairKeyOf } from '../run/fusions.js';
 import { VineBlazeSkill } from './fusions/VineBlazeSkill.js';
 import { VolcanoSkill } from './fusions/VolcanoSkill.js';
 import { PrismArraySkill } from './fusions/PrismArraySkill.js';
+import { BladeTideSkill } from './fusions/BladeTideSkill.js';
 
 /**
  * Registry: adding an ability means adding one line here.
@@ -81,7 +82,7 @@ export const FUSION_CLASSES = {
   '1+3': VineBlazeSkill, // 业火燎原 (T2)
   '3+4': VolcanoSkill, // 地心火山 (T3)
   '4+0': PrismArraySkill, // 锋岩星阵 (T4)
-  '0+2': null, // 霜刃洪流 (T5)
+  '0+2': BladeTideSkill, // 霜刃洪流 (T5)
   '2+1': null // 回春雷泽 (T6)
 };
 

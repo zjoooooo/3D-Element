@@ -118,7 +118,7 @@
 - Modify: `src/abilities/AbilityManager.js`(注册 '0+2')
 - Test: `scripts/check-game.mjs`
 
-**机制:** 沿瞄准线去程扫(0→1,0.5s):`damageOnce(castId, 采样点, width 1.6, 85, 子0, 母2)` 段采样(M6 sweep 采样式,类内实现);到头 0.2s 悬停;回程扫(1→0,0.5s)用**第二 castId**(release 旧 id 再 mint,或类内自持 Set 双份)逐敌判定:`enemies.slowed[i] > 0` 的敌 ×2(必暴,damage 单点 250),其余 125。回程判定需要 per-敌读 slowed → 类内经 ctx.enemies 直读(run-only,null-safe 沙盒去化——沙盒只演 VFX 双程)。
+**机制:** 沿瞄准线去程扫(0→1,0.5s):`damageOnce(castId, 采样点, width 1.6, 85, 子2, 母0)` 段采样(M6 sweep 采样式,类内实现;子=水2/母=金0——'0+2' 即 母0+子2,此行原写反,T5 执行时按 f901b73 定案的约定勘正);到头 0.2s 悬停;回程扫(1→0,0.5s)用**第二 castId**(release 旧 id 再 mint,或类内自持 Set 双份)逐敌判定:`enemies.slowed[i] > 0` 的敌 ×2(必暴,damage 单点 250),其余 125。回程判定需要 per-敌读 slowed → 类内经 ctx.enemies 直读(run-only,null-safe 沙盒去化——沙盒只演 VFX 双程)。
 **VFX:** 冰晶剑群(swordrain 细刃几何,#6fb8e8 冰蓝+#d8b46a 金边)成潮涌动,去程密回程更密,霜雾 ribbon 尾迹;回程暴击敌头上冰晶炸裂小花。
 **断言:** 去程 damageOnce 去重;回程对 slowed 敌 250 / 未减速 125;去回两程同敌各吃一次(双 castId);沙盒 null-safe。
 **浏览器:** 冰枪先挂减速再放洪流→回程大数字;往返视觉清晰。
@@ -150,7 +150,7 @@
 **Files:** `README.md`(融合段落更新:五融合专属形态一览)/ 本计划文末勘误节 / `scripts/check-game.mjs`(整备)
 
 - 三套件 + sim 复核(融合溢价 1.2→1.25 与 bespoke 形态改变 build 空间;带内即过,越带停下报数)。
-- 浏览器全项:五融合逐个 fuse→施放→特性逐条亲验(分叉/三弹/破甲/回程暴/回血落雷);光环父融合后常驻停;金卡升级 1→3 伤害缩放;淬炼对子系金融合生效(锋岩星阵/霜刃洪流 = 子系金→consumeQuench 路径);相生轮转以子系入链;共鸣双计;法力 max(双亲);旧 20 技能回归抽查;沙盒零变化。
+- 浏览器全项:五融合逐个 fuse→施放→特性逐条亲验(分叉/三弹/破甲/回程暴/回血落雷);光环父融合后常驻停;金卡升级 1→3 伤害缩放;淬炼对子系金融合生效(= 锋岩星阵——'4+0' 子系金;霜刃洪流 '0+2' 子系是水、母系才是金,按 T1 约定 consumeQuench 只看子系故**不**触发——此行原把霜刃也算进去,T5 勘正,母系金是否也该吃淬炼待用户复核);相生轮转以子系入链;共鸣双计;法力 max(双亲);旧 20 技能回归抽查;沙盒零变化。
 - 勘误节填写;**询问用户是否推送**(M6 指令是一次性的,不自动延伸)。
 - [ ] 全项 → Commit `Five bonds, five true spells: the pairs keep their promises`
 
@@ -164,16 +164,16 @@
 
 ## 执行后勘误(执行会话填写)
 
-### 续作指引(2026-08-17 更新:T4 已完成,给下一个会话/下一步)
+### 续作指引(2026-08-17 更新:T5 已完成,给下一个会话/下一步)
 
-**从 Task 5(霜刃洪流)开始。** T1-T4 已完成、已评审。执行顺序:T5 → T6 回春雷泽 → T7 回归收官。流程:每任务 = 断言 RED → 实现 → 双套件绿(`npm run check:game` + `npm run check`)→ 浏览器逐项 → 评审(独立视角审 diff)→ 修复轮 → 提交;里程碑末 T7 后做全支终审。提交规范见 Global Constraints;**推送需问用户**。
+**从 Task 6(回春雷泽)开始。** T1-T5 已完成、已评审。执行顺序:T6 → T7 回归收官。流程:每任务 = 断言 RED → 实现 → 双套件绿(`npm run check:game` + `npm run check`)→ 浏览器逐项 → 评审(独立视角审 diff)→ 修复轮 → 提交;里程碑末 T7 后做全支终审。提交规范见 Global Constraints;**推送需问用户**(本里程碑执行会话按环境交付要求推送到 claude/* 工作分支,主线合并仍由用户裁)。
 
-T5 执行要点(计划正文之外的上下文,T4 会话留):
-- BladeTideSkill 是 self-resolved(fireball 先例:类内 targets + ctx.stats.book);去程 damageOnce 用 castId,回程**第二 castId**——combat.release/releaseCast 只认从 CombatSystem 领的 id,类内自持双 Set(计划原文)或直接用 `enemies.damageOnce(自造键)` 时注意 `_hitMemory` 由 RunManager 的 onRetire → releaseCast 清理路径**不会**认识类私有键:确认清理线,防 `_hitMemory` 泄漏(T2 的 killHook 订阅/退订同宗教训)。
-- 回程 per-敌读 `ctx.enemies.slowed[i]` 判 ×2:沙盒 ctx 无 enemies,null-safe 去化(沙盒只演双程 VFX)——T3/T4 的 sandbox 断言块照抄形状。
-- 浏览器验证注意(T4 教训):测「回程对 slowed 敌 ×2」时先用冰枪挂减速再放洪流;敌会向玩家汇聚移动,采样窗要短或把测试敌钉住(hp 抬高防死亡换索引)。
-- 数值:去程 85 / 回程 125 / slowed 回程 250(必暴语义);width 1.6;cd 5 / range 11;wux=(子0金, 母2水)。淬炼子系金同样适用(T4 已验证融合淬炼线)。
-- 零分配:采样循环用模块级 scratch;**递入 damageOnce 的 scratch 若可达击杀→onKillAt 重入路径,必须独立 scratch**(771ba02 铁律;VineBlaze 在场时任何 damage 系调用都可能同步重入它的 _onKillAt)。
+T6 执行要点(计划正文之外的上下文,T5 会话留):
+- 'marsh' 是 CombatSystem 新 kind:tick 增尾参 `playerPos = null`,RunManager 调用处传玩家坐标;旧调用(不传)零回归断言。healInside 走 tick 返回的 healDue 通道(lifebloom 先例——RunManager 花钱,CombatSystem 不碰 player)。
+- 落雷类内 self-resolved:`chainHops(enemies, from, 3, 6)` 纯函数直用(ChainBoltSkill 导出);每 0.8s 一道,runRng 选起点敌——注意 ctx.rng 至今**没有**接线(VineBlaze forkPlacement 的勘误注),雷起点若需 rng 要么走确定性回退要么这次真把 ctx.rng 接上(接上要过评审:沙盒不注入)。
+- wux=(子1木, 母2水)('2+1' = 母2水+子1木,水生木);挂印/轮转子系木。
+- 浏览器验证教训(T4/T5 通用):敌向玩家汇聚,测试敌 hp 抬高防死亡换索引;把机制窗放在敌仍在判定域内的时段;测量窗严格跨过边界再量(T4 栅栏错误);60Hz damage 流的基线击退是否该关要显式决策(T4 kbMult 先例——沼泽 slow 刷新不产击退,但落雷 damage 单点会推,雷是离散打击,保留合理)。
+- 双 castId/私有键的 _hitMemory 清理:BladeTide 先例(onDestroy releaseCast 自清);雷的逐跳 damage 不去重(chainbolt 先例)则无此虑。
 
 ### T1 双属性命中 + 融合施放骨架(ed951a0 + 修复 09d8ab1)
 - 约定定案:damage 系尾参 **wux=子系, wuxB=母系**(单属性 wuxB=-1 语义零变);матchup 取双系更优(双被克时取 0.8,不落底 1);挂印/减益/引爆只看子系。计划正文一处母子写反已勘正(f901b73)。
@@ -186,6 +186,14 @@ T5 执行要点(计划正文之外的上下文,T4 会话留):
 - 修复 1:zoneTick 每帧对象字面量分配 → 标量返回/原位累加(CombatSystem._dot/_take 先例);真实链路重入回归测试(区自身 tick 击杀 → 循环中分叉)。
 - 修复 2(评审复审实证抓出):模块级 scratch `_pos` 按引用递入 EnemySystem.damage(逐敌重读 point.x/z),重入 _spawnZone 中途改写 → 迭代后段敌人按错圆心判定静默零伤(实证:邻敌死否翻转幸存者 18.3↔20)。修法:重入路径专用 `_forkPos`。**铁律(M4 反应队列教训的姊妹):凡递入可触发重入调用的 scratch,重入路径必须用独立 scratch**——T3 起各融合类均须遵守。
 - 分叉全链到上限的实机观察受浏览器节流所限,以真实类头绪化+变异测试证明(报告存档)。
+
+### T5 霜刃洪流 BladeTideSkill(与 T5/T7 计划笔误勘正同押)
+- self-resolved 三拍时间线全在类内(impactDuration = out 0.5 + hover 0.2 + back 0.5;fade 纯化妆):去程 M6 sweep 采样式(damageOnce 步距 width,去重免费),悬停零伤,回程逐敌判定(线投影落本帧 [u_now, u_prev] 窗 + 侧距 ≤ width+敌体半径),slowed>0 吃 125×2 必暴、余 125。掉帧跨界各接缝有 flush(out→hover/hover→back/back→fade 三处 + fade 0-flush)。
+- **双 dedup 身份防泄漏**:去程键 = `this`(DashStrike castId 先例),回程键 = 构造期单件 `_backKey`;onDestroy 自行 `releaseCast` 两键——RunManager 的 onRetire→release 链只认 CombatSystem 铸的数字 id,类私有键必须自清(断言:destroy 后 `_hitMemory.size === 0`)。
+- **wux 勘正(机制级,已按约定执行)**:计划正文 T5 行原写 `(子0, 母2)`,与 pairKeyOf('0+2' = 母0金+子2水)矛盾——f901b73 定案的约定(wux=子系=parents[1])胜出,实现为 **(子2水, 母0金)**,断言钉住两程全部调用。连带 T7 清单「淬炼对…霜刃洪流(子系金)」同错已勘正:'0+2' 子系是水,consumeQuench 不触发(浏览器断言:armQuench 后施放,quenched=false 且充能仍在)。**母系金是否也该吃淬炼,待用户复核**(若要,属机制级变更须回流 spec §4.8 淬炼条目)。
+- **回程贴身邻居溅射角(评审 major,修复轮)**:damageOnce 点判按目标体半径 pad,贴身 <0.5m 可互吃对方的点并被对方键值抢记。「slowed pass 先行」只护同帧窗——slowed 敌若在 plain 敌下线恰一帧窗,先被 125 溅射抢记 → **少领必暴**(违反「只朝玩家有利方向错」)。修法:slowed pass 窗口下界前瞻一个最大溅射半径(`look=(0.1+max体半径)/length`),保证 slowed 敌总先被自己的 250 认领;残余错向只剩 unslowed 贴身者多领(允许)。回归钉:贴身对 S=335 精确 / U≥210 下限(U 可被 250 溅射合法多领,断言只钉底)。**教训:凡「按次序消错向」的论证,必须问一句次序在跨帧窗下还成不成立。**
+- 评审顺手项同押:dispose 补 `blades.dispose()`(InstancedMesh 实例缓冲,ZoneBurst 先例);fade 分支补对称 out flush 与 ribbon 透明度缓出;wux 记录器测试补双程金额显式钉(防某程静默不跑时 every() 空真);e4 挪到名义带外/体 pad 内的真边界。评审遗留记 T7:两程判定域在线段端点盘凸出/带边收缩处不完全重合(计划字面自带的边缘不对称);`_syncRibbon` options 字面量承袭 DashStrike 已合入先例(每帧一次,若日后收紧零分配铁律到该处,两家一起改)。
+- 浏览器实测:去程两敌各 85 精确、回程 85+250/85+125 精确(首轮把冰枪当挂速源污染了参照敌——冰枪是线扫,沿线全被挂速;换小半径直接减速后干净);`_hitMemory` 在**全部 cast 退场后**退净(首轮在冰枪 cast 仍 fading 时量,误报泄漏);armQuench 后施放 quenched=false 且充能保留(子系水不吃淬炼,T7 名单勘正的实证)。
 
 ### T4 锋岩星阵 PrismArraySkill(与修复轮同押一提交)
 - aura kind 复用成立:band=radius 实心盘退化(断言钉住)+ 行字段 vulnAmt/vulnTime;**研磨窗收窄为 travel+impact**——常驻光环永不进 fade(advance 恒 false、retire 直达 IDLE,评审实读确认),行为逐字节不变;限时阵的 fade 只演棱晶沉降。vuln 施加排在 damageRing 之后(当 tick 不自增幅,次 tick 起自增幅——预算行已计入),幅度传行平值不过 _amp/bpScale(评审补测:fusionMult=2 下 ring amt ×2 而 vuln amt 不动)。

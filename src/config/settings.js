@@ -2525,7 +2525,17 @@ export const settings = {
       life: 3, prismCount: 5,
       lightColor: '#f5e6c8', lightIntensity: 6, lightRadius: 6
     },
-    '0+2': { cooldown: 5, range: 11, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#d8b46a' }, // 霜刃洪流
+    // M7 T5 (BladeTideSkill): '0+2' picks up its mechanism numbers (数值表:
+    // 去程 85 damageOnce / 回程 125 / slowed 回程 ×2 必暴 / width 1.6; the
+    // plan body's own 0.5s/0.2s/0.5s out-hover-back timeline) and the three
+    // light fields `Ability#_updateLight` reads unconditionally (NaN-poison
+    // guard — same addition every fusion class before it needed).
+    '0+2': {
+      cooldown: 5, range: 11, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#d8b46a', // 霜刃洪流
+      width: 1.6, outDamage: 85, backDamage: 125, backSlowedMult: 2,
+      outTime: 0.5, hoverTime: 0.2, backTime: 0.5,
+      lightColor: '#6fb8e8', lightIntensity: 6, lightRadius: 6
+    },
     '2+1': { cooldown: 7, range: 10, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#7ee08a' } // 回春雷泽
   },
 
