@@ -137,3 +137,7 @@ dist
 
 # Local VFX capture scratch (dev tooling)
 .captures/
+
+# SDD local workbench (task briefs, review packages — CLAUDE.md documents
+# this as ignored; the entry itself was missing until M7 T4)
+.superpowers/

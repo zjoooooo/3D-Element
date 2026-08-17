@@ -379,17 +379,43 @@ export class CombatSystem {
           // (OrbitAuraSkill keeps it pinned there every frame, not the cast's
           // origin) — because the visual is a ring the swords/flames/orbs actually
           // occupy, not a filled disc: an enemy standing on the caster's own feet,
-          // well inside the ring, should take nothing (WYSIWYG).
-          if (ability.phase === 'idle' || ability.phase === 'done') break;
+          // well inside the ring, should take nothing (WYSIWYG). 锋岩星阵 (M7 T4)
+          // rides this same case with band === radius, which degenerates the
+          // annulus to a genuine solid disc (inner edge 0) — no second kind.
+          //
+          // M7 T4: the grind window is TRAVEL+IMPACT only. A permanent aura
+          // (OrbitAuraSkill) lives in TRAVEL until it's retired straight to
+          // IDLE and never fades, so this changes nothing for it; a TIMED
+          // aura cast (PrismArraySkill, the first one) budgets its whole
+          // grind as its impactDuration (the row's own 3s), and its cosmetic
+          // sink tail (FADE) must not keep grinding past that window.
+          if (ability.phase !== 'travel' && ability.phase !== 'impact') break;
           const radius = c.radius * bpScale(ability.element, 'radius', level);
           const band = (c.band ?? 0) * bpScale(ability.element, 'band', level);
           const inner = Math.max(0, radius - band);
           const amt = c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level) * step;
+          // `kbMult` (M7 T4, 研磨不推): a row may scale the baseline per-hit
+          // shove — 0 for 锋岩星阵, whose 60Hz solid-disc stream would
+          // otherwise juggle enemies out of its own footprint (the row's own
+          // comment has the numbers). Absent (every permanent aura) reads 1:
+          // bladeorbit's blade-wall shove ships unchanged.
           this._book(
             ability.element,
             amt,
-            this.targets.damageRing(ability.position, inner, radius, amt, wux, wuxB)
+            this.targets.damageRing(ability.position, inner, radius, amt, wux, wuxB, c.kbMult ?? 1)
           );
+          // M7 T4 (锋岩星阵's 破甲): a row may carry vulnAmt/vulnTime — the
+          // same band gets its vuln refreshed every tick, AFTER the damage
+          // call, so a tick never amplifies itself with the vuln it just
+          // applied (the same freshly-applied-never-self-amplifies order
+          // _applyWux keeps for the overcoming debuffs); from the next tick
+          // on the standing vuln amplifies every source, this aura's own
+          // grind included — the plan's budget line prices that in. Flat
+          // row values on purpose: a debuff magnitude is settings-driven
+          // like _applyDebuff's own, never damage-amped.
+          if (c.vulnAmt) {
+            this.targets.applyVuln(ability.position, inner, radius, c.vulnAmt, c.vulnTime);
+          }
           break;
         }
 

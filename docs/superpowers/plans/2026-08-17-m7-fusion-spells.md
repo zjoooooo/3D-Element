@@ -164,15 +164,16 @@
 
 ## 执行后勘误(执行会话填写)
 
-### 续作指引(2026-08-17 会话交接,给下一个会话)
+### 续作指引(2026-08-17 更新:T4 已完成,给下一个会话/下一步)
 
-**从 Task 4(锋岩星阵)开始。** T1-T3 已完成、已评审、已合入 main。执行顺序:T4 → T5 霜刃洪流 → T6 回春雷泽 → T7 回归收官。流程:每任务 = 断言 RED → 实现 → 双套件绿(`npm run check:game` + `npm run check`)→ 浏览器逐项 → 评审(独立视角审 diff)→ 修复轮 → 提交;里程碑末 T7 后做全支终审。提交规范见 Global Constraints;**推送需问用户**。
+**从 Task 5(霜刃洪流)开始。** T1-T4 已完成、已评审。执行顺序:T5 → T6 回春雷泽 → T7 回归收官。流程:每任务 = 断言 RED → 实现 → 双套件绿(`npm run check:game` + `npm run check`)→ 浏览器逐项 → 评审(独立视角审 diff)→ 修复轮 → 提交;里程碑末 T7 后做全支终审。提交规范见 Global Constraints;**推送需问用户**。
 
-T4 执行要点(计划正文之外的上下文):
-- T1 的 App 光环拒施门(`settings.combat[element]?.kind === 'aura'`)查的是 settings.combat 顶层,融合 id 走 `rowFor`——fusion id 在 settings.combat 下 undefined,所以**不会**误拒 aura 行的融合;加结构 pin 防未来重构静默弄坏(断言:rowFor 对 'fusion:…' 解到 aura 行而 settings.combat['fusion:…'] 为 undefined)。
-- `applyVuln(point, innerRadius, radius, amt, time)` 加在 EnemySystem(镜像 damageRing 的循环含内缘 pad)+ Targets 可选链透传;**语义对齐既有 vuln 通道**(先读 _applyDebuff 怎么写 vulnT/vulnAmt——强弱覆盖规则照抄,断言钉住"弱不降级强")。
-- 阵是**限时施放**(3s 生命周期,正常五字段/冷却/法力),不是常驻光环;类不挪 ability.position(静置);band=radius → damageRing 实心盘退化,加断言。
-- wux 线程:'4+0' → (子0金, 母4土);淬炼(子系金)应在施放时消耗并 ×1.5 全程研磨 tick——浏览器验证。
+T5 执行要点(计划正文之外的上下文,T4 会话留):
+- BladeTideSkill 是 self-resolved(fireball 先例:类内 targets + ctx.stats.book);去程 damageOnce 用 castId,回程**第二 castId**——combat.release/releaseCast 只认从 CombatSystem 领的 id,类内自持双 Set(计划原文)或直接用 `enemies.damageOnce(自造键)` 时注意 `_hitMemory` 由 RunManager 的 onRetire → releaseCast 清理路径**不会**认识类私有键:确认清理线,防 `_hitMemory` 泄漏(T2 的 killHook 订阅/退订同宗教训)。
+- 回程 per-敌读 `ctx.enemies.slowed[i]` 判 ×2:沙盒 ctx 无 enemies,null-safe 去化(沙盒只演双程 VFX)——T3/T4 的 sandbox 断言块照抄形状。
+- 浏览器验证注意(T4 教训):测「回程对 slowed 敌 ×2」时先用冰枪挂减速再放洪流;敌会向玩家汇聚移动,采样窗要短或把测试敌钉住(hp 抬高防死亡换索引)。
+- 数值:去程 85 / 回程 125 / slowed 回程 250(必暴语义);width 1.6;cd 5 / range 11;wux=(子0金, 母2水)。淬炼子系金同样适用(T4 已验证融合淬炼线)。
+- 零分配:采样循环用模块级 scratch;**递入 damageOnce 的 scratch 若可达击杀→onKillAt 重入路径,必须独立 scratch**(771ba02 铁律;VineBlaze 在场时任何 damage 系调用都可能同步重入它的 _onKillAt)。
 
 ### T1 双属性命中 + 融合施放骨架(ed951a0 + 修复 09d8ab1)
 - 约定定案:damage 系尾参 **wux=子系, wuxB=母系**(单属性 wuxB=-1 语义零变);матchup 取双系更优(双被克时取 0.8,不落底 1);挂印/减益/引爆只看子系。计划正文一处母子写反已勘正(f901b73)。
@@ -185,6 +186,13 @@ T4 执行要点(计划正文之外的上下文):
 - 修复 1:zoneTick 每帧对象字面量分配 → 标量返回/原位累加(CombatSystem._dot/_take 先例);真实链路重入回归测试(区自身 tick 击杀 → 循环中分叉)。
 - 修复 2(评审复审实证抓出):模块级 scratch `_pos` 按引用递入 EnemySystem.damage(逐敌重读 point.x/z),重入 _spawnZone 中途改写 → 迭代后段敌人按错圆心判定静默零伤(实证:邻敌死否翻转幸存者 18.3↔20)。修法:重入路径专用 `_forkPos`。**铁律(M4 反应队列教训的姊妹):凡递入可触发重入调用的 scratch,重入路径必须用独立 scratch**——T3 起各融合类均须遵守。
 - 分叉全链到上限的实机观察受浏览器节流所限,以真实类头绪化+变异测试证明(报告存档)。
+
+### T4 锋岩星阵 PrismArraySkill(与修复轮同押一提交)
+- aura kind 复用成立:band=radius 实心盘退化(断言钉住)+ 行字段 vulnAmt/vulnTime;**研磨窗收窄为 travel+impact**——常驻光环永不进 fade(advance 恒 false、retire 直达 IDLE,评审实读确认),行为逐字节不变;限时阵的 fade 只演棱晶沉降。vuln 施加排在 damageRing 之后(当 tick 不自增幅,次 tick 起自增幅——预算行已计入),幅度传行平值不过 _amp/bpScale(评审补测:fusionMult=2 下 ring amt ×2 而 vuln amt 不动)。
+- 类是**首个纯 VFX 融合类**:零 targets 调用,机制全在 combat 行。onSpawn 即停 position 到瞄准点——帧序:combat.tick(App.frame 的 gameClock.advance)先于 abilities.update,手动施放会被以 travel 相位观察到一帧,停点保证那一帧的盘已在目标而非脚下(断言钉住 spawn 后未 update 即就位)。静置=此后无人写 position。
+- `applyVuln(point, innerRadius, radius, amt, time)`:镜像 damageRing 环带判定含内缘敌体半径 pad;规则=弱不降级强(幅度**与计时**都不动)/等强刷新计时/更强覆盖并带走计时/过期幅度不挡新申请(vulnT 是唯一活性信号);入口 `Math.fround(amt)`(评审抓:float32 通道下 0.3 类非二进制精确幅度会「强于自身」→ 静默停刷计时)。
+- **Critical(浏览器验证抓出,无头复现存档):60Hz 基线击退流弹飞研磨目标。** damageRing 每 tick 每命中记满额基线击退,汇聚敌开局被弹 ~7m、其后 rim-juggle:3s 实落 33 伤 vs 预算 319,仅 19/180 tick 在盘内。修法:damageRing 尾参 `kbScale=1`(默认逐字节同义;0 只关击退,flash/matchup/vuln/挂印不动)→ aura case 传 `row.kbMult ?? 1` → '4+0' 行 `kbMult: 0`。修后 3s 318.4 ≈ 319、180/180 在盘内;bladeorbit 等无 kbMult 行不变。**教训:把 damage 系当 60Hz DoT 流用的新形态,必须显式决定基线击退要不要跟着 60Hz**(glacier/熔岩等既有流的幻想是墙/池,推开合理;「困住研磨」类必须关)。
+- 评审遗留(不阻塞,待 T7/用户复核):(a) `_applyDebuff` 仍 latest-wins——阵外残留期,金/木克制命中会以 0.15/4 覆盖阵留的 0.25(阵内每 tick 自愈无感);通道两写手规则不对称,是否统一「弱不降级强」待用户裁;(b) vulnStrong.amount 与阵 vulnAmt 同为 0.25:等强路径会把熔甲尾巴「刷新」成 3s,单边调参时留意;(c) 结算 top-3 直接显示 fusion id 原串(App.js verdict 未走 fusionName,T2 起既有)→ T7 收口;(d) MAX_CONCURRENT 驱逐截断 3s 窗时 CRACK 地贴按自身 life 残留(Vine/Volcano 同族既有);(e) `scripts/sdd/review-package` 的 git diff 不含 untracked 新文件——评审含新类的任务须 `git add -N` 先行或评审员实读工作区。
 
 ### T3 地心火山 VolcanoSkill(502c30e,一次通过)
 - burst `waves` 通用化:行级可选 `waves:[{delay,damageMult,radiusMult}]`,per-cast 游标 Map 随 release 清理;时序保证:时钟先于 abilities.update,类以 0.25s FLIGHT_TIME 提前挪 position(5× dt 钳幅裕度);纯数据行(无类)也可多波。陨石 Lv5 extraWave 迁移到同通道**逐字节等价**(测试文件 0 删除;_extraDetonated 机器退役)。

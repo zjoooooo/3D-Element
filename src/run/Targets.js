@@ -46,15 +46,22 @@ export class Targets {
     for (const p of this._populations) p.knockback?.(point, radius, impulse);
   }
 
+  /** Vuln application over the same annulus damageRing tests (M7 T4
+   * 锋岩星阵's 破甲). Optional per population, like slow/knockback above —
+   * the sandbox dummies carry no vuln channel and quietly skip it. */
+  applyVuln(point, innerRadius, radius, amt, time) {
+    for (const p of this._populations) p.applyVuln?.(point, innerRadius, radius, amt, time);
+  }
+
   /** Damage only within an annulus [innerRadius, radius] of point (M6 T4:
    * an aura's orbiting ring/flames/orbs occupy a band, not a filled disc).
    * Populations that don't implement it degrade to a plain disc — the same
    * quiet-degradation contract damageOnce already documents above. */
-  damageRing(point, innerRadius, radius, amount, wuxing = -1, wuxingB = -1) {
+  damageRing(point, innerRadius, radius, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
     let total = 0;
     for (const p of this._populations) {
       total += p.damageRing
-        ? p.damageRing(point, innerRadius, radius, amount, wuxing, wuxingB)
+        ? p.damageRing(point, innerRadius, radius, amount, wuxing, wuxingB, kbScale)
         : p.damage(point, radius, amount, wuxing, wuxingB);
     }
     return total;

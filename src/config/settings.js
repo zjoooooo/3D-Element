@@ -525,7 +525,14 @@ export const settings = {
         // lavaLife`, the same 30/1.6/4 numbers moved to where the class
         // that actually owns them can read them.
       },
-      '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3 }, // 锋岩星阵 (T4); band===radius degenerates damageRing to a solid disc already
+      // 锋岩星阵 (T4); band===radius degenerates damageRing to a solid disc
+      // already. kbMult 0 = 研磨不推: the baseline per-hit shove, streamed at
+      // 60 ticks/s by an aura grind, launched a converging enemy ~7m out of
+      // the disc and rim-juggled it (19/180 ticks in-disc, ~33 damage where
+      // the 数值表 budgets ≈319 — M7 T4 browser catch). A grind holds its
+      // prey; aura rows that DON'T set kbMult keep the baseline shove
+      // exactly as shipped (bladeorbit's blade-wall feel).
+      '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3, kbMult: 0 },
       '0+2': { kind: 'self' }, // 霜刃洪流 (T5, self-resolved — fireball precedent)
       '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, healInside: 6 } // 回春雷泽 (T6) — 'marsh' isn't a case in tick()'s switch yet, so this row no-ops safely until then
     },
@@ -2503,7 +2510,21 @@ export const settings = {
       coneRiseTime: 0.4, scatterRadius: 4, lavaDps: 30, lavaRadius: 1.6, lavaLife: 4,
       lightColor: '#e86f4f', lightIntensity: 7, lightRadius: 6
     },
-    '4+0': { cooldown: 7, range: 9, castAnim: 'cast1', color: '#d8b46a', colorGlow: '#f5e6c8' }, // 锋岩星阵
+    // M7 T4 (PrismArraySkill): '4+0' was cast-side-only through T1 — this is
+    // the first task to actually spawn the class, so it picks up the same
+    // additions '1+3'/'3+4' needed when their classes landed: the mechanism
+    // numbers the plan gives exact values for (数值分层铁律 — `life` is the
+    // 数值表's own 3s grind window, i.e. the class's impactDuration and
+    // therefore exactly how long the aura combat row above gets to tick;
+    // `prismCount` off the plan's own "5 根金棱晶"), and the three light
+    // fields `Ability#_updateLight` reads unconditionally every active frame
+    // (NaN-poisons `LightPool.damp()` permanently if absent — M6 T5/T6
+    // lesson, repeated by both earlier fusion classes).
+    '4+0': {
+      cooldown: 7, range: 9, castAnim: 'cast1', color: '#d8b46a', colorGlow: '#f5e6c8', // 锋岩星阵
+      life: 3, prismCount: 5,
+      lightColor: '#f5e6c8', lightIntensity: 6, lightRadius: 6
+    },
     '0+2': { cooldown: 5, range: 11, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#d8b46a' }, // 霜刃洪流
     '2+1': { cooldown: 7, range: 10, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#7ee08a' } // 回春雷泽
   },

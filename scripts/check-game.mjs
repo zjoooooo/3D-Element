@@ -35,6 +35,7 @@ import {
   forkPlacement
 } from '../src/abilities/fusions/VineBlazeSkill.js';
 import { VolcanoSkill } from '../src/abilities/fusions/VolcanoSkill.js';
+import { PrismArraySkill } from '../src/abilities/fusions/PrismArraySkill.js';
 import { FUSION_CLASSES } from '../src/abilities/AbilityManager.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
@@ -3155,6 +3156,391 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }, 'Volcano: a full cast ticks with no targets/stats/bursts and never throws');
   assert.doesNotThrow(() => ability.destroy(), 'Volcano: destroy is null-safe');
   console.log('ok  M7 T3: VolcanoSkill sandbox null-safety (VFX only, zero errors)');
+}
+
+/* ---- M7 T4: EnemySystem.applyVuln — 锋岩星阵's armour-grind channel ---- */
+{
+  const enemies = new EnemySystem(createRng(31));
+  const pad = settings.enemies.swarm.radius; // every spawn below is behavior 0
+
+  // Geometry mirrors damageRing exactly, inner pad included: innerRadius 0
+  // degenerates to a solid disc (dead centre counts), a real annulus skips
+  // an enemy standing deeper inside the inner edge than its own body radius.
+  const centre = enemies.spawnAt(0, 0, 0);
+  const midBand = enemies.spawnAt(2.5, 0, 0);
+  const outside = enemies.spawnAt(10, 0, 0);
+  enemies.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3);
+  assert.equal(enemies.vulnT[centre], 3, 'applyVuln: innerRadius 0 is a solid disc — dead centre is vulnerable');
+  assert.equal(enemies.vulnAmt[centre], 0.25, "applyVuln: writes the caller's amount");
+  assert.equal(enemies.vulnT[midBand], 3, 'applyVuln: mid-disc enemy is vulnerable');
+  assert.equal(enemies.vulnT[outside], 0, 'applyVuln: past the outer edge is untouched');
+
+  {
+    const annulus = new EnemySystem(createRng(32));
+    const nearInner = annulus.spawnAt(2 - pad * 0.5, 0, 0); // inside the inner edge, but within its own body radius of it
+    const deepInside = annulus.spawnAt(2 - pad - 0.3, 0, 0); // deeper than its body radius can reach
+    annulus.applyVuln({ x: 0, z: 0 }, 2, 3.5, 0.25, 3);
+    assert.equal(annulus.vulnT[nearInner], 3, "applyVuln: inner edge pads by the enemy's own radius, same as damageRing");
+    assert.equal(annulus.vulnT[deepInside], 0, 'applyVuln: well inside the inner edge is untouched');
+  }
+
+  // Override rules on the one shared vulnT/vulnAmt channel (勘误: 弱不降级强):
+  // a live STRONGER vuln is left entirely alone — magnitude AND timer — a
+  // weaker application while it holds is a no-op, never a downgrade; equal
+  // strength refreshes the timer (the array's own per-tick re-application);
+  // stronger overwrites weaker, same as _applyDebuff's own latest-wins write.
+  enemies.vulnT[centre] = 2;
+  enemies.vulnAmt[centre] = 0.5;
+  enemies.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3);
+  assert.equal(enemies.vulnAmt[centre], 0.5, 'applyVuln: a weaker application never downgrades a live stronger vuln');
+  assert.equal(enemies.vulnT[centre], 2, "applyVuln: nor does it touch the stronger vuln's own timer");
+
+  enemies.vulnT[centre] = 1;
+  enemies.vulnAmt[centre] = 0.25;
+  enemies.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3);
+  assert.equal(enemies.vulnT[centre], 3, 'applyVuln: equal strength refreshes the timer (the per-tick re-application)');
+
+  // Reviewer catch: vulnAmt is a Float32Array, the caller's amt a double —
+  // a non-binary-exact magnitude (0.3 → fround 0.30000001…) would read as
+  // "stronger than itself" and silently stop refreshing. applyVuln frounds
+  // at the door so same-source re-application always compares equal.
+  enemies.vulnT[centre] = 1;
+  enemies.vulnAmt[centre] = Math.fround(0.3);
+  enemies.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.3, 3);
+  assert.equal(enemies.vulnT[centre], 3, 'applyVuln: a float32-stored equal strength still refreshes (fround at the door)');
+
+  enemies.vulnT[centre] = 2;
+  enemies.vulnAmt[centre] = Math.fround(0.15);
+  enemies.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3);
+  assert.equal(enemies.vulnAmt[centre], 0.25, 'applyVuln: a stronger application overwrites a live weaker vuln');
+  assert.equal(enemies.vulnT[centre], 3, 'applyVuln: and takes its own timer with it');
+
+  // An EXPIRED strong amount is stale data, not a live vuln — the timer is
+  // the liveness signal (tick() only ever clamps vulnT, never clears vulnAmt).
+  enemies.vulnT[centre] = 0;
+  enemies.vulnAmt[centre] = 0.9;
+  enemies.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3);
+  assert.equal(enemies.vulnAmt[centre], 0.25, 'applyVuln: an expired amount cannot block a fresh application');
+  assert.equal(enemies.vulnT[centre], 3, 'applyVuln: the fresh application arms the timer');
+
+  // Against the REAL debuff channel: 熔甲 (a fire overcoming hit) writes
+  // vulnStrong — the generic 0.15 vuln applied on top must not shave it.
+  {
+    const real = new EnemySystem(createRng(33));
+    const metal = real.spawnAt(0, 0, 0, 0); // 金 target — 火克金
+    real.damage({ x: 0, z: 0 }, 1, 1, 3); // fire hit → overcoming → vulnStrong
+    assert.equal(real.vulnAmt[metal], settings.combat.debuffs.vulnStrong.amount, 'fixture: 熔甲 landed');
+    real.applyVuln({ x: 0, z: 0 }, 0, 3.5, settings.combat.debuffs.vuln.amount, 3);
+    assert.equal(
+      real.vulnAmt[metal],
+      settings.combat.debuffs.vulnStrong.amount,
+      'applyVuln: the weaker generic vuln never downgrades a live 熔甲'
+    );
+  }
+
+  // The channel it writes is the one every hit already amplifies through.
+  {
+    const amp = new EnemySystem(createRng(34));
+    const e = amp.spawnAt(0, 0, 0, 3); // 火 body — neutral to an untyped hit
+    amp.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3);
+    const before = amp.hp[e];
+    amp.damage({ x: 0, z: 0 }, 1, 10, -1);
+    assert.ok(
+      Math.abs(before - amp.hp[e] - 10 * 1.25) < 1e-3,
+      'applyVuln: the vuln it applies amplifies a later untyped hit ×1.25'
+    );
+  }
+
+  // Targets facade: optional-chain passthrough — a population without
+  // applyVuln (the sandbox dummies) degrades to a quiet no-op, one with it
+  // receives the arguments verbatim.
+  {
+    const targets = new Targets();
+    targets.register({ hits: () => false, damage: () => 0 });
+    assert.doesNotThrow(
+      () => targets.applyVuln({ x: 0, z: 0 }, 0, 3.5, 0.25, 3),
+      'Targets.applyVuln: a population without the method quietly degrades'
+    );
+    const got = [];
+    targets.register({
+      hits: () => false,
+      damage: () => 0,
+      applyVuln: (p, inner, outer, amt, time) => got.push({ x: p.x, inner, outer, amt, time })
+    });
+    targets.applyVuln({ x: 7, z: 0 }, 0.5, 3.5, 0.25, 3);
+    assert.deepEqual(got, [{ x: 7, inner: 0.5, outer: 3.5, amt: 0.25, time: 3 }], 'Targets.applyVuln: arguments pass through verbatim');
+  }
+
+  console.log('ok  M7 T4: EnemySystem.applyVuln (solid disc/annulus pad/弱不降级强/amplify/Targets passthrough)');
+}
+
+/* ---- M7 T4: aura kind — vuln row fields, solid-disc degenerate, fade gate ---- */
+{
+  const row = settings.combat.fusions['4+0'];
+  assert.equal(row.kind, 'aura', "fixture: '4+0' rides the existing aura kind — 静置 needs no new CombatSystem kind");
+  assert.equal(row.band, row.radius, 'fixture: band === radius is the solid-disc degenerate the plan pins');
+  assert.equal(row.dps, 85, "fixture: 数值表's own dps");
+  assert.equal(row.vulnAmt, 0.25, "fixture: 数值表's own vulnAmt");
+  assert.equal(row.vulnTime, 3, "fixture: 数值表's own vulnTime");
+
+  const ringCalls = [];
+  const vulnCalls = [];
+  const combat = new CombatSystem({
+    damage: () => 0,
+    damageOnce: () => 0,
+    slow: () => {},
+    damageRing: (p, inner, outer, amt, wux, wuxB) => (ringCalls.push({ x: p.x, z: p.z, inner, outer, amt, wux, wuxB }), 1),
+    applyVuln: (p, inner, outer, amt, time) => vulnCalls.push({ x: p.x, z: p.z, inner, outer, amt, time })
+  });
+  const prism = {
+    element: fusionId('rockspikes', 'dashstrike'), // 土(4)+金(0) → '4+0'
+    phase: 'impact', impactTime: 0.5, fadeTime: 0,
+    position: { x: 4, z: -2 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 9, u: 1,
+    autocast: false, quenched: false, fusionMult: 1
+  };
+  combat.tick(1 / 60, [prism]);
+  assert.equal(ringCalls.length, 1, 'aura: one grind tick per frame');
+  assert.equal(ringCalls[0].inner, 0, 'aura: band === radius degenerates damageRing to a solid disc (inner edge 0)');
+  assert.ok(Math.abs(ringCalls[0].outer - row.radius) < 1e-9, 'aura: outer edge is the combat radius');
+  assert.ok(Math.abs(ringCalls[0].amt - row.dps / 60) < 1e-9, 'aura: per-tick amount is dps×step');
+  assert.equal(ringCalls[0].wux, 0, "aura: '4+0' grinds as wux = 子系 金 (0)");
+  assert.equal(ringCalls[0].wuxB, 4, 'aura: with wuxB = 母系 土 (4)');
+  assert.equal(vulnCalls.length, 1, 'aura: a row with vulnAmt applies vuln on the same tick');
+  assert.deepEqual(
+    vulnCalls[0],
+    { x: 4, z: -2, inner: 0, outer: row.radius, amt: row.vulnAmt, time: row.vulnTime },
+    "aura: vuln covers the same solid disc with the row's own amount/time"
+  );
+
+  combat.tick(1 / 60, [prism]);
+  assert.equal(vulnCalls.length, 2, 'aura: vuln re-applies every tick — 阵内敌持续破甲');
+
+  // The grind window is travel+impact only. A permanent aura (bladeorbit)
+  // lives in TRAVEL forever and never fades, so excluding FADE changes
+  // nothing for it — but a TIMED aura cast's cosmetic sink tail must not
+  // keep grinding past its own 3s window (数值表: dps 85 × 3s).
+  prism.phase = 'travel';
+  combat.tick(1 / 60, [prism]);
+  assert.equal(ringCalls.length, 3, 'aura: TRAVEL still ticks (the permanent-aura contract, unchanged)');
+  prism.phase = 'fade';
+  prism.fadeTime = 0.1;
+  combat.tick(1 / 60, [prism]);
+  assert.equal(ringCalls.length, 3, 'aura: FADE deals nothing — the grind stops at the 3s window');
+  assert.equal(vulnCalls.length, 3, 'aura: FADE applies no vuln either');
+
+  // A vuln-free aura row (bladeorbit) must never reach applyVuln at all.
+  const bladeorbit = {
+    element: 'bladeorbit', phase: 'travel', age: 1,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 1, u: 0,
+    autocast: false, quenched: false, fusionMult: 1
+  };
+  combat.tick(1 / 60, [bladeorbit]);
+  assert.equal(vulnCalls.length, 3, 'aura: a row without vulnAmt applies no vuln (bladeorbit regression)');
+
+  // Reviewer catch: with _amp ≡ 1 the "vuln is never damage-amped" claim was
+  // indistinguishable from `vulnAmt × _amp`. A ×2 fusionMult cast must
+  // double the grind tick and leave the vuln magnitude at the row's own
+  // flat value (a debuff is settings-driven, same as _applyDebuff's).
+  prism.phase = 'impact';
+  prism.fusionMult = 2;
+  {
+    const rings = ringCalls.length;
+    combat.tick(1 / 60, [prism]);
+    assert.equal(ringCalls.length, rings + 1, 'aura: amp fixture ticked once');
+    assert.ok(Math.abs(ringCalls[ringCalls.length - 1].amt - (row.dps / 60) * 2) < 1e-9, 'aura: fusionMult ×2 doubles the grind tick');
+    assert.equal(vulnCalls[vulnCalls.length - 1].amt, row.vulnAmt, 'aura: the vuln magnitude stays the flat row value under amp');
+  }
+  prism.fusionMult = 1;
+
+  // 研磨不推 (browser-verification catch): the row's kbMult 0 suppresses the
+  // baseline per-hit knockback on the grind tick. At 60 ticks/s the baseline
+  // impulse stream launched a converging enemy ~7m out of the disc in the
+  // first half-second and rim-juggled it after — 19/180 ticks in-disc, 33
+  // damage where the 数值表 budgets ≈319 (headless repro). A grind holds its
+  // prey; rows that don't opt out (bladeorbit's blade-wall shove) keep the
+  // baseline exactly as shipped.
+  assert.equal(settings.combat.fusions['4+0'].kbMult, 0, "fixture: '4+0' opts out of baseline knockback");
+  {
+    const kbEnemies = new EnemySystem(createRng(36));
+    const kbCombat = new CombatSystem(kbEnemies);
+    // OFF the disc centre on purpose (re-review catch): at the centre
+    // dx=dz=0 zeroes the shove regardless of wiring, making the assertion
+    // vacuous — 1m out, a broken kbMult thread (`|| 1`, a dropped Targets
+    // arg) shoves kbX≈8 and fails loudly, while the correct wiring reads 0.
+    const held = kbEnemies.spawnAt(5, -2, 0, 3);
+    const heldHp = kbEnemies.hp[held];
+    prism.phase = 'impact';
+    kbCombat.tick(1 / 60, [prism]);
+    kbCombat.tick(1 / 60, [prism]);
+    assert.equal(kbEnemies.kbX[held], 0, 'aura: kbMult 0 — the grind tick imparts no baseline shove (x)');
+    assert.equal(kbEnemies.kbZ[held], 0, 'aura: kbMult 0 — the grind tick imparts no baseline shove (z)');
+    assert.ok(kbEnemies.hp[held] < heldHp && kbEnemies.vulnT[held] > 0, 'aura: damage and vuln still land with the shove off');
+
+    // The default is byte-identical: a ring hit with no kbScale argument (or
+    // a row without kbMult — bladeorbit) still shoves, same as before.
+    const ring = kbEnemies.spawnAt(20, 0, 0, 3);
+    kbEnemies.damageRing({ x: 19, z: 0 }, 0, 2, 1, -1);
+    assert.ok(kbEnemies.kbX[ring] > 0, 'damageRing: default kbScale keeps the baseline shove (regression)');
+    const scaled = kbEnemies.spawnAt(30, 0, 0, 3);
+    kbEnemies.damageRing({ x: 29, z: 0 }, 0, 2, 1, -1, -1, 0);
+    assert.equal(kbEnemies.kbX[scaled], 0, 'damageRing: kbScale 0 suppresses the baseline shove');
+  }
+
+  // End-to-end against a real EnemySystem: the first grind tick lands
+  // un-amplified (damage first, vuln second — a tick never amplifies itself
+  // with the vuln it just applied), every later tick self-amplifies ×1.25
+  // (the plan's own budget line counts this), and an outside hit profits too.
+  {
+    const enemies = new EnemySystem(createRng(35));
+    const live = new CombatSystem(enemies);
+    const e = enemies.spawnAt(4, -2, 0, 3); // 火 body: max(金 0.8被克, 土 1中性) = ×1 — clean baseline
+    prism.phase = 'impact';
+    const hp0 = enemies.hp[e];
+    live.tick(1 / 60, [prism]);
+    const first = hp0 - enemies.hp[e];
+    assert.ok(Math.abs(first - row.dps / 60) < 1e-3, 'aura end-to-end: the first grind tick is un-amplified (vuln lands after damage)');
+    assert.equal(enemies.vulnT[e], row.vulnTime, 'aura end-to-end: that same tick left vuln standing');
+    const hp1 = enemies.hp[e];
+    live.tick(1 / 60, [prism]);
+    const second = hp1 - enemies.hp[e];
+    assert.ok(
+      Math.abs(second - (row.dps / 60) * (1 + row.vulnAmt)) < 1e-3,
+      'aura end-to-end: the second tick self-amplifies ×1.25 (破甲放大一切来源, the array included)'
+    );
+    const hp2 = enemies.hp[e];
+    enemies.damage({ x: 4, z: -2 }, 1, 10, -1);
+    assert.ok(
+      Math.abs(hp2 - enemies.hp[e] - 10 * (1 + row.vulnAmt)) < 1e-3,
+      'aura end-to-end: an outside untyped hit is amplified ×1.25 — 破甲+暴击 in one channel'
+    );
+  }
+
+  console.log('ok  M7 T4: aura vuln fields, solid disc, fade gate, dual-wux threading');
+}
+
+/* ---- M7 T4: rowFor resolves the aura-row fusion; settings.combat stays clean ---- */
+{
+  // App's 装备即常驻 refusal gate (`settings.combat[element]?.kind === 'aura'`)
+  // reads the FLAT table — a fusion id must never grow a row there, or the
+  // gate would wrongly refuse the '4+0' cast the way it refuses a seat-key
+  // press on bladeorbit. rowFor is the one door a fusion row resolves
+  // through; this pins the split so a future "flatten the fusion rows into
+  // settings.combat" refactor fails loudly instead of silently bricking the cast.
+  const id = fusionId('rockspikes', 'dashstrike');
+  assert.equal(rowFor(id), settings.combat.fusions['4+0'], "rowFor: '4+0' fusion id resolves to the aura combat row");
+  assert.equal(rowFor(id).kind, 'aura', 'rowFor: and that row really is aura-kind');
+  assert.equal(settings.combat[id], undefined, 'settings.combat: a fusion id has NO flat row — the aura refusal gate must not see one');
+  console.log('ok  M7 T4: rowFor/settings.combat split keeps the aura refusal gate blind to fusions');
+}
+
+/* ---- M7 T4: PrismArraySkill (锋岩星阵) — headless lifecycle against the real class ---- */
+{
+  assert.equal(FUSION_CLASSES['4+0'], PrismArraySkill, "AbilityManager: '4+0' resolves to PrismArraySkill");
+
+  const cfg = settings.fusions['4+0'];
+  assert.equal(cfg.life, 3, "settings.fusions['4+0']: the grind window is the 数值表's own 3s");
+  assert.equal(cfg.prismCount, 5, "settings.fusions['4+0']: five prisms (计划: 5 根金棱晶)");
+  for (const key of ['lightColor', 'lightIntensity', 'lightRadius']) {
+    assert.ok(cfg[key] !== undefined, `settings.fusions['4+0']: ${key} present (M6 T5/T6 NaN-poison guard — _updateLight reads it unconditionally)`);
+  }
+
+  let lightsAcquired = 0;
+  let lightsReleased = 0;
+  const fakeLights = {
+    acquire: () => (lightsAcquired++, { n: lightsAcquired }),
+    release: (h) => { if (h) lightsReleased++; },
+    set: () => {}
+  };
+  const decalSpawns = [];
+  const ctx = {
+    lights: fakeLights,
+    decals: { spawn: (type, pos, opts) => (decalSpawns.push({ type, x: pos.x, z: pos.z, opts }), { mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    },
+    mods: null
+  };
+
+  const ability = new PrismArraySkill(ctx, fusionId('rockspikes', 'dashstrike'));
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+
+  // Parked at the aimed point BEFORE the first update: combat.tick runs
+  // ahead of abilities.update in the frame, so a manual cast IS observed in
+  // TRAVEL once — the disc must already sit at the target, not the caster.
+  assert.ok(
+    Math.abs(ability.position.x - 9) < 1e-6 && Math.abs(ability.position.z - 0) < 1e-6,
+    'PrismArray: position parks at the aimed point at spawn, before any update'
+  );
+
+  ability.update(1 / 60);
+  assert.equal(ability.phase, 'impact', 'PrismArray: reaches IMPACT on the very first tick (no travel)');
+  assert.equal(ability.impactDuration, cfg.life, "PrismArray: the impact window IS the row's own 3s life");
+  assert.equal(ability._prisms.length, cfg.prismCount, 'PrismArray: five prisms stand the array');
+  assert.ok(ability._prisms.every((p) => p.visible), 'PrismArray: every prism is up during the grind');
+
+  // 静置: the array NEVER follows the player — position stays put through
+  // the whole grind (the aura case reads it every tick).
+  for (let i = 0; i < 60; i++) ability.update(1 / 60);
+  assert.ok(
+    Math.abs(ability.position.x - 9) < 1e-6 && Math.abs(ability.position.z - 0) < 1e-6,
+    'PrismArray: 静置 — ability.position never moves during the grind'
+  );
+  assert.ok(ability._prisms.every((p) => p.visible), 'PrismArray: the full array stands once every prism has risen');
+
+  // Run the clock out: 3s impact + fade tail → DONE, prisms recycled.
+  while (!ability.isFinished) ability.update(0.1);
+  ability.destroy();
+  assert.ok(ability._prisms.every((p) => !p.visible), 'PrismArray: prisms hidden once the cast retires');
+  assert.equal(lightsReleased, lightsAcquired, 'PrismArray: every acquired light came back to the pool');
+
+  // Pooled reuse: a second cast off the same instance stands the array again.
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, 5);
+  ability.update(1 / 60);
+  assert.equal(ability.phase, 'impact', 'PrismArray: a pooled re-cast reaches IMPACT again');
+  assert.ok(
+    Math.abs(ability.position.x - 0) < 1e-6 && Math.abs(ability.position.z - 5) < 1e-6,
+    'PrismArray: the re-cast parks at its own new aimed point'
+  );
+  assert.ok(ability._prisms.every((p) => p.visible), 'PrismArray: prisms stand again on the re-cast');
+  ability.destroy();
+
+  console.log('ok  M7 T4: PrismArraySkill lifecycle (park/static/3s window/prism recycle), headless');
+}
+
+/* ---- M7 T4: PrismArraySkill sandbox null-safety — VFX only, zero errors ---- */
+{
+  const ctx = {
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    }
+    // no targets, no stats, no mods, no decals, no bursts — the sandbox shape
+    // (fusions are unreachable there in practice — Global Constraints — but
+    // the class must still not throw if ticked with this shaped a ctx).
+  };
+  const ability = new PrismArraySkill(ctx, fusionId('rockspikes', 'dashstrike'));
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  assert.doesNotThrow(() => ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9), 'PrismArray: spawn is null-safe without decals/targets');
+  assert.doesNotThrow(() => {
+    for (let i = 0; i < 500; i++) ability.update(1 / 60);
+  }, 'PrismArray: a full cast ticks with no targets/stats/decals and never throws');
+  assert.doesNotThrow(() => ability.destroy(), 'PrismArray: destroy is null-safe');
+  console.log('ok  M7 T4: PrismArraySkill sandbox null-safety (VFX only, zero errors)');
 }
 
 /* ---- strings: bilingual table + t() fallback chain (spec §9) ---- */

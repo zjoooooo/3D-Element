@@ -286,8 +286,15 @@ export class EnemySystem {
    * (M6 T4). Mirrors damage()'s loop exactly, plus the inner cutoff; an
    * enemy standing well inside the ring (nearer than innerRadius, padded by
    * its own collision radius the same way the outer edge already is) takes
-   * nothing. */
-  damageRing(point, innerRadius, radius, amount, wuxing = -1, wuxingB = -1) {
+   * nothing.
+   *
+   * `kbScale` (M7 T4) scales the baseline per-hit shove, default 1 —
+   * byte-identical for every pre-M7-T4 caller. 0 turns it off outright:
+   * a 60Hz grind tick (锋岩星阵's solid disc) streaming the full baseline
+   * impulse launched enemies clean out of its own footprint (研磨不推 —
+   * see the '4+0' combat row's own comment); flash/matchup/vuln/marks are
+   * untouched, only the shove scales. */
+  damageRing(point, innerRadius, radius, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
@@ -298,10 +305,12 @@ export class EnemySystem {
       if (dist < innerRadius - kind.radius) continue;
       hits++;
       this.flash[i] = 1;
-      const d = dist || 1;
-      const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult;
-      this.kbX[i] += (dx / d) * kb;
-      this.kbZ[i] += (dz / d) * kb;
+      if (kbScale) {
+        const d = dist || 1;
+        const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult * kbScale;
+        this.kbX[i] += (dx / d) * kb;
+        this.kbZ[i] += (dz / d) * kb;
+      }
       this._applyWux(i, amount, wuxing, wuxingB);
     }
     this._flushReactions();
@@ -474,6 +483,40 @@ export class EnemySystem {
         : factor;
       this.slowed[i] = Math.max(this.slowed[i], f);
       this.slowT[i] = Math.max(this.slowT[i], dur);
+    }
+  }
+
+  /**
+   * 破甲 (M7 T4 锋岩星阵): apply a vuln of `amt` for `time` seconds to every
+   * enemy within the annulus [innerRadius, radius] of `point`. The band test
+   * mirrors damageRing()'s exactly, inner-edge pad included, so the vuln
+   * footprint can never drift from the grind footprint that rides the same
+   * row (WYSIWYG) — innerRadius 0 degenerates to the same solid disc.
+   *
+   * Writes the ONE shared vulnT/vulnAmt channel `_applyDebuff`'s 断枝/熔甲
+   * already write ("vuln or the stronger vulnStrong, never both" — the field
+   * comment above), with one more rule a per-tick re-application forces:
+   * a live STRONGER vuln is left entirely alone (弱不降级强) — magnitude and
+   * timer both — where equal strength refreshes the timer (the array
+   * re-arming its own 3s linger every tick) and stronger overwrites outright,
+   * the same latest-wins write `_applyDebuff` itself does. `vulnT` is the
+   * liveness signal (tick() clamps it to 0 and leaves vulnAmt stale), so an
+   * expired amount never blocks a fresh application.
+   */
+  applyVuln(point, innerRadius, radius, amt, time) {
+    // Compare float32-vs-float32: vulnAmt is a Float32Array, and a
+    // non-binary-exact amt (0.3 → stored 0.30000001…) would otherwise read
+    // back as "stronger than itself" and silently stop refreshing the timer
+    // on its own re-application (reviewer catch).
+    amt = Math.fround(amt);
+    for (let i = 0; i < this.count; i++) {
+      const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
+      const dist = Math.hypot(this.x[i] - point.x, this.z[i] - point.z);
+      if (dist >= radius + kind.radius) continue;
+      if (dist < innerRadius - kind.radius) continue;
+      if (this.vulnT[i] > 0 && this.vulnAmt[i] > amt) continue; // 弱不降级强
+      this.vulnT[i] = time;
+      this.vulnAmt[i] = amt;
     }
   }
 
