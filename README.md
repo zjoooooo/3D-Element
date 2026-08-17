@@ -193,11 +193,11 @@ Two or more equipped skills sharing a wuxing resonate (共鸣): 金 raises match
 
 The HUD carries elapsed time and the tide banner, kills and level, and — only while something resonates — a `共鸣` line naming which wuxing and whether 周天 is up; M5 dresses the rest (health/mana, the skill bar, the arena itself) as its own paragraphs below.
 
-M5 puts a title screen in front of the run: `#run` opens on a line of lore, five 本命 cards (one per wuxing — metal/wood/water/fire pickable, earth a disabled placeholder until M6 ships an earth skill), a character dropdown and a link back to the sandbox. Picking a card seats that element at loadout slot 1, sets it as your 禁咒 ultimate's home element, and starts the run; `#run=quick` skips the screen and drops straight into `settings.run.loadout` as configured, which is what the existing browser-verification passes still use. **Esc** opens a pause menu instead of cancelling a cast — three volume sliders (sfx/ui/music), a 中文/EN toggle that reflows every `t()`-driven string live, `reduceFlashes`/`performanceMode` checkboxes, a read-only build recap, and 继续/重开/回标题 — and is a full stop, the same freeze a level-up hand already used. `performanceMode` writes and restores a `settings.global` multiplier preset rather than touching any effect's own base numbers; `reduceFlashes` halves the big screen flashes and the low-health heartbeat.
+M5 puts a title screen in front of the run: `#run` opens on a line of lore, five 本命 cards (one per wuxing, all five pickable since M6 gave 土 its first skill), a character dropdown and a link back to the sandbox. Picking a card seats that element at loadout slot 1, sets it as your 禁咒 ultimate's home element, and starts the run; `#run=quick` skips the screen and drops straight into `settings.run.loadout` as configured, which is what the existing browser-verification passes still use. **Esc** opens a pause menu instead of cancelling a cast — three volume sliders (sfx/ui/music), a 中文/EN toggle that reflows every `t()`-driven string live, `reduceFlashes`/`performanceMode` checkboxes, a read-only build recap, and 继续/重开/回标题 — and is a full stop, the same freeze a level-up hand already used. `performanceMode` writes and restores a `settings.global` multiplier preset rather than touching any effect's own base numbers; `reduceFlashes` halves the big screen flashes and the low-health heartbeat.
 
-Every wuxing carries a 禁咒: a field-wide ultimate charged by kills (+1) and sheng detonations (+5) up to `settings.ultimate.chargeMax`, fired on **F** once full — an early press just toasts and spends nothing. Each element's payoff is a full-arena call into the existing damage/slow API rather than a dedicated VFX class: 金 hits everything and then executes anything left under an absolute hp floor, 木 slows the field and heals you over four seconds, 水 freezes everyone solid, 火 lands three damage waves, 土 hits and stuns. A successful cast clears the charge, flashes the screen, shakes the camera and buys the same brief hitstop an elite kill or a sheng detonation already does. A mana pool sits behind the run's second glass bottle at 100, regenerating 4/s plus 1 per kill — full for the whole of M5, since no ability spends it yet.
+Every wuxing carries a 禁咒: a field-wide ultimate charged by kills (+1) and sheng detonations (+5) up to `settings.ultimate.chargeMax`, fired on **F** once full — an early press just toasts and spends nothing. Each element's payoff is a full-arena call into the existing damage/slow API rather than a dedicated VFX class: 金 hits everything and then executes anything left under an absolute hp floor, 木 slows the field and heals you over four seconds, 水 freezes everyone solid, 火 lands three damage waves, 土 hits and stuns. A successful cast clears the charge, flashes the screen, shakes the camera and buys the same brief hitstop an elite kill or a sheng detonation already does. A mana pool sits behind the run's second glass bottle at 100, regenerating 4/s plus 1 per kill — full for the whole of M5, since no ability spent it yet (M6 gives it five spenders, below).
 
-Health and mana are two hand-blown glass bottles (camera-locked quads, an SDF silhouette and a wobbling liquid surface, no DOM and no texture) at the bottom corners — HP left, mana right. A hit sloshes the liquid and reddens the screen edge; under 30 % health the bottle's surface takes on a lub-dub heartbeat that quickens as hp drops, halved under `reduceFlashes`. The skill bar below is six glyph icons — no text, hover for the name — with a conic-gradient cooldown sweep, a ready pop on a long cooldown clearing, and a small dot reserved for anything that will cost mana once M6 ships a consumer; **F**'s own slot fills inward as the ultimate charges and glows once it is full. A full-width bar along the bottom edge carries xp.
+Health and mana are two hand-blown glass bottles (camera-locked quads, an SDF silhouette and a wobbling liquid surface, no DOM and no texture) at the bottom corners — HP left, mana right. A hit sloshes the liquid and reddens the screen edge; under 30 % health the bottle's surface takes on a lub-dub heartbeat that quickens as hp drops, halved under `reduceFlashes`. The skill bar below is six glyph icons — no text, hover for the name — with a conic-gradient cooldown sweep, a ready pop on a long cooldown clearing, and a small dot lit for anything that costs mana (M6's five tactical-tier skills); **F**'s own slot fills inward as the ultimate charges and glows once it is full. A full-width bar along the bottom edge carries xp.
 
 The arena is dressed to match: a five-way ritual ring etched into the ground and five procedural crystal steles standing on its boundary, one per wuxing and tinted to match — the current tide's stele burns bright, the next one breathes a slow pulse as it warms up, and a light arc traces the boundary between them, replacing the M1 placeholder rim. Light, fog and drifting dust glide toward each tide's own palette over a 20-second cross-fade on a turn — 金 gold dust, 木 fireflies, 水 falling snow, 火 warm embers, 土 dry haze — read off `settings.tides.atmosphere` and multiplied onto the environment's already-updated runtime colours rather than overwriting them, so a sandbox session (which never constructs the class doing this) stays frame-for-frame untouched.
 
@@ -207,7 +207,38 @@ Eleven vendored ZzFX voices (a single-function MIT synth) cover the five element
 
 `index.html` checks for WebGL2 and a non-mobile viewport before `main.js` ever touches the canvas, swapping in a bilingual "this needs a desktop browser" page in place of a blank canvas or a stack trace; a GPU context lost mid-run raises the same overlay with a "click to reload" instead of freezing on a black screen.
 
-To validate the game loop headless, run `npm run check:game` — forty-two blocks of logic tests including the mixed-horde stress gate (measures tick time at the 300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
+M6 takes the active roster from seven skills to the v1 launch twenty. Thirteen new ones land through three shared template classes rather than thirteen hand-written ability files: `LineSweepSkill` (spikes tearing up along a line — ice's own skeleton, reused for stone) covers the one line-cast newcomer; `ZoneBurstSkill` (a falling-blade rain, a healing bloom, a self-centred frost ring, a dropped boulder, a self-centred shockwave) covers the five that detonate on a circle; `OrbitAuraSkill` (five orbiting swords, a ring of ground fire, three orbiting embers) covers the three that ride along as a **permanent aura** — no cast, no cooldown, spawned the instant the skill is seated and torn down the instant it isn't. Two needed real code: `DashStrikeSkill` (a short teleport-slash that displaces the caster along the existing dodge channel) and `ChainBoltSkill` (a bolt that hops between up to four enemies, decaying 15% a hop). `ShieldSkill` covers the remaining two: a personal absorption pool that eats damage before hp does, one flavour additionally reflecting a share of what it absorbs back at whoever landed the hit. Every new skill is still a data row in `settings.js` first, built from the same procedural pieces the original seven use — instanced crystals, SDF decals, `BurstSphere`, the shared ribbon strip — coloured off its own wuxing.
+
+土 fields a skill for the first time, which opens every gate M4 built ahead of it and left dormant: 周天 resonance (every wuxing represented at once) is reachable, the earth 禁咒 (a field hit, a stun and a knockback) has something to seat it, and two more of the five 相生 fusion pairs (锋岩星阵 土+金, 地心火山 火+土) have an earth half to fuse with. Mana finally has spenders: five 战术档 (tactical-tier) skills cost 30 of the pool's 100, checked at the same site cooldown already gates — mana first, then cooldown, so a refused cast spends neither — and refused with a rate-limited toast on a manual miss; autocast fails the same gate silently.
+
+The editor's thirteen new folders are all one function: `_buildGenericSkill` reflects a skill's own settings block into sliders, colour pickers and a cast-clip dropdown, so a new skill needs a data row and nothing else to get a folder. `public/` dropped from 44 MB to 34 MB (a production build from 58 MB to 47 MB) by deleting an orphaned idle clip nothing referenced and re-encoding the two largest character textures from PNG to JPEG (neither carries an alpha channel); four sorcerer combat FBX are what's left, on the books for a post-v1 draco/ktx2 pass. The three `<link rel=preload>` tags now fire from inside the WebGL2 gate instead of ahead of it, so a device the gate is about to turn away never downloads the heavy assets first. The page finally has a face: a five-colour inline-SVG favicon, a real `<title>`, and an Open Graph card for whenever a link gets shared.
+
+**v1 launch roster — 20 skills**, four to a wuxing (★ marks the seven the sandbox already had):
+
+| 五行 | 中文 | English | What it does |
+| --- | --- | --- | --- |
+| 金 Metal | 新星光束 ★ | Nova Beam | Held beam column, four-beat cast, burns the longer it stays on target |
+| 金 Metal | 万剑诀 | Sword Rain | Blades rain down across a targeted circle |
+| 金 Metal | 剑域 | Blade Orbit | Five swords orbit the caster — permanent aura |
+| 金 Metal | 弑神一闪 | God-Killing Flash | Short teleport-slash, one crit-weight line of damage |
+| 木 Wood | 雷枪 ★ | Storm Lance | Bundled lightning bolt, restrikes and forks while it holds |
+| 木 Wood | 电缚 ★ | Voltaic Snare | Far cast — a circle that tears open into a re-striking pillar |
+| 木 Wood | 连锁闪电 | Chain Bolt | Hops between up to four enemies, decaying each jump |
+| 木 Wood | 生命绽放 | Life Bloom | Zone burst that damages enemies and heals the caster in one drop |
+| 水 Water | 冰枪 ★ | Frost Lance | Ice crystals tear up along the line, dense near, walled far |
+| 水 Water | 冰川冠 ★ | Glacial Crown | Far cast — a snap-open ring of ice and slow |
+| 水 Water | 寒霜新星 | Frost Nova | Self-centred ring that freezes everything nearby |
+| 水 Water | 冰晶甲 | Crystal Ward | Personal shield, sprays shards when it breaks |
+| 火 Fire | 陨石 ★ | Cinder Fall | Burning rock lobbed on an arc, detonates into cracked, glowing ground |
+| 火 Fire | 火弹 ★ | Ember Bolt | Small fireball thrown fast and flat, bursts into a scorched ring |
+| 火 Fire | 燃阵 | Cinder Ring | Ring of ground fire around the caster — permanent aura |
+| 火 Fire | 日轮 | Sun Wheel | Three embers orbit the caster — permanent aura |
+| 土 Earth | 岩刺突贯 | Stone Spikes | Line of spikes tearing up from the ground — ice's skeleton, in stone |
+| 土 Earth | 落石 | Boulder Fall | Single rock dropped on a circle, stuns on landing |
+| 土 Earth | 震地波 | Quake | Self-centred shockwave with heavy knockback |
+| 土 Earth | 石肤 | Stone Skin | Shield that reflects a share of what it absorbs |
+
+To validate the game loop headless, run `npm run check:game` — sixty-three blocks of logic tests including the mixed-horde stress gate (measures tick time at the 300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
 
 ---
 
@@ -217,6 +248,9 @@ To validate the game loop headless, run `npm run check:game` — forty-two block
 src/
   abilities/      Ability base class (the travelling front), IceAbility, ThunderAbility,
                   MeteorAbility, BeamAbility, SnareAbility, pooling manager
+  abilities/templates/  The three M6 template classes (LineSweepSkill, ZoneBurstSkill,
+                  OrbitAuraSkill) plus the two specialists (DashStrikeSkill, ChainBoltSkill)
+                  and ShieldSkill — thirteen skills, six files
   animation/      FBX character loading, AnimationMixer, the per-ability cast clips,
                   the procedural cast lunge
   assets/         Procedural crystal and asteroid geometry, the bolt ribbon strip,
@@ -568,9 +602,9 @@ target, blurred twice and projected onto the ground.
 ## Editor and presets
 
 Press **G** for the panel. Folders: Presets, Global, Aim indicator, Far-cast circle, Frost Lance,
-Storm Lance, Cinder Fall, Nova Beam, Voltaic Snare, Glacial Crown, Ember Bolt, Environment, Post
-processing, Camera, Character. Every folder starts collapsed — there are enough controls here that one open section
-pushes the rest off the screen.
+Storm Lance, Cinder Fall, Nova Beam, Voltaic Snare, Glacial Crown, Ember Bolt, the thirteen M6
+skills, Environment, Post processing, Camera, Character. Every folder starts collapsed — there are
+enough controls here that one open section pushes the rest off the screen.
 
 - **Global** multipliers scale everything at once (speed, glow, noise, particles, lights, impact
   intensity, camera shake, time scale…).
@@ -598,6 +632,12 @@ pushes the rest off the screen.
   the ability is nothing but emission parameters: `size`, `coreRate` and `coreLife` between them
   decide whether the head reads as a ball or as a streak, and `burstTurbulence` is what stops the
   impact reading as a solid orange sphere.
+- **The thirteen M6 skills** (Sword Rain, Blade Orbit, God-Killing Flash, Chain Bolt, Life Bloom,
+  Frost Nova, Crystal Ward, Cinder Ring, Sun Wheel, Stone Spikes, Boulder Fall, Quake, Stone Skin) —
+  one folder each, built by reflection (`_buildGenericSkill`) rather than hand-authored: every
+  numeric field becomes a slider (×0.1–×3 of its shipped value), every colour a picker, `castAnim`
+  a dropdown. Whatever the skill's settings block carries is what the folder shows, so there is no
+  per-skill editor code left to fall out of sync.
 - **Training dummies** — how many targets, how far out they stand, their hit points and how long
   they stay down. `count` and `ringRadius` are read every frame by the system itself, so dragging
   either rebuilds or repositions the ring live.
