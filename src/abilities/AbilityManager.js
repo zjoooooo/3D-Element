@@ -50,8 +50,16 @@ export const ABILITY_TYPES = {
   fireball: FireballAbility,
 
   rockspikes: LineSweepSkill,
+  // M8 T2: two more line fields on the same template — a water wall that
+  // sweeps and shoves, and a thorn road that keeps burning where it stood.
+  tidalsurge: LineSweepSkill,
+  thornroad: LineSweepSkill,
 
   swordrain: ZoneBurstSkill,
+  // M8 T2: a six-wave hail barrage and a single heavy pillar, both pure
+  // data on the burst template (their wave tables live in settings.combat).
+  hailstorm: ZoneBurstSkill,
+  stonepillar: ZoneBurstSkill,
   lifebloom: ZoneBurstSkill,
   frostnova: ZoneBurstSkill,
   boulder: ZoneBurstSkill,

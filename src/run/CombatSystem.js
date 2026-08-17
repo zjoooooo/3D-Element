@@ -223,6 +223,34 @@ export class CombatSystem {
             const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
             this.targets.slow(ability.position, width * 1.5, slowFactor, slowTime);
           }
+          // M8 T2 (潮汐涌浪's 水墙推退): an optional per-row shove composed
+          // after the sweep's own damage — a row without `knockback` (every
+          // sweep skill before this one) never reaches it and stays
+          // byte-identical.
+          //
+          // Unlike the burst case's `knockback`, which is one impulse per
+          // detonation, a sweep's is a RATE (per second, ×step here): a wall
+          // passes over a body continuously, and the whole time it does. The
+          // distinction is load-bearing, not cosmetic — applying a burst-sized
+          // impulse every tick shoved the first browser test's target ~10m
+          // clear of the front, so the wave visibly swept a body it never
+          // damaged (WYSIWYG: "看着打到了却没伤" is a bug, spec §3).
+          // The shove centre sits one width BEHIND the front, not on it
+          // (second browser catch): `knockback` pushes radially away from
+          // the point it's given, so centring it on the front shoves bodies
+          // forward while the wall approaches and drags them back the moment
+          // it passes — a wash, and backwards for a wall. Behind the front,
+          // everything the wall is currently sweeping lies outward from that
+          // centre, so the push reads as the wall carrying them along.
+          if (c.knockback && travelling) {
+            this._p.x = ability.position.x - ability.direction.x * width;
+            this._p.z = ability.position.z - ability.direction.z * width;
+            this.targets.knockback(
+              this._p,
+              width * 2,
+              c.knockback * bpScale(ability.element, 'knockback', level) * step
+            );
+          }
           break;
         }
 
@@ -353,11 +381,17 @@ export class CombatSystem {
           const width = c.width * bpScale(ability.element, 'width', level);
           const perSecond = (c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level)) / LINE_SAMPLES;
           const amt = perSecond * step;
+          // M8 T2 (荆棘之路's 缠绕): an optional per-row slow refreshed at
+          // each sample, the zoneTick case's own shape — a row without
+          // `slowFactor` (beam, the only other lineTick) never reaches it.
+          const lineSlow = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+          const lineSlowTime = lineSlow ? c.slowTime * bpScale(ability.element, 'slowTime', level) : 0;
           for (let s = 1; s <= LINE_SAMPLES; s++) {
             const t = (s / LINE_SAMPLES) * ability.u;
             this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * t;
             this._book(ability.element, amt, this.targets.damage(this._p, width, amt, wux, wuxB));
+            if (lineSlow) this.targets.slow(this._p, width, lineSlow, lineSlowTime);
           }
           break;
         }
@@ -440,8 +474,11 @@ export class CombatSystem {
           const radius = c.radius * bpScale(ability.element, 'radius', level);
           const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
           // M8 T1: the refresh hold reads the row (`slowHold`) — T6 shipped
-          // it as a code literal, collected into the tuning ledger now.
-          if (slowFactor) this.targets.slow(ability.position, radius, slowFactor, c.slowHold ?? 0.5);
+          // it as a code literal, collected into the tuning ledger now. No
+          // `?? 0.5` fallback on purpose (M8 T2 review): a default would
+          // quietly restore the very literal this collected, so a renamed or
+          // dropped field should fail loudly instead.
+          if (slowFactor) this.targets.slow(ability.position, radius, slowFactor, c.slowHold);
           if (playerPos && c.healInside) {
             const dx = playerPos.x - ability.position.x;
             const dz = playerPos.z - ability.position.z;

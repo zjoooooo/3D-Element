@@ -136,13 +136,14 @@ export function zoneContaining(px, pz, zx, zz, life, radius) {
  * `rng`, when given (a `() => [0,1)` function — `ctx.rng`, mirroring
  * `App#runRng`), places it uniformly inside the disc (angle × √u for uniform
  * area, same "uniform-ish point" idiom `ParticleSystem#emit`'s own ball-point
- * code already uses in 3D). App never wires `ctx.rng` onto the ability
- * context today (grepped — only `App#runRng` exists, read solely by the echo
- * roll), so in practice this always takes the deterministic branch: a
- * golden-angle spiral off a running per-cast child index (`seq`, monotonic
- * across every fork event this cast ever has, not reset per event), so a
- * second or third fork event's children never land exactly on an earlier
- * one's spot the way a naive "always start at angle 0" scheme would.
+ * code already uses in 3D). App wires that context in a run as of M8 T1
+ * (`abilities.ctx.rng = runRng` — seeded, so a replay forks identically);
+ * the sandbox and every headless fixture leave it absent and take the
+ * deterministic branch instead: a golden-angle spiral off a running
+ * per-cast child index (`seq`, monotonic across every fork event this cast
+ * ever has, not reset per event), so a second or third fork event's
+ * children never land exactly on an earlier one's spot the way a naive
+ * "always start at angle 0" scheme would.
  *
  * @param {(() => number)|null} rng
  * @param {number} seq         this cast's running child index (0, 1, 2, ...)

@@ -22,7 +22,10 @@ const BURST_MODE = {
   lifebloom: BurstMode.WATER, // a dome that blooms open, foam read as petals
   frostnova: BurstMode.FROST, // shell tearing into rime plates — already ice-native
   boulder: BurstMode.EARTH, // dense dust ball
-  quake: BurstMode.EARTH // same family, bigger
+  quake: BurstMode.EARTH, // same family, bigger
+  // M8 T2: hail is ice-native like frostnova; the pillar is the earth family.
+  hailstorm: BurstMode.FROST,
+  stonepillar: BurstMode.EARTH
 };
 
 const _pos = new Vector3();

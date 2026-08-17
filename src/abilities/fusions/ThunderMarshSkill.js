@@ -51,10 +51,10 @@ const STRIKE_RADIUS = 0.05;
  * `boltHits` strikes total, each `boltDecay`× the last, starting at
  * `boltDamage` (数值表 anchor: ≈5 bolts × 51 = 255 over the pool's 4s).
  *
- * Seed pick is DETERMINISTIC — a running `_boltSeq` cycles the in-pool
- * candidates — because `ctx.rng` still isn't wired onto the ability ctx
- * (forkPlacement's own documented fallback situation, third instance now;
- * wiring it means an App change outside this task's file list — errata).
+ * Seed pick rolls the run's own seeded rng (`ctx.rng`, wired by App at M8
+ * T1 — replayable, never Math.random) and falls back to a running
+ * `_boltSeq` cycle over the in-pool candidates wherever that context is
+ * absent: the sandbox, and every headless fixture that doesn't supply one.
  *
  * Strike order safety: `chainHops` returns INDICES, but a strike can kill
  * and swap-remove, sliding a different body into a later index — so the

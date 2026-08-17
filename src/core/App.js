@@ -69,7 +69,7 @@ import { HUD, LoadingScreen } from '../ui/HUD.js';
 import { Editor } from '../ui/Editor.js';
 import { t, wuxingWord, wuxingPhrase } from '../ui/strings.js';
 
-import { settings, ELEMENTS, ELEMENT_META, CastShape, castShapeOf } from '../config/settings.js';
+import { settings, ELEMENTS, ELEMENT_META, CastShape, castShapeOf, permanentAuraElements } from '../config/settings.js';
 
 const HDR_URL = './hdri/spruit_sunrise.hdr';
 
@@ -92,7 +92,12 @@ const RUN_SLOT_KEYS = ['LMB', 'RMB', 'Q', 'E', 'R', 'T'];
  * derived from `settings.combat` rather than a hand-kept list, the same way
  * `_quickCastDistance` already reads a kind off `settings.combat` instead of
  * naming skills. */
-const AURA_ELEMENTS = ELEMENTS.filter((element) => settings.combat[element]?.kind === 'aura');
+const AURA_ELEMENTS = permanentAuraElements();
+
+/** M8 T2: "seated means standing" applies to the three permanent rings only —
+ * a timed aura field (磁暴/沙暴领域) is an ordinary cast that merely borrows
+ * the aura hit test, so every gate below asks this instead of the raw kind. */
+const isPermanentAura = (element) => AURA_ELEMENTS.includes(element);
 
 /**
  * Run mode's keyboard half of the loadout. The six on-stage abilities sit in
@@ -902,7 +907,7 @@ export class App {
     // press must be a no-op for an aura element, or pressing it would fire a
     // second, ordinary-lifecycle instance through this pipeline on top of the
     // permanent one _syncAuras() already keeps running (see its own doc).
-    if (settings.combat[element]?.kind === 'aura') return;
+    if (isPermanentAura(element)) return;
     if (isFusionId(element)) {
       if ((this.cooldowns.get(element) ?? 0) > 0) return;
       // M7 T1: no more parent aim.setElement borrow. The old borrow existed
@@ -1246,7 +1251,7 @@ export class App {
     // M6 T4: see _quickCast's own copy of this guard — this is the funnel for
     // autocast, the acquire-a-new-active demo shot, and a fusion hand-off's
     // shared target point, so an aura seat has to be refused here too.
-    if (settings.combat[element]?.kind === 'aura') return;
+    if (isPermanentAura(element)) return;
     // M6 T6 fix round: same exclusive-channel refusal `_cast` applies, ahead
     // of the mana gate/any five-field write (see `_dashing`'s own doc).
     // Skipped for a demo cast — `_dashDisplace`'s own `!demo` guard means a
@@ -1417,7 +1422,7 @@ export class App {
         // M6 T4: 装备即常驻 — a fused-away aura parent isn't directly seated
         // any more (see _syncAuras()'s own reasoning), so this follows the
         // same `!fused` narrowing the rest of the row already uses.
-        aura: !fused && settings.combat[element]?.kind === 'aura'
+        aura: !fused && isPermanentAura(element)
       };
     });
     this.runHud.syncSlots(view);
@@ -1497,7 +1502,7 @@ export class App {
       }
       // M6 T4: an aura has no cooldown and no mana cost to show — its badge
       // carries its own "常驻" state instead (see _syncBadges/RunHud).
-      if (settings.combat[element]?.kind === 'aura') {
+      if (isPermanentAura(element)) {
         slot.active = false;
         return;
       }

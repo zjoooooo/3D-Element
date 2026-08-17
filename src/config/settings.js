@@ -2522,17 +2522,36 @@ export const settings = {
     color: '#7ee08a', colorGlow: '#c9f7d0',
     lightColor: '#c9f7d0', lightIntensity: 6, lightRadius: 7
   },
+  // Thin, tall, crooked "spikes" read as bramble; `lifetime` (LineSweepSkill's
+  // own field name, NOT the fusion family's `life` — one name, no drift) is
+  // both how long the road stands and what the anchor2 timed-dps fold reads.
   thornroad: {
-    range: 11, minRange: 0, cooldown: 7, manaCost: 0, castAnim: 'cast1',
-    life: 4,
+    range: 11, minRange: 0, speed: 18, cooldown: 7, manaCost: 0, castAnim: 'cast1',
+    spikeCount: 20, riseTime: 0.12,
+    height: 1.1, heightJitter: 0.45, radius: 0.14,
+    facets: 4, taper: 0.4, roughness: 0.65, bend: 0.45, lean: 0.2,
+    lifetime: 4, sinkTime: 0.5,
     color: '#5fd98f', colorGlow: '#9ef0b6',
     lightColor: '#9ef0b6', lightIntensity: 5, lightRadius: 6
   },
+  // M8 T2 rides LineSweepSkill (rockspikes' template): the VFX field set
+  // below is that class's own contract — every one of them is read
+  // unconditionally per frame, so a missing field NaN-poisons a transform.
+  // A wave is a wide, low, blunt "spike" that leans hard into the sweep.
   tidalsurge: {
     range: 11, minRange: 0, speed: 16, cooldown: 5, manaCost: 0, castAnim: 'cast1',
+    spikeCount: 14, riseTime: 0.1,
+    height: 1.3, heightJitter: 0.25, radius: 0.55,
+    facets: 6, taper: 0.55, roughness: 0.3, bend: 0.25, lean: 0.55,
+    lifetime: 0.5, sinkTime: 0.35,
     color: '#6fb8e8', colorGlow: '#bfe6ff',
     lightColor: '#bfe6ff', lightIntensity: 6, lightRadius: 6
   },
+  // M8 T2 rides ZoneBurstSkill (boulder/swordrain's template). No preEffect
+  // of its own (neither `_hasBladeRain` nor `_hasFallingRock` matches these
+  // ids) — the burst shell + shockwave decal + puff is the whole beat, once
+  // per wave; `burstLife` covers the last wave's own delay so the shell is
+  // still up when it lands.
   hailstorm: {
     range: 12, minRange: 0, speed: 20, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     zoneRadius: 3.8, burstLife: 2.1,
@@ -2895,6 +2914,23 @@ export const ELEMENT_META = {
   sandfield: { label: 'Sandstorm Field', accent: '#c9a06a', hint: 'Sandstorm Field', cast: CastShape.ZONE },
   stonepillar: { label: 'Pillar of Heaven', accent: '#b8875a', hint: 'Pillar of Heaven', cast: CastShape.ZONE }
 };
+
+/**
+ * The skills that stand on their own once seated (装备即常驻, M6 T4) — every
+ * aura-kind row EXCEPT the timed fields, which are ordinary casts that
+ * happen to use the aura hit test (M8: 磁暴/沙暴领域, and the fusion 锋岩星阵
+ * before them). A timed one is exactly the one carrying its own `life`.
+ *
+ * Derived, not hand-kept, so a new aura row can't be forgotten — but the
+ * discriminator has to be this pair of facts, not the kind alone: App hands
+ * every member a free standing cast with no cooldown and no mana, which for
+ * a timed field would be flatly wrong.
+ */
+export function permanentAuraElements() {
+  return ELEMENTS.filter(
+    (element) => settings.combat[element]?.kind === 'aura' && settings[element]?.life === undefined
+  );
+}
 
 /** How the given ability is aimed. Line unless its metadata says otherwise. */
 export function castShapeOf(element) {

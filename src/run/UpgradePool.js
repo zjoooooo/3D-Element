@@ -33,7 +33,14 @@ export class UpgradePool {
       // M6 T12: Lv3/Lv5 are 质变 breakpoints, not just another +25% — append
       // that tier's one-line description (strings `bp.<element>.lv3`/`.lv5`,
       // t() so a language flip picks it up like every other UI string).
-      const bp = nextLevel === 3 || nextLevel === 5 ? ` · ${t(`bp.${element}.lv${nextLevel}`)}` : '';
+      // M8 T2 (review catch): only a skill that actually HAS that tier gets
+      // the line. The second wave ships no breakpoint tables, and an
+      // unconditional append printed the raw fallback key onto the card
+      // ("伤害 +25% · bp.hailstorm.lv3") — t()'s bottom rung is loud by
+      // design, which is right for a missing translation and wrong for a
+      // tier that legitimately doesn't exist.
+      const tier = settings[element]?.breakpoints?.[`lv${nextLevel}`];
+      const bp = tier ? ` · ${t(`bp.${element}.lv${nextLevel}`)}` : '';
       candidates.push({
         weight: w.upgrade,
         card: {

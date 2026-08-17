@@ -93,4 +93,17 @@
 
 ## 执行后勘误(执行会话填写)
 
-(待回填)
+### T1 清账 + 十技骨架(664cc21)
+- 十技以数据先落地(ELEMENTS/META/combat 行/wuxingOf/cast 块 + light 三件套),类未注册前经 `cast()` 与升级池双闸 inert;锚2 第二块自带 shape 表与解算器(waves 求和、timed dps×life/cd),M6 块相应**限域到它自己的十三技**(计数 pin 单一来源迁至 M8 块)。
+- 三笔 M7 债清:`ctx.rng` 接线(App run 支注入 `runRng`,沙盒不注)、marsh `slowHold` 入行、负拉力 `kbMult` 先例入 '4+0' 之外的平元素行。
+- **评审 SHIP,带出五项**(逐条已在 T2 处理,见下)。另记两条 Info:hailstorm 以「每波满伤 ×6」表达(53.4×6=320.4,较表 320 +0.13%);计划 T1 的浏览器项「升级池能刷出新技卡」在池门下**不可能达成**——条目本身写错,实际验证的是"未注册 id 永不入池"。
+- rng 接线的**顺带影响**:地心火山散布、业火燎原分叉在 run 内由金角回退切换为种子随机(类文档本意如此,但计划只点名两处,故记此)。
+
+### T2 纯数据四技 + 两个可选行字段
+- 潮汐涌浪/荆棘之路挂 LineSweepSkill,冰雹风暴/石柱擎天挂 ZoneBurstSkill(BURST_MODE 补 FROST/EARTH);sweep 增可选 `knockback`、lineTick 增可选 `slowFactor/slowTime`,均 boulder 式"缺省语义零变"(beam/rockspikes 零回归断言)。
+- **命名统一**:LineSweep 家族的站立时长字段是 `lifetime`,M7 融合家族是 `life`;thornroad 两界都沾,裁定**从模板名 `lifetime`**(不造重复字段),锚2 解算器改读 `life ?? lifetime`——原写法会让 thornroad 以"永续 dps"蒙混过带(实际 55 落在 [30,70] 内属侥幸,已修正为折算 31.4)。
+- **浏览器抓出真 bug(WYSIWYG)**:sweep 的 `knockback` 按 tick 施加,而 7 是按单次冲量定的 → 水墙把敌推飞 9.91m、**跑赢自己的伤害**(kbX 20.71,零伤)。裁定:**sweep 的击退是速率(×step),burst 的是单次冲量**——墙持续推过,爆发只炸一次;断言改钉 `knockback/60`。此前另三条 FAIL 是测试自身错误(减速在过期后才量、石柱敌摆在圆心使击退方向退化),已修正。
+- **T1 评审五项处理**:①[Major] `kind:'aura'` 被 App 的常驻光环推导吞掉(入座即免费常驻,无 CD 无蓝)——磁暴/沙暴是限时施放,若不修则 T3 注册即撞墙。修法:新导出 `permanentAuraElements()` =「aura 行且**无 life**」,App 五处门统一走它(锋岩星阵靠 fusion id 侥幸躲过,平元素躲不了);②[Medium] 升级卡在 Lv3/Lv5 无条件拼 `bp.<el>.lv3`,第二波无 breakpoints 表 → 卡面漏裸键,改为**该档存在才拼**(sabotage 验证有判别力);③[Minor] VolcanoSkill 陈旧 rng 注释已改(VineBlaze/ThunderMarsh 两处同病同轮已改);④[Minor] SHAPE2 完备性钉已补(每个 wave-2 id 要么受检要么具名豁免);⑤[Minor] `slowHold ?? 0.5` 回退删除——刚收走的字面量不该由回退复活。
+- **第二轮浏览器又抓一条同源设计问题**:`targets.knockback` 是**径向**推离给定点,把中心放在波前 → 波未及时把敌推前、掠过后立刻往回拽,净效为零(实测 kbX -0.23)。裁定:**击退中心置于波前后方一个 width**,半径 width×2——墙正在扫过的目标恒在该中心外侧,推力方向即"墙带着走";断言钉住中心坐标(否则回退到波前无人发现)。教训记入:**径向 API 表达"定向推"时,中心点的选择就是方向设计的一部分**。
+- 两条 FAIL 属测量误差已修:击退是一次冲量、按 6/s 指数衰减(半秒后只剩十分之一)→ 改**峰值采样**;`slowed` 是 Float32Array,土克水先挂淤塞使击晕 1.0 被翻倍并**封顶 0.9**,而 0.9 存回读为 0.89999998 → 断言改 `> 0.89` 并注明封顶来由。
+- **纪律违规自记**:浏览器验证在飞时改了 src(vite 全量重载),污染了那一轮——这正是 M7 勘误里自己写下的禁令,重跑修正。

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 
 import { createRng } from '../src/run/rng.js';
-import { settings, ELEMENTS, ELEMENT_META } from '../src/config/settings.js';
+import { settings, ELEMENTS, ELEMENT_META, permanentAuraElements } from '../src/config/settings.js';
 import { TideSchedule, WUXING, WUXING_LABEL, BEATS, FEEDS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
@@ -38,7 +38,9 @@ import { VolcanoSkill } from '../src/abilities/fusions/VolcanoSkill.js';
 import { PrismArraySkill } from '../src/abilities/fusions/PrismArraySkill.js';
 import { BladeTideSkill } from '../src/abilities/fusions/BladeTideSkill.js';
 import { ThunderMarshSkill } from '../src/abilities/fusions/ThunderMarshSkill.js';
-import { FUSION_CLASSES } from '../src/abilities/AbilityManager.js';
+import { FUSION_CLASSES, ABILITY_TYPES } from '../src/abilities/AbilityManager.js';
+import { LineSweepSkill } from '../src/abilities/templates/LineSweepSkill.js';
+import { ZoneBurstSkill } from '../src/abilities/templates/ZoneBurstSkill.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -252,12 +254,26 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   function dps2(el) {
     const row = settings.combat[el];
     if (row.dps !== undefined) {
-      const life = settings[el].life;
+      // Two field names for one idea, both live in the codebase: the
+      // LineSweep family calls a field's standing time `lifetime`, the M7
+      // fusion family calls it `life`. Read either — a timed row that folds
+      // as if it channelled forever would sail through the band on a number
+      // it never actually sustains (M8 T2 caught exactly that for thornroad).
+      const life = settings[el].life ?? settings[el].lifetime;
       return life ? (row.dps * life) / settings[el].cooldown : row.dps;
     }
     const waveSum = (row.waves ?? [{ damageMult: 1 }]).reduce((s, w) => s + w.damageMult, 0);
     return (row.damage * waveSum) / settings[el].cooldown;
   }
+  // Completeness (review catch): every wave-2 id is either shape-checked here
+  // or an explicitly named self-resolving exemption — deleting a row from
+  // SHAPE2 must fail loudly, not quietly drop that skill out of the band.
+  const SELF_EXEMPT2 = ['piercelance', 'stormfield'];
+  assert.deepEqual(
+    [...Object.keys(SHAPE2), ...SELF_EXEMPT2].sort(),
+    WAVE2.slice().sort(),
+    'anchor2 M8: every second-wave id is either shape-checked or a named self exemption'
+  );
   for (const [el, coef] of Object.entries(SHAPE2)) {
     const actual = dps2(el);
     const lo = BASE * coef * 0.6, hi = BASE * coef * 1.4;
@@ -318,6 +334,163 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M8 T1: second-wave roster (data/mana tiers/anchor2/slowHold/rng seed)');
+}
+
+/* ---- M8 T2: sweep knockback + lineTick slow, and the four template arts ---- */
+{
+  // Both new row fields follow the boulder/quake precedent exactly: optional,
+  // absent means "behave as before", present means one extra composed call.
+  const kbCalls = [];
+  const slowCalls = [];
+  const mkCombat = () => new CombatSystem({
+    damage: () => 1,
+    damageOnce: () => 1,
+    damageRing: () => 1,
+    slow: (p, r, f, d) => slowCalls.push({ r, f, d }),
+    knockback: (p, r, impulse) => kbCalls.push({ x: p.x, z: p.z, r, impulse })
+  });
+
+  // --- sweep.knockback (潮汐涌浪's water wall) ---
+  {
+    const combat = mkCombat();
+    const surge = {
+      element: 'tidalsurge', phase: 'travel', u: 0.5,
+      position: { x: 3, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 11,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [surge]);
+    assert.equal(kbCalls.length, 1, 'sweep: a row with knockback shoves once per sampled tick');
+    // A RATE, not an impulse (browser catch): a burst-sized shove applied
+    // every tick outran the sweep's own damage front — the wall swept bodies
+    // it never hit. ×step keeps the total over a pass comparable to one
+    // burst impulse and makes it frame-rate independent.
+    assert.ok(
+      Math.abs(kbCalls[0].impulse - settings.combat.tidalsurge.knockback / 60) < 1e-9,
+      "sweep: the shove is the row's own value per SECOND (×step), not a per-tick impulse"
+    );
+    assert.ok(kbCalls[0].r > 0, 'sweep: the shove covers the sampled width');
+    // Centre one width BEHIND the front (browser catch): knockback pushes
+    // radially outward, so a centre ON the front drags bodies back the
+    // instant it passes them — the wall would sweep, then suck.
+    const width = settings.combat.tidalsurge.width;
+    assert.ok(
+      Math.abs(kbCalls[0].x - (surge.position.x - width)) < 1e-9 && Math.abs(kbCalls[0].z) < 1e-9,
+      `sweep: the shove centres one width behind the front (got ${kbCalls[0].x}, want ${surge.position.x - width})`
+    );
+
+    // Zero regression: rockspikes (a sweep row with NO knockback) shoves nothing.
+    kbCalls.length = 0;
+    const spikes = {
+      element: 'rockspikes', phase: 'travel', u: 0.5,
+      position: { x: 3, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 9,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    mkCombat().tick(1 / 60, [spikes]);
+    assert.equal(kbCalls.length, 0, 'sweep: a row without knockback is byte-identical to before (no shove)');
+  }
+
+  // --- lineTick.slowFactor (荆棘之路's tangle) ---
+  {
+    slowCalls.length = 0;
+    const combat = mkCombat();
+    const thorn = {
+      element: 'thornroad', phase: 'impact', impactTime: 0.2, fadeTime: 0, u: 1,
+      position: { x: 5, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 11,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [thorn]);
+    assert.ok(slowCalls.length > 0, 'lineTick: a row with slowFactor tangles what it burns');
+    assert.equal(slowCalls[0].f, settings.combat.thornroad.slowFactor, "lineTick: the tangle reads the row's own factor");
+    assert.equal(slowCalls[0].d, settings.combat.thornroad.slowTime, "lineTick: and the row's own duration");
+
+    // Zero regression: beam (a lineTick row with NO slowFactor) never slows.
+    slowCalls.length = 0;
+    const beam = {
+      element: 'beam', phase: 'impact', impactTime: 0.2, fadeTime: 0, u: 1,
+      position: { x: 5, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 12,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    mkCombat().tick(1 / 60, [beam]);
+    assert.equal(slowCalls.length, 0, 'lineTick: a row without slowFactor never slows (beam regression)');
+  }
+
+  // --- the four arts resolve through the templates they registered on ---
+  assert.equal(ABILITY_TYPES.tidalsurge, LineSweepSkill, 'registry: tidalsurge rides LineSweepSkill');
+  assert.equal(ABILITY_TYPES.thornroad, LineSweepSkill, 'registry: thornroad rides LineSweepSkill');
+  assert.equal(ABILITY_TYPES.hailstorm, ZoneBurstSkill, 'registry: hailstorm rides ZoneBurstSkill');
+  assert.equal(ABILITY_TYPES.stonepillar, ZoneBurstSkill, 'registry: stonepillar rides ZoneBurstSkill');
+
+  // Both templates read VFX params straight off `settings[element]` — a
+  // missing one reads undefined and NaN-poisons a transform or the light
+  // pool (M6 T5/T6 lesson, every fusion class since has paid for it).
+  const LINESWEEP_FIELDS = ['spikeCount', 'radius', 'height', 'lifetime', 'riseTime', 'sinkTime', 'facets', 'taper', 'roughness', 'bend', 'lean', 'heightJitter'];
+  const ZONEBURST_FIELDS = ['zoneRadius', 'burstLife', 'speed'];
+  for (const el of ['tidalsurge', 'thornroad']) {
+    for (const f of LINESWEEP_FIELDS) assert.ok(settings[el][f] !== undefined, `settings.${el}: LineSweepSkill reads ${f}`);
+  }
+  for (const el of ['hailstorm', 'stonepillar']) {
+    for (const f of ZONEBURST_FIELDS) assert.ok(settings[el][f] !== undefined, `settings.${el}: ZoneBurstSkill reads ${f}`);
+  }
+
+  // 命名统一 (M8 T2): the LineSweep family's own field for "how long the
+  // field stands" is `lifetime`; the M7 fusion family called it `life`.
+  // thornroad is the first skill to sit in both worlds, so the timed-dps
+  // resolver below (and the anchor2 block above) accepts either name —
+  // pinned here so a rename can't silently drop a skill out of the band.
+  assert.equal(settings.thornroad.life, undefined, 'thornroad: no duplicate `life` — the template field `lifetime` is the single source');
+  assert.equal(settings.thornroad.lifetime, 4, 'thornroad: the thorn road stands 4s (数值表)');
+  {
+    const timedLife = (el) => settings[el].life ?? settings[el].lifetime;
+    const dps = (settings.combat.thornroad.dps * timedLife('thornroad')) / settings.thornroad.cooldown;
+    const baseline = (settings.combat.ice.damage / settings.ice.cooldown) * 1.0; // 宽线 coefficient
+    assert.ok(dps >= baseline * 0.6 && dps <= baseline * 1.4, `anchor2: thornroad ${dps.toFixed(1)} inside the 宽线 band`);
+  }
+
+  // --- 常驻 vs 限时 aura (review catch, T3 landmine defused early) ---
+  // App derives its permanent-aura roster off `combat[el].kind === 'aura'`
+  // and hands every member a free standing cast the moment it is seated —
+  // no cooldown, no mana, no five-field write (装备即常驻). The second wave
+  // has two TIMED aura rows (磁暴/沙暴领域) that must cast normally, so the
+  // discriminator can no longer be the kind alone: a timed row carries its
+  // own `life`, a permanent one never does.
+  for (const el of ['bladeorbit', 'firering', 'sunwheel']) {
+    assert.equal(settings.combat[el].kind, 'aura', `fixture: ${el} is an aura row`);
+    assert.equal(settings[el].life, undefined, `permanent aura: ${el} carries no life — it never ends on its own`);
+  }
+  for (const el of ['cyclonecut', 'sandfield']) {
+    assert.equal(settings.combat[el].kind, 'aura', `fixture: ${el} rides the aura kind for its hit test`);
+    assert.ok(settings[el].life > 0, `timed aura: ${el} carries a life — an ordinary cast, not a standing one`);
+    assert.equal(settings[el].manaCost !== undefined, true, `timed aura: ${el} is priced like a cast`);
+  }
+  assert.deepEqual(
+    permanentAuraElements().slice().sort(),
+    ['bladeorbit', 'firering', 'sunwheel'],
+    'permanent auras: exactly the three standing rings — a timed field must never be seated as permanent'
+  );
+
+  // --- breakpoint card line (review catch): only when the tier exists ---
+  // UpgradePool appends `t('bp.<el>.lv3')` at Lv3/Lv5. The second wave has no
+  // breakpoint tables, so an unguarded append would print the raw key onto
+  // the card ("伤害 +25% · bp.hailstorm.lv3").
+  {
+    const loadout = new Loadout();
+    loadout.acquire('hailstorm');
+    while (loadout.levelOf('hailstorm') < 2) loadout.upgrade('hailstorm'); // next draw offers Lv3
+    const pool = new UpgradePool(createRng(71), loadout, new Modifiers());
+    let sawRawKey = false;
+    for (let i = 0; i < 60; i++) {
+      for (const card of pool.draw(4, 4) ?? []) {
+        if (typeof card.body === 'string' && card.body.includes('bp.')) sawRawKey = true;
+      }
+    }
+    assert.ok(!sawRawKey, 'upgrade card: a skill with no breakpoint table never prints a raw bp.* key');
+  }
+
+  console.log('ok  M8 T2: sweep knockback / lineTick slow (+regressions), four template arts, aura/bp guards');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

@@ -41,8 +41,9 @@ const ARC_HEIGHT = 2.4; // metres the bomb arcs upward mid-hop
  * rises at the aimed point over `coneRiseTime` (0.4s), then spits three
  * magma bombs, each scattered to its own point within `scatterRadius` (4m)
  * of the cone (`forkPlacement`, reused wholesale from VineBlazeSkill — same
- * deterministic golden-angle fallback when `ctx.rng` is absent, which it
- * always is today, see that function's own doc). Each bomb's own burst
+ * run's seeded `ctx.rng` once App wires it (M8 T1 — so a replay scatters
+ * identically), and the deterministic golden-angle fallback wherever that
+ * context is absent, see that function's own doc). Each bomb's own burst
  * damage/radius/stun rides `settings.combat.fusions['3+4']`'s `waves` table
  * through `CombatSystem`'s generalised 'burst' case (see that file's own
  * doc) — this class's only job there is to move `ability.position` to the
