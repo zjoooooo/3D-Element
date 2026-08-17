@@ -1,5 +1,5 @@
 import GUI from 'lil-gui';
-import { settings, ELEMENTS, CAST_ANIMATIONS } from '../config/settings.js';
+import { settings, ELEMENTS, ELEMENT_META, CAST_ANIMATIONS } from '../config/settings.js';
 import { CHARACTERS } from '../animation/CharacterController.js';
 import { ABILITY_TYPES } from '../abilities/AbilityManager.js';
 import { PresetManager } from './PresetManager.js';
@@ -44,6 +44,15 @@ export class Editor {
     this._buildSnare();
     this._buildGlacier();
     this._buildFireball();
+
+    // M6 T8: the thirteen M6 T2 data-only skills each get one reflected fold
+    // (see _buildGenericSkill) instead of a hand-written one — everything in
+    // ELEMENTS that isn't one of the seven folds built above.
+    const handWritten = new Set(['ice', 'thunder', 'meteor', 'beam', 'snare', 'glacier', 'fireball']);
+    ELEMENTS.filter((element) => !handWritten.has(element)).forEach((element) =>
+      this._buildGenericSkill(element)
+    );
+
     this._buildDummies();
     this._buildEnvironment();
     this._buildPost();
@@ -1674,6 +1683,79 @@ export class Editor {
     ground.addColor(c, 'colorCrack').name('embers in it');
     ground.addColor(c, 'colorShockA').name('shockwave inner');
     ground.addColor(c, 'colorShockB').name('shockwave outer');
+  }
+
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * One fold for a data-only M6 T2 skill, built by reflecting over its own
+   * `settings[element]` block instead of hand-listing every field the way
+   * the seven folds above do. A fourteenth data-only skill later needs
+   * nothing here — only its settings block and a line in `ELEMENTS`.
+   *
+   * Every control still binds straight to the live `settings[element]`
+   * object (`folder.add(c, key, …)`, same as every hand-written fold above),
+   * so this carries the class doc's "no rebuild" guarantee for free: the
+   * ability classes already read `settings[this.element]` fresh in
+   * `onSpawn`/per tick (see e.g. `Ability#settings`, `ZoneBurstSkill`), so a
+   * dragged slider lands on the next cast without any wiring here.
+   *
+   * Field → control, decided by the *shape* of the current value:
+   *   - key `castAnim`      → the same dropdown the seven folds use
+   *                           (`Editor.castAnimation`), not a slider.
+   *   - string starting `#` → colour picker (`color`, `colorGlow`,
+   *                           `lightColor`, …).
+   *   - number              → slider, range inferred as `[value × 0.1,
+   *                           value × 3]` — a knob can be tuned down to a
+   *                           tenth or up to three times whatever was
+   *                           authored. `value === 0` breaks that formula
+   *                           (both ends collapse to 0), so a zero gets a
+   *                           fixed 0..1 step-0.01 band instead — every zero
+   *                           across these thirteen blocks is a float-ish
+   *                           field (`minRange`, or `speed`/`cooldown` on a
+   *                           permanent aura), not a count, so a small fixed
+   *                           band is a sensible default to tune from. Step
+   *                           size otherwise follows the value's own
+   *                           granularity, not any per-field knowledge: a
+   *                           whole number (counts like `swordCount`,
+   *                           `hops`) steps by 1, anything with a fractional
+   *                           part steps by 0.01.
+   *   - anything else       → SKIPPED. The only other shape any block
+   *                           carries is `breakpoints: {lv3:{…}, lv5:{…}}`
+   *                           — T12 Lv3/Lv5 design data (multipliers/deltas
+   *                           consumed by `run/breakpoints.js`), not a
+   *                           live-tuning knob, and not safe to slider-ize
+   *                           generically since its "values" are per-field
+   *                           factors rather than standalone numbers. A
+   *                           plain object simply matches no branch below
+   *                           and falls through untouched, which is also the
+   *                           right behaviour for any other non-primitive
+   *                           nobody has anticipated here.
+   */
+  _buildGenericSkill(element) {
+    const c = settings[element];
+    const folder = this.gui.addFolder(ELEMENT_META[element]?.label ?? element);
+
+    for (const key of Object.keys(c)) {
+      if (key === 'castAnim') {
+        Editor.castAnimation(folder, c);
+        continue;
+      }
+      const value = c[key];
+      if (typeof value === 'string' && value.startsWith('#')) {
+        folder.addColor(c, key);
+        continue;
+      }
+      if (typeof value === 'number') {
+        const min = value === 0 ? 0 : Math.min(value * 0.1, value * 3);
+        const max = value === 0 ? 1 : Math.max(value * 0.1, value * 3);
+        const step = value === 0 ? 0.01 : Number.isInteger(value) ? 1 : 0.01;
+        Editor.range(folder, c, key, min, max, step);
+      }
+      // else: `breakpoints` (a plain object) or any other non-primitive — skipped.
+    }
+
+    return folder;
   }
 
   _buildDummies() {
