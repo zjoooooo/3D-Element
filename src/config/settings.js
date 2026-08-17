@@ -2449,7 +2449,28 @@ export const settings = {
    * that branch's own comment).
    */
   fusions: {
-    '1+3': { cooldown: 6, range: 10, castAnim: 'cast1', color: '#74d7a8', colorGlow: '#e86f4f' }, // 业火燎原
+    // M7 T2 (VineBlazeSkill): unlike the other four rows (still cast-side
+    // only, T3-T6's own problem), '1+3' is `kind:'self'` (see
+    // combat.fusions['1+3']) — the class resolves its own hits and never
+    // touches CombatSystem, so every mechanism number the plan's 数值表
+    // gives it lives here instead of a combat row, same split
+    // dashstrike/chainbolt already established for the other two
+    // self-resolved specials. radius/dps/life/forkDps/forkCount/maxZones/
+    // forkOffset/birthTime are all spec numbers (数值表: 主区180=45×4s,
+    // 分叉27×0.6, forkCount 2, cap 5 含主区, radius 2.2 shared by every
+    // zone, forkOffset/birthTime are the plan's own "≤0.8m"/"0.3s") — the
+    // 数值分层铁律 (settings basis × modifier layer, never hardcoded in
+    // code) applies to a self-resolved skill's own top-level block exactly
+    // as it does to combat rows. lightColor/lightIntensity/lightRadius are
+    // new too: Ability#_updateLight reads them unconditionally every active
+    // frame and NaN-poisons LightPool.damp() permanently if absent (M6 T5/T6
+    // lesson) — T1's skeleton row left this cast-side-only, so this is the
+    // first task to actually spawn the class and hit that trap.
+    '1+3': {
+      cooldown: 6, range: 10, castAnim: 'cast1', color: '#74d7a8', colorGlow: '#e86f4f', // 业火燎原
+      radius: 2.2, dps: 45, life: 4, forkDps: 27, forkCount: 2, maxZones: 5, forkOffset: 0.8, birthTime: 0.3,
+      lightColor: '#e86f4f', lightIntensity: 6, lightRadius: 5
+    },
     '3+4': { cooldown: 8, range: 9, castAnim: 'cast1', color: '#b58f5e', colorGlow: '#e86f4f' }, // 地心火山
     '4+0': { cooldown: 7, range: 9, castAnim: 'cast1', color: '#d8b46a', colorGlow: '#f5e6c8' }, // 锋岩星阵
     '0+2': { cooldown: 5, range: 11, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#d8b46a' }, // 霜刃洪流

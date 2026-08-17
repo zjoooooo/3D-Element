@@ -14,6 +14,7 @@ import { ChainBoltSkill } from './templates/ChainBoltSkill.js';
 import { ELEMENTS } from '../config/settings.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
 import { isFusionId, pairKeyOf } from '../run/fusions.js';
+import { VineBlazeSkill } from './fusions/VineBlazeSkill.js';
 
 /**
  * Registry: adding an ability means adding one line here.
@@ -75,7 +76,7 @@ export const ABILITY_TYPES = {
  * pair safely no-ops.
  */
 export const FUSION_CLASSES = {
-  '1+3': null, // 业火燎原 (T2)
+  '1+3': VineBlazeSkill, // 业火燎原 (T2)
   '3+4': null, // 地心火山 (T3)
   '4+0': null, // 锋岩星阵 (T4)
   '0+2': null, // 霜刃洪流 (T5)
@@ -108,20 +109,25 @@ export class AbilityManager {
 
     this.pools = new Map();
     for (const [element, Type] of Object.entries(ABILITY_TYPES)) {
-      this.pools.set(
-        element,
-        new ObjectPool(() => {
-          // The `element` second argument is only read by the M6 T4 template
-          // classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill), which
-          // register the same class under several ids — every hand-written
-          // ability's constructor takes one argument and simply ignores it.
-          const ability = new Type(this.ctx, element);
-          this.ctx.scene.add(ability.group);
-          ability.group.visible = false;
-          return ability;
-        })
-      );
+      this.pools.set(element, new ObjectPool(() => this._spawnInstance(Type, element)));
     }
+  }
+
+  /**
+   * Build one pooled instance: construct, add its group to the scene,
+   * hide it until the first `spawn()`. Shared by the constructor's eager
+   * `ABILITY_TYPES` loop above and `cast()`'s own lazy fusion branch below.
+   *
+   * The `element` second argument is only read by the M6 T4 template
+   * classes (LineSweepSkill/ZoneBurstSkill/OrbitAuraSkill), which register
+   * the same class under several ids — every hand-written ability's
+   * constructor takes one argument and simply ignores it.
+   */
+  _spawnInstance(Type, element) {
+    const ability = new Type(this.ctx, element);
+    this.ctx.scene.add(ability.group);
+    ability.group.visible = false;
+    return ability;
   }
 
   select(element) {
@@ -143,10 +149,22 @@ export class AbilityManager {
   cast(origin, direction, distance, element = this.selected) {
     // M7 T1: a fusion id resolves through FUSION_CLASSES by pair-key
     // instead of ABILITY_TYPES by literal id (see that registry's own
-    // doc) — every entry is still null, so this is a no-throw no-op until
-    // T2-T6 land real classes.
+    // doc) — a still-null entry (T3-T6, not yet landed) is a no-throw
+    // no-op, same as an ABILITY_TYPES miss.
     const registered = isFusionId(element) ? FUSION_CLASSES[pairKeyOf(element)] : ABILITY_TYPES[element];
     if (!registered) return null;
+
+    // M7 T2: unlike ABILITY_TYPES (a fixed, small id set the constructor
+    // pools eagerly, above), the set of literal fusion ids that will ever
+    // actually be cast can't be known up front — many different specific
+    // parent-name pairs can share one pair-key (fusions.js#pairKeyOf), and
+    // every one of them still pools separately, keyed by its own literal id
+    // (every call below keys `this.pools` off `ability.element`, i.e. the
+    // literal id, never the pair-key). Build this one pool lazily, the
+    // first time this exact literal id is ever cast.
+    if (isFusionId(element) && !this.pools.has(element)) {
+      this.pools.set(element, new ObjectPool(() => this._spawnInstance(registered, element)));
+    }
 
     // Retire the oldest cast rather than letting the scene grow without bound.
     // M6 T4: a permanent aura (`ability.permanent` — OrbitAuraSkill) never

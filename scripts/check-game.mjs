@@ -26,6 +26,15 @@ import { PlayerState } from '../src/run/PlayerState.js';
 import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
 import { chainHops, resolveTarget } from '../src/abilities/templates/ChainBoltSkill.js';
 import { dashTarget, dashLineHits, scaledDashRange } from '../src/abilities/templates/DashStrikeSkill.js';
+import {
+  VineBlazeSkill,
+  zoneTick,
+  liveZoneCount,
+  forkBudget,
+  zoneContaining,
+  forkPlacement
+} from '../src/abilities/fusions/VineBlazeSkill.js';
+import { FUSION_CLASSES } from '../src/abilities/AbilityManager.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -2444,6 +2453,253 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.doesNotThrow(() => combat.tick(1 / 60, [fakeAbility]), 'combat: an unimplemented kind must not throw');
   assert.equal(calls.length, 0, "combat: an unimplemented kind ('marsh') deals no damage yet — the switch's default silently skips it");
   console.log("ok  M7 T1: unimplemented combat kind ('marsh') no-ops safely");
+}
+
+/* ---- M7 T2: VineBlazeSkill (业火燎原) — pure helpers ---- */
+{
+  // zoneTick: leaky-bucket accumulation, mirrors CombatSystem's own _dot/_take.
+  let r = zoneTick(45, 1 / 60, 0);
+  assert.equal(r.amount, 0, 'zoneTick: nothing banked below 1');
+  assert.ok(Math.abs(r.accum - 0.75) < 1e-9, 'zoneTick: accumulates dps×step exactly');
+  r = zoneTick(45, 1 / 60, r.accum); // 0.75 + 0.75 = 1.5, crosses 1
+  assert.ok(r.amount >= 1, 'zoneTick: pays out once the bucket reaches 1');
+  assert.ok(Math.abs(r.amount - 1.5) < 1e-9, 'zoneTick: pays the WHOLE bucket, not a clamped 1');
+  assert.equal(r.accum, 0, 'zoneTick: resets to 0 after paying out');
+
+  r = zoneTick(90, 1, 0); // a single tick alone already exceeds 1
+  assert.ok(Math.abs(r.amount - 90) < 1e-9, 'zoneTick: a single oversized tick still pays its whole amount');
+
+  assert.equal(liveZoneCount(new Float32Array([4, 0, 2, 0, 0])), 2, 'liveZoneCount: counts life > 0 only');
+
+  assert.equal(forkBudget(1, 2, 5), 2, 'forkBudget: full budget when room allows');
+  assert.equal(forkBudget(3, 2, 5), 2, 'forkBudget: exactly fills the cap');
+  assert.equal(forkBudget(4, 2, 5), 1, 'forkBudget: partial budget when only one slot remains');
+  assert.equal(forkBudget(5, 2, 5), 0, 'forkBudget: cap already reached truncates a further fork to 0');
+
+  const zx = new Float32Array([0, 5, -5, 0, 0]);
+  const zz = new Float32Array([0, 0, 0, 0, 0]);
+  const life = new Float32Array([4, 2, 0, 0, 0]); // slot 2 has a stale position but is dead
+  assert.equal(zoneContaining(0.5, 0.5, zx, zz, life, 2.2), 0, 'zoneContaining: hits the main zone');
+  assert.equal(zoneContaining(5.5, 0, zx, zz, life, 2.2), 1, 'zoneContaining: hits a live child');
+  assert.equal(zoneContaining(-5.5, 0, zx, zz, life, 2.2), -1, 'zoneContaining: a dead slot never matches, even at its old position');
+  assert.equal(zoneContaining(50, 50, zx, zz, life, 2.2), -1, 'zoneContaining: outside every zone');
+
+  const a = forkPlacement(null, 0, 0.8);
+  const b = forkPlacement(null, 1, 0.8);
+  assert.ok(Math.abs(Math.hypot(a.dx, a.dz) - 0.8) < 1e-9, 'forkPlacement: deterministic fallback sits exactly at maxOffset');
+  assert.ok(Math.abs(Math.hypot(b.dx, b.dz) - 0.8) < 1e-9, 'forkPlacement: deterministic fallback sits exactly at maxOffset (2nd child)');
+  assert.ok(Math.abs(a.dx - b.dx) > 1e-6 || Math.abs(a.dz - b.dz) > 1e-6, 'forkPlacement: consecutive children never land on the same spot (golden-angle spread)');
+  let ci = 0;
+  const stream = [0.1, 0.6];
+  const c = forkPlacement(() => stream[ci++], 0, 0.8);
+  assert.ok(Math.hypot(c.dx, c.dz) <= 0.8 + 1e-9, 'forkPlacement: rng branch stays within maxOffset');
+
+  console.log('ok  M7 T2: VineBlazeSkill pure helpers (zoneTick/forkBudget/zoneContaining/forkPlacement)');
+}
+
+/* ---- M7 T2: VineBlazeSkill — headless lifecycle against the real class ---- */
+{
+  assert.equal(FUSION_CLASSES['1+3'], VineBlazeSkill, "AbilityManager: '1+3' resolves to VineBlazeSkill");
+
+  const damageCalls = [];
+  const bookCalls = [];
+  const fakeTargets = {
+    damage: (pos, r, amt, wux, wuxB) => {
+      damageCalls.push({ x: pos.x, z: pos.z, r, amt, wux, wuxB });
+      return 1;
+    }
+  };
+  const fakeStats = { book: (element, amount) => bookCalls.push({ element, amount }) };
+  const fakeDecal = () => ({
+    mesh: { scale: { setScalar() {} } },
+    material: { uniforms: { uColorA: { value: { lerpColors() {} } } } }
+  });
+  const decalSpawns = [];
+  const fakeDecals = {
+    spawn: (type, pos, opts) => {
+      decalSpawns.push({ type, x: pos.x, z: pos.z, opts });
+      return fakeDecal();
+    }
+  };
+  let lightsAcquired = 0;
+  let lightsReleased = 0;
+  const fakeLights = {
+    acquire: () => {
+      lightsAcquired++;
+      return { n: lightsAcquired };
+    },
+    release: () => lightsReleased++,
+    set: () => {}
+  };
+  const fakeParticles = {
+    get: () => ({
+      uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+      setGradient() {},
+      emit() {}
+    })
+  };
+  const killHook = [];
+  const ctx = { targets: fakeTargets, stats: fakeStats, decals: fakeDecals, lights: fakeLights, particles: fakeParticles, killHook, mods: null };
+
+  const ability = new VineBlazeSkill(ctx, fusionId('thunder', 'fireball')); // 木(1)+火(3) → '1+3'
+
+  // Field order matters and must match the real caller exactly:
+  // AbilityManager.cast() runs spawn() (and onSpawn) synchronously and
+  // returns; only THEN does App#_quickCastToward's fusion branch stamp
+  // autocast/fusionMult/quenched onto the returned instance — same "cast,
+  // then stamp" order the plain-element branch uses too. Stamping BEFORE
+  // spawn() here would hide a real bug class (reading these fields inside
+  // onSpawn instead of onImpact sees a pooled instance's STALE values from
+  // its previous cast) — fusionMult: 2 (not 1) makes that bug visible in
+  // the assertion below rather than silently cancelling out.
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 10);
+  ability.autocast = false;
+  ability.fusionMult = 2;
+  ability.quenched = false;
+  assert.equal(killHook.length, 1, 'VineBlaze: subscribes to the kill hook on spawn');
+
+  // One tick: the no-travel advance() override resolves TRAVEL→IMPACT
+  // immediately and onImpact() plants the main zone at the aimed point.
+  ability.update(1 / 60);
+  assert.equal(ability.phase, 'impact', 'VineBlaze: reaches IMPACT on the very first tick (no travel)');
+  assert.ok(ability.zlife[0] > 0, 'VineBlaze: main zone alive after impact');
+  const mainX = ability.zx[0];
+  const mainZ = ability.zz[0];
+  assert.ok(Math.abs(mainX - 10) < 1e-6 && Math.abs(mainZ - 0) < 1e-6, 'VineBlaze: main zone lands at the aimed point, not the caster');
+  assert.equal(decalSpawns.length, 1, 'VineBlaze: the main zone spawns its own decal');
+  assert.ok(
+    Math.abs(ability.zdps[0] - 45 * 2) < 1e-6,
+    'VineBlaze: onImpact reads fusionMult stamped AFTER spawn() (45 base × 2 fusionMult), not a stale pre-spawn value'
+  );
+
+  // Kill outside every zone: nothing happens.
+  killHook[0](500, 500, 0);
+  assert.equal(liveZoneCount(ability.zlife), 1, 'VineBlaze: a kill outside every zone is a no-op');
+
+  // Kill dead centre of the main zone: forks exactly 2 children.
+  killHook[0](mainX, mainZ, 0);
+  assert.equal(liveZoneCount(ability.zlife), 3, 'VineBlaze: one main-zone kill forks exactly 2 children');
+  const childX = ability.zx[1];
+  const childZ = ability.zz[1];
+
+  // Kill inside a child zone but OUTSIDE the (overlapping) main zone's own
+  // radius — children spawn well within the main zone's reach (forkOffset
+  // 0.8 << radius 2.2), so a kill at a child's own centre would ALSO read
+  // as "inside main"; this point isolates the child-only case.
+  const awayX = childX + ability.config.radius * 0.9;
+  killHook[0](awayX, childZ, 0);
+  assert.equal(liveZoneCount(ability.zlife), 3, 'VineBlaze: a kill inside a child zone (outside main) spawns no grandchildren');
+
+  // A second main-zone kill fills the cap exactly (1 main + 4 children = 5).
+  killHook[0](mainX, mainZ, 0);
+  assert.equal(liveZoneCount(ability.zlife), 5, 'VineBlaze: a second main-zone kill fills the cap exactly');
+
+  // A third forking kill has no slots left — truncated to 0 new zones.
+  killHook[0](mainX, mainZ, 0);
+  assert.equal(liveZoneCount(ability.zlife), 5, "VineBlaze: cap enforced — a 3rd forking kill's forks truncate");
+
+  // Zone-tick math: a couple of 1s ticks, still well inside the 4s life,
+  // must have actually paid real damage with the fusion's own wux/wuxB.
+  ability.update(1);
+  ability.update(1);
+  assert.equal(liveZoneCount(ability.zlife), 5, 'VineBlaze: every zone still alive mid-life while ticking damage');
+  assert.ok(damageCalls.length > 0, 'VineBlaze: zone ticks actually call targets.damage');
+  assert.ok(
+    damageCalls.every((c) => c.wux === 3 && c.wuxB === 1),
+    'VineBlaze: every hit carries wux=3 (子 fire), wuxB=1 (母 wood)'
+  );
+  assert.ok(
+    bookCalls.length > 0 && bookCalls.every((b) => b.element === ability.element),
+    'VineBlaze: every payout books under the fusion id'
+  );
+
+  // Run the clock out well past the main zone's 4s life — every zone
+  // (main and every child, regardless of when it forked) retires together.
+  for (let i = 0; i < 5; i++) ability.update(1);
+  assert.equal(liveZoneCount(ability.zlife), 0, 'VineBlaze: every zone retires once its life expires');
+
+  // Drive the cast to DONE and retire it the way AbilityManager does.
+  while (!ability.isFinished) ability.update(0.5);
+  ability.destroy();
+  assert.equal(killHook.length, 0, 'VineBlaze: retire unsubscribes — listener list back to baseline');
+  assert.equal(lightsReleased, lightsAcquired, 'VineBlaze: every acquired light (base + every child) was released, none leaked');
+
+  console.log('ok  M7 T2: VineBlazeSkill zone lifecycle (fork/cap/retire/wux), headless');
+}
+
+/* ---- M7 T2: sandbox null-safety — no ctx.targets/killHook, VFX only ---- */
+{
+  const ctx = {
+    decals: { spawn: () => ({ mesh: { scale: { setScalar() {} } }, material: { uniforms: { uColorA: { value: { lerpColors() {} } } } } }) },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    }
+    // no targets, no killHook, no stats, no mods — the sandbox shape
+  };
+  const ability = new VineBlazeSkill(ctx, fusionId('thunder', 'fireball'));
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  assert.doesNotThrow(() => ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 10), 'VineBlaze: spawn is null-safe with no killHook/targets');
+  assert.doesNotThrow(() => {
+    for (let i = 0; i < 300; i++) ability.update(1 / 60);
+  }, 'VineBlaze: a full cast ticks with no killHook/targets/stats and never throws');
+  assert.doesNotThrow(() => ability.destroy(), 'VineBlaze: destroy is null-safe with no killHook');
+  console.log('ok  M7 T2: VineBlazeSkill sandbox null-safety (VFX only, zero errors)');
+}
+
+/* ---- M7 T2: RunManager onKillAt — injects and fans out, additively ---- */
+{
+  const rng = createRng(77);
+  const enemies = new EnemySystem(rng);
+  const pickups = new PickupSystem();
+  const player = new PlayerState();
+  const mods = new Modifiers();
+  const fakeCtx = {};
+  const run = new RunManager({
+    enemies, pickups, player, rng,
+    modifiers: mods,
+    tides: new TideSchedule(createRng(77)),
+    projectiles: new EnemyProjectiles(),
+    combat: { tick: () => 0, release: () => -1, resetStats: () => {}, book: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null, ctx: fakeCtx }
+  });
+
+  assert.equal(fakeCtx.killHook, run.onKillAt, 'RunManager: injects its onKillAt list onto abilities.ctx');
+
+  // Fixtures that construct RunManager with a bare { active, onRetire }
+  // abilities stub (no ctx at all) must be untouched by this — several
+  // pre-existing check-game.mjs blocks do exactly that (asserted implicitly:
+  // this whole file still runs to completion around this block).
+  const bareRun = new RunManager({
+    enemies: new EnemySystem(createRng(1)), pickups: new PickupSystem(), player: new PlayerState(), rng: createRng(1),
+    modifiers: new Modifiers(), tides: new TideSchedule(createRng(1)), projectiles: new EnemyProjectiles(),
+    combat: { tick: () => 0, release: () => -1, resetStats: () => {}, book: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null }
+  });
+  assert.ok(Array.isArray(bareRun.onKillAt), 'RunManager: onKillAt still exists with no abilities.ctx to inject onto');
+
+  run.start();
+  const seen = [];
+  run.onKillAt.push((x, z, elite) => seen.push({ x, z, elite }));
+
+  const i = enemies.spawnAt(3, 4, 0, 0, 0, 0);
+  assert.equal(i, 0);
+  const killsBefore = run.kills;
+  enemies.damage({ x: 3, z: 4 }, 1, 99999, -1); // untyped, lethal in one hit
+
+  assert.equal(seen.length, 1, 'RunManager: onKillAt fan-out fires exactly once per death');
+  assert.deepEqual(seen[0], { x: 3, z: 4, elite: 0 }, 'RunManager: fan-out receives (x, z, elite)');
+  assert.equal(run.kills, killsBefore + 1, 'RunManager: existing kill counter still increments — fan-out is additive');
+
+  console.log('ok  M7 T2: RunManager onKillAt injection + fan-out (existing death flow intact)');
 }
 
 /* ---- strings: bilingual table + t() fallback chain (spec §9) ---- */

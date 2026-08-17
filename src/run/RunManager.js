@@ -69,6 +69,25 @@ export class RunManager {
      * (onDeath's elite flag, `_fireUltimate`'s own success branch), so only
      * the reaction case needs a signal out of here. */
     this.onBigMoment = null;
+    /** M7 T2: kill-position fan-out, `(x, z, elite)` — a fusion class that
+     * reacts to kills inside its own zones (业火燎原's fork-on-kill) pushes
+     * its own handler here on spawn, swap-removes it on retire (array
+     * push/splice — the class's own job, not this list's). Injected onto
+     * the shared ability ctx below so any `Ability` instance's
+     * `this.ctx.killHook` reaches this exact array — additive: every
+     * existing onDeath consumer below (gems/shards/heal/mana/禁咒) is
+     * unchanged, this is one more line at the end of that same handler.
+     * Listeners are expected to stay side-effect-light (spawning VFX/zones,
+     * never calling back into `enemies.damage()`/`.slow()` etc.) — a
+     * listener that killed another enemy synchronously here would need the
+     * same reentrancy-safe queuing `EnemySystem#_reactionQueue` already
+     * uses, which this plain fan-out does not attempt. Guarded: several
+     * check-game.mjs fixtures construct RunManager with a bare
+     * `{ active, onRetire }` abilities stub carrying no `ctx` at all — this
+     * task doesn't touch those, so the guard below just leaves them exactly
+     * as inert as before. */
+    this.onKillAt = [];
+    if (this.s.abilities.ctx) this.s.abilities.ctx.killHook = this.onKillAt;
 
     this.s.enemies.onDeath = (x, z, element, elite) => {
       this.kills++;
@@ -85,6 +104,7 @@ export class RunManager {
       if (this.s.modifiers?.resonates(1)) this.s.player.heal(settings.resonance.woodKillHeal);
       this.s.player.gainMana(settings.run.manaPerKill);
       this.s.ultimate?.gainKill();
+      for (let i = 0; i < this.onKillAt.length; i++) this.onKillAt[i](x, z, elite);
     };
     this.s.enemies.onFire = (x, z, dx, dz, dmg) => this.s.projectiles.spawn(x, z, dx, dz, dmg);
     this.s.enemies.onReaction = (markWux, wux, x, z, amount) => this._react(markWux, wux, x, z, amount);
