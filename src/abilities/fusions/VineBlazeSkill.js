@@ -12,6 +12,32 @@ import { fusionParents, pairKeyOf } from '../../run/fusions.js';
 const _pos = new Vector3();
 const _dir = new Vector3(0, 1, 0);
 const _emit = {};
+/**
+ * `_spawnZone`'s OWN scratch, deliberately separate from `_pos` above
+ * (fix round 2). `_payoutZone` hands `_pos` BY REFERENCE into
+ * `ctx.targets.damage(_pos, ...)`, which (via `EnemySystem#damage`) holds
+ * that reference across a `for` loop that re-reads `point.x`/`point.z` on
+ * EVERY iteration — it is never copied once up front. A kill inside that
+ * same loop fires `onDeath` synchronously, which can reach this class's own
+ * `_onKillAt` → `_spawnZone` while the loop is still mid-iteration. Before
+ * this fix, `_spawnZone` reused the SAME `_pos` for its own decal-position
+ * set, so a reentrant fork silently overwrote the very point the outer
+ * damage() sweep was still reading — every enemy visited AFTER the kill in
+ * that same sweep got distance-checked against the wrong centre and
+ * (depending on how far the corrupted point drifted) could silently take
+ * no damage at all. Same reentrancy CLASS `EnemySystem`'s own
+ * `_reactionQueue` field comment documents (a kill's side effect, fired
+ * synchronously mid-loop, corrupting that same loop's still-in-progress
+ * state) — a sibling bug, with a different repair: that one defers the
+ * side effect and drains it once the loop has fully resolved; this one
+ * instead gives the reentrant WRITE its own object, so it can never touch
+ * what an outer sweep is still reading. `_spawnZone` is reachable from both
+ * `onImpact` (never reentrant) and `_onKillAt` (reentrant) — using a
+ * dedicated scratch for both call sites, rather than only guarding the
+ * reentrant one, keeps the rule simple: nothing reachable from `_onKillAt`
+ * ever touches `_pos`.
+ */
+const _forkPos = new Vector3();
 
 /** Deterministic fallback's angular step (radians) — the golden angle, so a
  * running sequence of children never repeats a direction, however many fork
@@ -444,9 +470,13 @@ export class VineBlazeSkill extends Ability {
     this.zaccum[slot] = 0;
     this.zbirth[slot] = 0;
 
-    _pos.set(x, 0.05, z);
+    // `_forkPos`, not `_pos` — see that scratch's own doc (fix round 2):
+    // this method is reachable from `_onKillAt`, which can run reentrantly
+    // mid-`targets.damage()` sweep; `_pos` is what that sweep is still
+    // reading by reference at that moment.
+    _forkPos.set(x, 0.05, z);
     const decal =
-      this.ctx.decals?.spawn(DecalType.CRACK, _pos, {
+      this.ctx.decals?.spawn(DecalType.CRACK, _forkPos, {
         radius: c.radius,
         life,
         colorA: getColor(c.color),

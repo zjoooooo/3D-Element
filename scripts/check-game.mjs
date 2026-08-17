@@ -2726,6 +2726,122 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   console.log('ok  M7 T2 fix round: real-path fork reentrancy (EnemySystem→onDeath→killHook, mid-onFade-loop)');
 }
 
+/* ---- M7 T2 fix round 2: reentrant fork must not clobber the sweep's own scratch ---- */
+{
+  // Reviewer's repro: EnemySystem#damage()'s own `for` loop re-reads
+  // point.x/point.z on EVERY iteration, never caching it once up front. The
+  // previous reentrancy test above has only ONE real enemy — nothing left
+  // for a clobbered point to miss once the killer itself is gone — so it
+  // never exercised this.
+  //
+  // Placement, worked out exactly (not eyeballed) off the real
+  // `forkPlacement` output rather than hand-derived trig:
+  //   - `_onKillAt` places the FIRST child (seq 0) into the first empty
+  //     slot, then the SECOND (seq 1) into the next — `_forkPos`/`_pos`'s
+  //     value once `_onKillAt` returns (and control unwinds back into the
+  //     still-running damage() sweep) is whatever the LAST of those two
+  //     calls wrote, i.e. seq 1's position, not seq 0's.
+  //   - The survivor sits `SURVIVOR_DIST` out from the main zone's true
+  //     centre, in the direction exactly OPPOSITE seq 1's own offset — so
+  //     it reads `SURVIVOR_DIST` from the true centre (inside main's own
+  //     reach) but `SURVIVOR_DIST + forkOffset` from the clobbered point
+  //     (outside every zone's reach), by simple collinearity.
+  //   - `dt` is chosen small enough that a FRESHLY forked child (dps 27,
+  //     accum starts at 0 this same frame) does NOT itself cross the ≥1
+  //     payout threshold this tick (27×dt < 1) — so a same-frame child hit
+  //     can never confound "did the survivor take main's hit or a child's".
+  const SURVIVOR_DIST = 2.5; // < radius(2.2)+bodyRadius(0.45)=2.65: inside main's reach
+  const TICK_DT = 0.025; // 45×0.025=1.125 ≥ 1 (main pays); 27×0.025=0.675 < 1 (a fresh child doesn't)
+
+  // Isolates the exact variable the reviewer's own repro isolated: the
+  // identical zone+survivor scenario, run twice, differing only in whether
+  // the neighbouring enemy also dies (and therefore forks) that same tick.
+  function runSurvivorScenario(dyingEnemyHp) {
+    const rng = createRng(23);
+    const enemies = new EnemySystem(rng);
+    const targets = new Targets();
+    targets.register(enemies);
+    const killHook = [];
+    enemies.onDeath = (x, z, element, elite) => {
+      for (let i = 0; i < killHook.length; i++) killHook[i](x, z, elite);
+    };
+    const ctx = {
+      targets,
+      killHook,
+      stats: { book() {} },
+      decals: {
+        spawn: () => ({
+          mesh: { scale: { setScalar() {} } },
+          material: { uniforms: { uColorA: { value: { lerpColors() {} } } } }
+        })
+      },
+      lights: { acquire: () => ({}), release() {}, set() {} },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {},
+          emit() {}
+        })
+      },
+      mods: null
+    };
+    const ability = new VineBlazeSkill(ctx, fusionId('thunder', 'fireball'));
+    ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 10);
+    ability.autocast = false;
+    ability.fusionMult = 1;
+    ability.quenched = false;
+    ability.update(1 / 60); // TRAVEL→IMPACT, main zone at (10, 0)
+    const mainX = ability.zx[0];
+    const mainZ = ability.zz[0];
+
+    // The exact offset _onKillAt's SECOND fork call will place (seq 1) —
+    // the deterministic fallback (no ctx.rng, same as the real app today)
+    // is pure, so calling it here mirrors production exactly rather than
+    // re-deriving its angle by hand.
+    const seq1 = forkPlacement(null, 1, 0.8);
+    const scale = SURVIVOR_DIST / 0.8;
+    const survivorX = mainX - seq1.dx * scale;
+    const survivorZ = mainZ - seq1.dz * scale;
+
+    // element 1 (wood) is neutral against BOTH wux=3(fire)/wuxB=1(wood) —
+    // BEATS[3]=0≠1 and BEATS[1]=4≠1 either direction — so the payout below
+    // carries no matchup multiplier and the arithmetic is exact.
+    //
+    // Spawned FIRST → index 0 → EnemySystem.damage()'s reverse loop
+    // (count-1 downto 0) visits it LAST, i.e. AFTER the dying enemy's kill
+    // (and its reentrant fork) has already fired earlier in this same sweep
+    // — "later in the iteration order," the reviewer's own phrase.
+    const survivor = enemies.spawnAt(survivorX, survivorZ, 0, 1, 0, 0);
+    enemies.hp[survivor] = 20;
+
+    // Spawned SECOND → index 1 → visited FIRST by the reverse loop.
+    const dying = enemies.spawnAt(mainX, mainZ, 0, 1, 0, 0);
+    enemies.hp[dying] = dyingEnemyHp;
+
+    ability.update(TICK_DT);
+
+    return { survivorHp: enemies.hp[survivor], liveZones: liveZoneCount(ability.zlife) };
+  }
+
+  const EXPECTED_HP = 20 - 45 * TICK_DT; // 18.875 — main's own hit only
+
+  const control = runSurvivorScenario(999); // neighbour survives too — no fork
+  assert.equal(control.liveZones, 1, 'fixture: control case forks nothing (neighbour also survives)');
+  assert.ok(
+    Math.abs(control.survivorHp - EXPECTED_HP) < 1e-6,
+    `fixture: control survivor takes exactly main's own payout (20 → ${EXPECTED_HP}), got ${control.survivorHp}`
+  );
+
+  const withFork = runSurvivorScenario(1); // neighbour dies — forks 2 children
+  assert.equal(withFork.liveZones, 3, 'fixture: treatment case actually forks (neighbour dies this tick)');
+  assert.ok(
+    Math.abs(withFork.survivorHp - EXPECTED_HP) < 1e-6,
+    `VineBlaze: a reentrant fork must not rob a later-iterated survivor of its own hit — got ${withFork.survivorHp}, expected ${EXPECTED_HP} (control: ${control.survivorHp})`
+  );
+
+  console.log("ok  M7 T2 fix round 2: reentrant fork does not clobber the sweep's shared scratch (survivor still takes damage)");
+}
+
 /* ---- M7 T2: sandbox null-safety — no ctx.targets/killHook, VFX only ---- */
 {
   const ctx = {
