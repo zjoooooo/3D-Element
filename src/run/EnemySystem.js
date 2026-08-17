@@ -321,17 +321,26 @@ export class EnemySystem {
    * A wedge (M8 T5, 烈焰喷吐's 扇形龙息): everything within `range` of
    * `point` whose bearing off (`dirX`, `dirZ`) is inside `halfAngle`.
    *
-   * The one new judged shape this milestone adds, and it mirrors damage()'s
-   * loop exactly — same body-radius pad on the reach, same flash, same
-   * knockback, same `_applyWux`, same reaction flush — with one extra
-   * angular test. The angle is compared through the dot product rather than
-   * an `atan2` difference: no wrap-around case to get wrong, and no
-   * transcendental per enemy per tick on a hot path. Bodies at the caster's
-   * own feet (dist ≈ 0) have no bearing to speak of and are always included,
+   * The one new judged shape this milestone adds. It mirrors damage()'s loop
+   * — same flash, same `_applyWux`, same reaction flush — with the shove
+   * behind a `kbScale` gate (an aura's own precedent: pass 0 and this burns
+   * without pushing) and one extra test for the wedge.
+   *
+   * That test splits the offset into "along the axis" and "across it" rather
+   * than comparing an angle, which is what lets a body's own radius pad BOTH
+   * edges the way damageRing pads its inner and outer rims — a pure angular
+   * comparison pads only the far edge, leaving a tank visibly swept by the
+   * flame and taking nothing. One `tan` per call, none per enemy. A body at
+   * the apex (along ≈ 0, offset ≤ its radius) is inside by construction,
    * which is what a flamethrower does to something hugging you.
    */
   damageCone(point, dirX, dirZ, halfAngle, range, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
-    const tanHalf = Math.tan(halfAngle);
+    // Clamped below a right angle: past π/2 `tan` goes negative and the test
+    // below rejects everything, so a "wider cone" breakpoint would silently
+    // switch the flamethrower off rather than widen it (review catch). A
+    // wedge at or past 90° is a disc with a back wall — out of scope for
+    // this shape, and the completeness pin refuses to let a row ask for one.
+    const tanHalf = Math.tan(Math.min(halfAngle, 1.5));
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];

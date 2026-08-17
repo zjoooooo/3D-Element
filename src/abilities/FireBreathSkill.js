@@ -17,19 +17,29 @@ const _emit = {};
 
 // Cosmetic — the wedge's real numbers (half-angle, range, dps) live in the
 // combat row, which is also what CombatSystem judges against.
-/** `ParticleSystem#emit`'s `spread` is a 0..1 jitter on the direction
- * vector's components (1 = full sphere), NOT an angle — feeding it a radian
- * value sent a tenth of the flame outside the judged wedge and left the
- * inner third looking thin (review catch, measured). This is the empirical
- * conversion that puts the plume's OUTER envelope on the judged edge:
- * max deviation ≈ 1.61 × spread, so spread ≈ halfAngle / 1.61. */
-const SPREAD_PER_RADIAN = 1 / 1.61;
-/** The plume decelerates — `uDrag` damps it analytically, so a particle
- * launched at `range / life` stops well short (measured: 3.79m of a 5.5m
- * reach). Solving the shader's own `travel = (1 - e^(-k·t)) / k` for the
- * launch speed that lands exactly on the rim. */
+/**
+ * `ParticleSystem#emit`'s `spread` is a 0..1 jitter added to each component
+ * of the direction vector (1 = full sphere), NOT an angle — feeding it a
+ * radian value sent a tenth of the flame outside the judged wedge and left
+ * the inner third thin. Solved rather than measured: the widest bearing that
+ * jitter can produce comes from pushing the axial component down by `s` and
+ * the lateral one up by `s`, i.e. `atan(s / (1 - s))`, so putting the plume's
+ * OUTER envelope exactly on the judged edge means `s = tanθ / (1 + tanθ)`.
+ * (An earlier empirical constant hit 87% of the edge at 0.55 rad and drifted
+ * with the angle — it would have overshot outright past ~1 rad.)
+ */
+const spreadFor = (halfAngle) => {
+  const t = Math.tan(halfAngle);
+  return t / (1 + t);
+};
+/** Each emitter damps at its own `uDrag`, and the shader integrates it
+ * analytically as `travel = (1 - e^(-k·t)) / k` — so the launch speed that
+ * dies exactly on the rim has to be solved against THAT emitter's own k. One
+ * shared constant sent the embers 29% past the judged range while the plume
+ * landed on it (review catch: same function, wrong k). */
 const PLUME_DRAG = 1.9;
-const plumeSpeed = (range, life) => (range * PLUME_DRAG) / (1 - Math.exp(-PLUME_DRAG * life));
+const EMBER_DRAG = 1.2;
+const speedFor = (range, life, drag) => (range * drag) / (1 - Math.exp(-drag * life));
 const PLUME_RATE = 90; // flame particles per second at full throat
 const EMBER_RATE = 26;
 const THROAT_HEIGHT = 1.05; // metres — where the breath leaves the caster
@@ -93,7 +103,7 @@ export class FireBreathSkill extends Ability {
       stretch: true,
       softFade: 0.3
     });
-    this.sparks.uniforms.uDrag.value = 1.2;
+    this.sparks.uniforms.uDrag.value = EMBER_DRAG;
     this.sparks.uniforms.uEndSize.value = 0.2;
     this.sparks.uniforms.uSizeIn.value = 0.04;
     this.sparks.uniforms.uFadeOut.value = 0.4;
@@ -149,13 +159,13 @@ export class FireBreathSkill extends Ability {
       this.origin.z + this.direction.z * 0.35
     );
     _emit.radius = 0.18;
-    // `spread` fans the emitter's own direction: matched to the row's
-    // half-angle so the drawn cone and the judged cone open by the same
-    // amount, and the speed carries a particle to the rim over its life.
+    // Both calibrations below are solved against the particle system's own
+    // curves (see the two helpers): the plume's outer envelope lands on the
+    // judged edge, and its launch speed dies at the judged range.
     _emit.direction = _dir.set(this.direction.x, 0.06, this.direction.z).normalize();
-    _emit.speed = plumeSpeed(range, life);
+    _emit.speed = speedFor(range, life, PLUME_DRAG);
     _emit.speedVariance = 0.35;
-    _emit.spread = half * SPREAD_PER_RADIAN;
+    _emit.spread = spreadFor(half);
     _emit.inherit = null;
     _emit.anchor = null;
     _emit.size = 0.34;
@@ -181,9 +191,9 @@ export class FireBreathSkill extends Ability {
     );
     _emit.radius = 0.2;
     _emit.direction = _dir.set(this.direction.x, 0.22, this.direction.z).normalize();
-    _emit.speed = plumeSpeed(range, 0.35) * 1.15;
+    _emit.speed = speedFor(range, 0.35, EMBER_DRAG);
     _emit.speedVariance = 0.5;
-    _emit.spread = row.halfAngle * SPREAD_PER_RADIAN * 0.8;
+    _emit.spread = spreadFor(row.halfAngle * 0.8);
     _emit.inherit = null;
     _emit.anchor = null;
     _emit.size = 0.13;

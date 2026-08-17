@@ -129,8 +129,8 @@
 - 测试夹具教训:处决线断言的"应存活"敌血量必须把**克制加成**算进去(金克木 ×1.25 使 320→400,首版恰好落在阈值线上被误杀)。
 
 ### T5 扇形判定 + 烈焰喷吐
-- **本里程碑唯一的新判定形状**:`EnemySystem.damageCone(point, dirX, dirZ, halfAngle, range, amt, wux, wuxB)` 镜像 damage() 的循环(体半径 pad / flash / 击退 / _applyWux / 反应 flush),角判定走**点积**而非 atan2 差(无环绕分支、热路径无三角函数);贴脸(dist≈0)恒中——喷火器对贴身者本就该烧。Targets 对无 cone 种群**不降级为圆**(降级成圆会烧到背后),沙盒假人静默贡献 0。
-- `coneTick` case:窗口 travel+impact(限时形状规则)、dps×step、顶点取 `ability.origin` 而非 position——龙息从嘴里出来沿瞄准线张开,类的粒子扇也以 origin 为顶点、`spread` 直接取行的 halfAngle,画的扇即判的扇。
+- **本里程碑唯一的新判定形状**:`EnemySystem.damageCone(point, dirX, dirZ, halfAngle, range, amt, wux, wuxB, kbScale)` 镜像 damage() 的循环(flash / _applyWux / 反应 flush;击退经 kbScale 门控)。~~首版角判定走点积、并对 dist≈0 开特例~~ → **终版按沿轴/横轴分解**:`offset ≤ along·tanHalf + r`,体半径**两边都 pad**(tank 压边不再零伤),`tanHalf` 循环外算一次,贴脸由 `along≈0 && offset≤r` 天然覆盖(特例已删)。Targets 对无 cone 种群**不降级为圆**(降级成圆会烧到背后),沙盒假人静默贡献 0。
+- `coneTick` case:窗口 travel+impact(限时形状规则)、dps×step、顶点取 `ability.origin` 而非 position——龙息从嘴里出来沿瞄准线张开。~~"`spread` 直接取行的 halfAngle,画的扇即判的扇"~~ **这句是错的**:`spread` 是 0..1 抖动不是弧度,详见下方 major 条与终版闭式换算。
 - 类是纯 VFX(机制全在行),所以**无头测试必须同时驱动 CombatSystem** 才能看到伤害——首版只推 ability 得 0,是测试写法问题而非实现缺陷。
 - **Critical(评审):冲量当速率,第四次。** `damageCone` 内用的是单次冲量击退,却被 coneTick 每 tick 调一次 → 峰值 |kb| 29.5 m/s,喷口前 1.5m 的敌人被吹到 8.15m(飞出 5.5m 扇形),整条引导只交付 **17% 预算**。修:`damageCone` 补 `kbScale` 尾参(镜像 damageRing)、coneTick 传 `(c.kbMult ?? 0) * step`、行显式 `kbMult: 0`(**龙息只烧不推**),并加"每个 coneTick 行必须显式声明 kbMult"的完备性钉。**至此四个通道(sweep/aura/coneTick + 老 damage 基线)全部按同一规则统一。**
 - **教训(比 bug 本身更重要):我的浏览器验证把这个 bug 掩盖了。** 为隔离扇形几何,我每帧把测试敌钉回原位并清零 kbX/kbZ——恰好也抹掉了击退,于是读到 243/240"达标"。评审的独立探针(不钉位置 + 驱动 `enemies.tick`)才测出 17%。**规则:凡为隔离 A 而冻结 B,必须另有一条不冻结 B 的交付测试**;无头 lifecycle 循环也必须推 `enemies.tick`,否则任何"把目标推出判定域"的缺陷都不可见。已按此补齐两处(无头一行 + 浏览器一段)。
@@ -146,3 +146,8 @@
 - **[minor] 地贴族又选错一半**:雷暴用 ARC,其前沿 `pow(age, 0.35)` 使 6s 场在 1.5s 时只画到 63% 半径,而落雷从第 0 秒就按满半径选靶 → 改 CRACK(T3 同一教训的复发)。
 - 三条 sabotage(击退回退为冲量 / 处决脚印放大 20× / 无视 rng)复核后**均被新钉当场击杀**。
 - 待办(记入 T7):`damage()` 自带的基线冲量对 `zoneTick`/`lineTick` 同样逐 tick 施加(实测 snare 峰值 28.7 m/s、thornroad 19.1、beam 17.2)——M8 之前的老账,但本里程碑刚立的通道规则把它变成明账;雷暴"单击"实为 0.5m 溅射盘(密堆下均 3.65 具),文档措辞需回填。
+
+### T6 流火雨
+- 地心火山的**波次挪位契约**原样复用、把火山本身拿掉:行的 `waves` 说何时炸、`ability.waveIndex` 说炸过几发、类在每波落地前把 `position` 挪到该发落点——这套握手与火山无关,所以本类只是同一支舞的简版(无锥、无熔岩、五个弹坑走位)。散布走 `forkPlacement`(种子/回退双支,与火山、业火同源)。
+- 断言覆盖:五发时点、散布 ≤3.5、**每发在自己的落点炸**(而非都落在瞄准点——这是本类存在的唯一理由)、五坑确实散开、种子双支可区分且可复现、沙盒 null-safe。
+- 至此**十技全部注册**;浏览器同轮验了「十技逐个可施放」与「旧技抽查」。

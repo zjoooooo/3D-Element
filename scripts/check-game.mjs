@@ -45,6 +45,7 @@ import { TimedAuraSkill } from '../src/abilities/templates/TimedAuraSkill.js';
 import { PierceLanceSkill } from '../src/abilities/PierceLanceSkill.js';
 import { StormFieldSkill } from '../src/abilities/StormFieldSkill.js';
 import { FireBreathSkill } from '../src/abilities/FireBreathSkill.js';
+import { MortarRainSkill } from '../src/abilities/MortarRainSkill.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -970,6 +971,23 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     assert.equal(enemies.hp[behind], hp0[behind], 'cone: behind the caster is spared');
     assert.equal(enemies.hp[tooFar], hp0[tooFar], 'cone: past the range is spared');
 
+    // The pad on the ACROSS-axis edge, which is the whole reason the test
+    // splits along/offset instead of comparing an angle: a tank's centre can
+    // sit outside the wedge while its body is plainly in the flame. Removing
+    // the `+ kind.radius` term passed every other assertion here (review
+    // sabotage) because no fixture body straddled the edge.
+    {
+      const fat = new EnemySystem(createRng(106));
+      // along 3, offset 2.34: the edge at that depth is 3·tan(0.55) = 1.93,
+      // so the centre is 0.41 outside — inside only once its 0.7 radius pads.
+      const tank = fat.spawnAt(3, 2.34, 0, 1, 2);
+      fat.hp[tank] = 5000;
+      assert.equal(fat.damageCone({ x: 0, z: 0 }, 1, 0, 0.55, 5.5, 10, -1), 1, "cone: a wide body straddling the edge is in the flame");
+      const thin = new EnemySystem(createRng(107));
+      thin.spawnAt(3, 2.34, 0, 1, 0); // swarm, radius 0.45 — still short of the edge
+      assert.equal(thin.damageCone({ x: 0, z: 0 }, 1, 0, 0.55, 5.5, 10, -1), 0, 'cone: a slim body at the same spot stays out');
+    }
+
     // Point blank: a body standing on the apex has no bearing to speak of
     // and is inside by construction — a flamethrower does not spare whoever
     // is hugging you.
@@ -1048,11 +1066,41 @@ import { DecalType } from '../src/effects/GroundDecals.js';
       if (settings.combat[el]?.kind !== 'coneTick') continue;
       assert.equal(typeof settings.combat[el].kbMult, 'number', `coneTick row ${el} must declare its own kbMult rate`);
     }
-    assert.ok(Math.abs(cones[0].kb ?? 0) < 1e-12, 'coneTick: the row is passed its shove as a per-step rate (0 here)');
+    assert.equal(cones[0].kb, 0, 'coneTick: the row is passed its shove as a per-step rate (0 here)');
 
     // One range, not two: the cast block drives aiming, the combat row drives
     // burning — they must be the same number or the flame and the reticle part.
     assert.equal(settings.flamebreath.range, settings.combat.flamebreath.range, 'flamebreath: aiming range and judged range are one number');
+
+    // All three breakpoint consumers at once (review catch: each could be
+    // deleted unnoticed, because a level-1 fixture makes bpScale the identity
+    // — `cones[0].half === row.halfAngle` proves nothing on its own).
+    // Injected the way the marsh test injects a row value, and put back.
+    {
+      const saved = settings.flamebreath.breakpoints;
+      settings.flamebreath.breakpoints = { lv3: { dps: 2, halfAngle: 1.5, range: 3 } };
+      const scaled = [];
+      const lv3 = new CombatSystem(
+        { damage: () => 0, damageOnce: () => 0, damageRing: () => 0, slow: () => {},
+          damageCone: (p, dx, dz, half, range, amt) => (scaled.push({ half, range, amt }), 1) },
+        null,
+        () => 3
+      );
+      breath.phase = 'impact';
+      lv3.tick(1 / 60, [breath]);
+      assert.ok(Math.abs(scaled[0].amt - (row.dps * 2) / 60) < 1e-9, 'coneTick: dps rides its breakpoint');
+      assert.ok(Math.abs(scaled[0].half - row.halfAngle * 1.5) < 1e-9, 'coneTick: halfAngle rides its breakpoint');
+      assert.ok(Math.abs(scaled[0].range - row.range * 3) < 1e-9, 'coneTick: range rides its breakpoint');
+      settings.flamebreath.breakpoints = saved;
+      if (saved === undefined) delete settings.flamebreath.breakpoints;
+    }
+
+    // A wedge at or past a right angle is not a wedge — and the geometry
+    // clamps `tan` there, so a row must never ask for one.
+    for (const el of ELEMENTS) {
+      if (settings.combat[el]?.kind !== 'coneTick') continue;
+      assert.ok(settings.combat[el].halfAngle < Math.PI / 2, `coneTick row ${el}: half-angle stays under a right angle`);
+    }
 
     // Timed window: fade breathes nothing (T4's rule for timed shapes).
     breath.phase = 'fade';
@@ -1122,6 +1170,125 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M8 T5: cone geometry, coneTick case, FireBreathSkill');
+}
+
+/* ---- M8 T6: 流火雨 — five shells, scattered, on the volcano's own machine ---- */
+{
+  assert.equal(ABILITY_TYPES.mortarrain, MortarRainSkill, 'registry: mortarrain');
+  const row = settings.combat.mortarrain;
+  const cfg = settings.mortarrain;
+  assert.equal(row.waves.length, 5, 'fixture: five shells (数值表)');
+  assert.equal(row.damage, 80, "fixture: one shell's damage");
+  assert.equal(row.radius, 1.6, "fixture: one shell's radius");
+  assert.equal(cfg.scatterRadius, 3.5, 'fixture: the scatter (数值表)');
+  assert.deepEqual(
+    row.waves.map((w) => w.delay),
+    [0.5, 1.0, 1.5, 2.0, 2.5],
+    'fixture: the shells walk in at half-second intervals'
+  );
+
+  const mkCtx = (extra = {}) => ({
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    decals: { spawn: () => null }, bursts: { spawn: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {}, emit() {}
+      })
+    },
+    mods: null,
+    ...extra
+  });
+
+  {
+    const rain = new MortarRainSkill(mkCtx(), 'mortarrain');
+    rain.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 12);
+    rain.autocast = false; rain.fusionMult = 1; rain.quenched = false;
+    rain.update(1 / 60);
+    assert.equal(rain.phase, 'impact', 'rain: the barrage opens on the first tick (no travel)');
+    assert.ok(
+      rain.impactDuration >= row.waves[row.waves.length - 1].delay,
+      "rain: the cast outlives its own last shell (impactDuration covers the walk-in)"
+    );
+
+    // Five landing points, every one inside the scatter of the aimed centre.
+    assert.equal(rain._shellX.length, row.waves.length, 'rain: one landing point per shell');
+    for (let i = 0; i < row.waves.length; i++) {
+      const d = Math.hypot(rain._shellX[i] - 12, rain._shellZ[i]);
+      assert.ok(d <= cfg.scatterRadius + 1e-4, `rain: shell ${i} lands within the scatter (got ${d.toFixed(3)})`);
+    }
+    // Deterministic without an rng — the same fallback every scattering class
+    // in this codebase shares, so a headless replay lands the same pattern.
+    const firstX = Array.from(rain._shellX);
+    rain.destroy();
+    rain.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 12);
+    rain.update(1 / 60);
+    assert.deepEqual(Array.from(rain._shellX), firstX, 'rain: the fallback pattern is repeatable');
+
+    // …and genuinely seeded when a run supplies one.
+    const seeded = new MortarRainSkill(mkCtx({ rng: createRng(11) }), 'mortarrain');
+    seeded.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 12);
+    seeded.autocast = false; seeded.fusionMult = 1; seeded.quenched = false;
+    seeded.update(1 / 60);
+    assert.ok(
+      Array.from(seeded._shellX).some((x, i) => Math.abs(x - firstX[i]) > 1e-6),
+      'rain: a seeded cast really consults the rng rather than falling through'
+    );
+    const replay = new MortarRainSkill(mkCtx({ rng: createRng(11) }), 'mortarrain');
+    replay.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 12);
+    replay.autocast = false; replay.fusionMult = 1; replay.quenched = false;
+    replay.update(1 / 60);
+    assert.deepEqual(Array.from(replay._shellX), Array.from(seeded._shellX), 'rain: the same seed replays the same pattern');
+    seeded.destroy(); replay.destroy(); rain.destroy();
+  }
+
+  // The hand-off: CombatSystem walks the wave cursor, the class walks the
+  // position — each shell must detonate at its OWN landing point, which is
+  // the whole reason this class exists (the volcano's contract, reused).
+  {
+    const hits = [];
+    const combat = new CombatSystem({
+      damage: (p, r, amt) => (hits.push({ x: p.x, z: p.z, r, amt }), 1),
+      damageOnce: () => 1, damageRing: () => 1, slow: () => {}, damageCone: () => 0
+    });
+    const rain = new MortarRainSkill(mkCtx(), 'mortarrain');
+    rain.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 12);
+    rain.autocast = false; rain.fusionMult = 1; rain.quenched = false;
+    for (let i = 0; i < 200; i++) {
+      combat.tick(1 / 60, [rain]);
+      rain.update(1 / 60);
+    }
+    assert.equal(hits.length, row.waves.length, `rain: exactly ${row.waves.length} shells detonate`);
+    for (let i = 0; i < hits.length; i++) {
+      const d = Math.hypot(hits[i].x - rain._shellX[i], hits[i].z - rain._shellZ[i]);
+      assert.ok(d < 1e-6, `rain: shell ${i} detonates at its own landing point, not the aim point (off by ${d.toFixed(4)})`);
+    }
+    const spread = Math.max(...hits.map((h) => Math.hypot(h.x - hits[0].x, h.z - hits[0].z)));
+    assert.ok(spread > 0.5, `rain: the five craters are actually spread apart (widest gap ${spread.toFixed(2)}m)`);
+    assert.ok(Math.abs(hits[0].amt - row.damage) < 1e-9, "rain: a shell lands the row's own damage");
+    rain.destroy();
+  }
+
+  // Sandbox shape.
+  {
+    const bare = new MortarRainSkill({
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {}, emit() {}
+        })
+      }
+    }, 'mortarrain');
+    bare.autocast = false; bare.fusionMult = 1; bare.quenched = false;
+    assert.doesNotThrow(() => {
+      bare.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 12);
+      for (let i = 0; i < 400; i++) bare.update(1 / 60);
+      bare.destroy();
+    }, 'rain: a bare-VFX ctx never throws');
+  }
+
+  console.log('ok  M8 T6: mortar rain (five shells, scatter, per-shell hand-off)');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

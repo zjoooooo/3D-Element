@@ -8,6 +8,7 @@ import { FireballAbility } from './FireballAbility.js';
 import { PierceLanceSkill } from './PierceLanceSkill.js';
 import { StormFieldSkill } from './StormFieldSkill.js';
 import { FireBreathSkill } from './FireBreathSkill.js';
+import { MortarRainSkill } from './MortarRainSkill.js';
 import { LineSweepSkill } from './templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
 import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
@@ -80,6 +81,8 @@ export const ABILITY_TYPES = {
   stormfield: StormFieldSkill,
   // M8 T5: the milestone's one new judged shape — a channelled wedge.
   flamebreath: FireBreathSkill,
+  // M8 T6: the volcano's wave/scatter hand-off with the volcano taken off.
+  mortarrain: MortarRainSkill,
 
   bladeorbit: OrbitAuraSkill,
   firering: OrbitAuraSkill,

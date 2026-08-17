@@ -37,9 +37,13 @@ const DRIZZLE_RATE = 14;
  * Fully self-resolved: `combat.stormfield` is `kind:'self'`, so CombatSystem
  * never touches it — the field itself deals nothing, only the bolts do. That
  * is the difference from 回春雷泽, whose pool IS a combat row; this one is
- * pure sky. A single bolt is a single body's problem (no chain — that is
- * 连锁闪电's job and 回春雷泽's), which is what lets the budget sit in
- * cadence rather than in spread.
+ * pure sky. A bolt strikes a POINT rather than chaining (that is 连锁闪电's
+ * job, and 回春雷泽's), so the budget sits in cadence — but "a point" means
+ * a 0.05m query padded by each body's own radius, the same ball-to-ball
+ * contract every hit in this codebase keeps: in a crowd piled on the player
+ * one bolt takes whoever is standing in that half-metre, measured at ~3.6
+ * bodies on average and 8 at worst. The anchor prices the nominal per-body
+ * damage, which that does not change.
  *
  * Target pick rolls the run's seeded `ctx.rng` (M8 T1's wiring), falling
  * back to a running counter over the in-field candidates wherever that
