@@ -1291,6 +1291,103 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   console.log('ok  M8 T6: mortar rain (five shells, scatter, per-shell hand-off)');
 }
 
+
+/* ---- M9 T1: the draft draws by CATEGORY, not by how many cards exist ---- */
+{
+  // Measured before this task: the ten skills M8 added pushed new-skill cards
+  // from 68% of a hand to 77% at four seats, squeezing upgrades 20→15 and
+  // passives 12→9 — because `passiveWeights` was applied per CANDIDATE, so a
+  // category's share scaled with how many of its cards happened to exist.
+  // The weights are a category contract now: registering more skills must not
+  // move the shape of a hand.
+  const WAVE2 = ['cyclonecut', 'piercelance', 'stormfield', 'thornroad', 'tidalsurge',
+                 'hailstorm', 'flamebreath', 'mortarrain', 'sandfield', 'stonepillar'];
+
+  /** Deal `trials` hands at `seats` filled and report the share of each kind. */
+  function shares(seats, hide = []) {
+    const stash = {};
+    for (const el of hide) { stash[el] = ABILITY_TYPES[el]; delete ABILITY_TYPES[el]; }
+    const seen = { upgrade: 0, new: 0, passive: 0, fusion: 0, mutation: 0 };
+    let cards = 0;
+    const seatable = ELEMENTS.filter((e) => ABILITY_TYPES[e] && !WAVE2.includes(e));
+    for (let t = 0; t < 400; t++) {
+      const loadout = new Loadout();
+      for (let s = 0; s < seats; s++) loadout.acquire(seatable[(t * 7 + s * 3) % seatable.length]);
+      const pool = new UpgradePool(createRng(t + 1), loadout, new Modifiers());
+      for (const card of pool.draw(6, 6) ?? []) { seen[card.kind]++; cards++; }
+    }
+    for (const el of hide) ABILITY_TYPES[el] = stash[el];
+    const out = {};
+    for (const k of Object.keys(seen)) out[k] = seen[k] / cards;
+    out._cards = cards;
+    return out;
+  }
+
+  // Roster independence: hiding ten registered skills must barely move the
+  // shape of a hand. (Before this task the same comparison moved 9 points.)
+  for (const seats of [2, 4]) {
+    const full = shares(seats);
+    const trimmed = shares(seats, WAVE2);
+    for (const kind of ['new', 'upgrade', 'passive']) {
+      const drift = Math.abs(full[kind] - trimmed[kind]);
+      assert.ok(
+        drift < 0.03,
+        `draft: ${kind} share is roster-independent at ${seats} seats (drifted ${(drift * 100).toFixed(1)} points)`
+      );
+    }
+  }
+
+  // The weights mean what they say, at the category level: 3 : 2 : 1.
+  {
+    const w = settings.upgrades.passiveWeights;
+    const s = shares(4);
+    const ratio = (a, b) => s[a] / s[b];
+    assert.ok(
+      Math.abs(ratio('upgrade', 'passive') - w.upgrade / w.passive) < 0.5,
+      `draft: upgrade:passive tracks the weights (got ${ratio('upgrade', 'passive').toFixed(2)}, want ${(w.upgrade / w.passive).toFixed(2)})`
+    );
+    assert.ok(
+      Math.abs(ratio('new', 'passive') - w.newActive / w.passive) < 0.5,
+      `draft: new:passive tracks the weights (got ${ratio('new', 'passive').toFixed(2)}, want ${(w.newActive / w.passive).toFixed(2)})`
+    );
+  }
+
+  // An empty category renormalises rather than shrinking the hand: a full
+  // build has no 'new' cards to give and must still deal three.
+  {
+    const loadout = new Loadout();
+    const seatable = ELEMENTS.filter((e) => ABILITY_TYPES[e]);
+    for (let i = 0; loadout.hasEmpty() && i < seatable.length; i++) loadout.acquire(seatable[i]);
+    assert.ok(!loadout.hasEmpty(), 'fixture: the build is full');
+    const pool = new UpgradePool(createRng(9), loadout, new Modifiers());
+    const hand = pool.draw(6, 6) ?? [];
+    assert.equal(hand.length, 3, 'draft: a full build still deals three cards');
+    assert.ok(hand.every((c) => c.kind !== 'new'), 'draft: …and none of them is a new skill');
+  }
+
+  // Zero regression on the two guaranteed-card paths.
+  {
+    const loadout = new Loadout();
+    loadout.acquire('ice');
+    const pool = new UpgradePool(createRng(3), loadout, new Modifiers());
+    const milestone = settings.upgrades.milestones[0];
+    let sawNew = 0;
+    for (let t = 0; t < 40; t++) {
+      const p = new UpgradePool(createRng(t + 50), loadout, new Modifiers());
+      if ((p.draw(milestone, milestone) ?? []).some((c) => c.kind === 'new')) sawNew++;
+    }
+    assert.equal(sawNew, 40, 'draft: a milestone level still guarantees a new-skill card');
+
+    const directed = pool.draw(6, 6, settings.combat.wuxingOf.ice) ?? [];
+    assert.ok(
+      directed.every((c) => c.kind !== 'passive' && settings.combat.wuxingOf[c.element] === settings.combat.wuxingOf.ice),
+      "draft: a shard's directed hand still deals only that wuxing, and no passives"
+    );
+  }
+
+  console.log('ok  M9 T1: draft draws by category (roster-independent, weights honoured, renormalising)');
+}
+
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
 {
   const count = { a: 0, b: 0 };

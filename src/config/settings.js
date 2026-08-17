@@ -411,7 +411,13 @@ export const settings = {
     scavengerPerLevel: 0.1,
     echoPerLevel: 0.04, // 12% at max, spec's number
     skillLevelMax: 5,
-    passiveWeights: { upgrade: 3, newActive: 2, passive: 1 }, // draw weights
+    // Draw weights per CATEGORY, not per card (M9 T1): a hand picks a
+    // category by these numbers and then a card uniformly inside it. Weighing
+    // each candidate instead made a category's share scale with how many
+    // cards it happened to hold, so registering skills rewrote the draft
+    // without anyone editing a number — M8's ten took new-skill cards from
+    // 68% of a hand to 77%.
+    passiveWeights: { upgrade: 3, newActive: 2, passive: 1 },
     milestones: [5, 10, 15] // levels that guarantee a new-active card
   },
 

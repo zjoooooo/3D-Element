@@ -108,9 +108,52 @@ export class UpgradePool {
     }
 
     while (hand.length < 3 && candidates.length > 0) {
-      hand.push(this._take(candidates, candidates));
+      hand.push(this._takeByCategory(candidates));
     }
     return hand;
+  }
+
+  /**
+   * Pick a card the way `passiveWeights` reads: choose a CATEGORY by weight,
+   * then a card uniformly inside it (M9 T1).
+   *
+   * The old shape pushed a per-card weight into one flat pool, which made a
+   * category's share scale with how many of its cards happened to exist —
+   * so registering skills silently rewrote the draft. M8's ten took
+   * new-skill cards from 68% of a hand to 77% at four seats and squeezed
+   * upgrades and passives to match, without a single weight being edited.
+   * Categories are a fixed, tiny set, so this is the shape that makes the
+   * numbers in settings mean what they say.
+   *
+   * A category with nothing to give simply isn't in the running, and the
+   * remaining weights renormalise on their own (the roll is taken over the
+   * present categories' total) — a full build with no seat to fill still
+   * deals a full hand out of upgrades and passives.
+   */
+  _takeByCategory(candidates) {
+    const w = settings.upgrades.passiveWeights;
+    const weightOf = (kind) =>
+      kind === 'upgrade' ? w.upgrade : kind === 'new' ? w.newActive : w.passive;
+
+    // Which categories are actually present, and their total weight. Built
+    // per draw (three times a hand, off a level-up — not a hot path).
+    const kinds = [];
+    let total = 0;
+    for (const c of candidates) {
+      if (kinds.includes(c.card.kind)) continue;
+      kinds.push(c.card.kind);
+      total += weightOf(c.card.kind);
+    }
+
+    let roll = this.rng() * total;
+    let kind = kinds[kinds.length - 1];
+    for (const k of kinds) {
+      roll -= weightOf(k);
+      if (roll <= 0) { kind = k; break; }
+    }
+
+    const inKind = candidates.filter((c) => c.card.kind === kind);
+    return this._take(inKind, candidates);
   }
 
   /** The one guaranteed fusion card, or null if nothing's ripe. Kept off the
