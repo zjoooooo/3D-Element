@@ -9,6 +9,7 @@ import { LAYER } from '../../core/Layers.js';
 import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
+import { bpScale, bpAdd } from '../../run/breakpoints.js';
 
 const TAU = Math.PI * 2;
 const MAX_ORBITERS = 8;
@@ -109,9 +110,17 @@ export class OrbitAuraSkill extends Ability {
     return false;
   }
 
-  /** Live orbit radius/band — read off the combat row (see class doc). */
-  _combat() {
-    return settings.combat[this.element];
+  /** Live orbit radius — read off the combat row (see class doc). M6 T12:
+   * scaled by the same bpScale('radius') CombatSystem's own aura case
+   * applies to the damage ring, off this same `bpLevel` (WYSIWYG). */
+  _radius() {
+    return settings.combat[this.element].radius * bpScale(this.element, 'radius', this.bpLevel);
+  }
+
+  /** Live annulus band (only firering's ring reads this) — same bpScale('band')
+   * treatment as radius above. */
+  _band() {
+    return (settings.combat[this.element].band ?? 0) * bpScale(this.element, 'band', this.bpLevel);
   }
 
   onSpawn() {
@@ -127,8 +136,13 @@ export class OrbitAuraSkill extends Ability {
 
   _updateBlades() {
     const c = settings[this.element];
-    const radius = this._combat().radius;
-    const count = Math.min(MAX_ORBITERS, Math.max(1, Math.round(c.bladeCount)));
+    const radius = this._radius();
+    // M6 T12 (剑域 Lv3 刃数+2): additive, shares the `count` key with
+    // swordrain/sunwheel's own instance counts.
+    const count = Math.min(
+      MAX_ORBITERS,
+      Math.max(1, Math.round(c.bladeCount + bpAdd(this.element, 'count', this.bpLevel)))
+    );
     const height = 0.95;
 
     for (let i = 0; i < count; i++) {
@@ -154,7 +168,10 @@ export class OrbitAuraSkill extends Ability {
   _updateFireRing(dt) {
     const c = settings[this.element];
     const g = settings.global;
-    const combat = this._combat();
+    // M6 T12: 环带宽 (Lv3) scales `band`, dps (Lv5, CombatSystem-side only —
+    // nothing here reads dps) — radius itself carries no firering breakpoint.
+    const radius = this._radius();
+    const band = this._band();
 
     // A scorched ring under the caster's feet — refreshed well before its own
     // life runs out, so it never visibly gaps as the player moves.
@@ -164,7 +181,7 @@ export class OrbitAuraSkill extends Ability {
       this._ringTimer = refresh;
       _pos.copy(this.position).setY(0.03);
       this.ctx.decals.spawn(DecalType.SCORCH, _pos, {
-        radius: combat.radius,
+        radius,
         life: refresh * 2.2,
         intensity: 0.75,
         colorA: getColor(c.color),
@@ -178,12 +195,12 @@ export class OrbitAuraSkill extends Ability {
     if (count > 0) {
       const theta = Math.random() * TAU;
       _pos.set(
-        this.position.x + Math.cos(theta) * combat.radius,
+        this.position.x + Math.cos(theta) * radius,
         0.05,
-        this.position.z + Math.sin(theta) * combat.radius
+        this.position.z + Math.sin(theta) * radius
       );
       _emit.position = _pos;
-      _emit.radius = combat.band * 0.5;
+      _emit.radius = band * 0.5;
       _emit.direction = _dir.set(0, 1, 0);
       _emit.speed = c.flameHeight * 1.6;
       _emit.speedVariance = 0.6;
@@ -205,8 +222,13 @@ export class OrbitAuraSkill extends Ability {
   _updateSunOrbs(dt) {
     const c = settings[this.element];
     const g = settings.global;
-    const combat = this._combat();
-    const count = Math.max(1, Math.round(c.orbCount));
+    const radius = this._radius();
+    // M6 T12 (日轮 Lv3 球数+1): additive, shares the `count` key.
+    const count = Math.max(1, Math.round(c.orbCount + bpAdd(this.element, 'count', this.bpLevel)));
+    // M6 T12 (日轮 Lv5 公转速×1.3): `orbitSpeed` used to be a bare 0.6
+    // hard-coded below — pulled into settings.sunwheel (mirroring
+    // bladeorbit's own field of the same name) so it has something to scale.
+    const orbitSpeed = c.orbitSpeed * bpScale(this.element, 'orbitSpeed', this.bpLevel);
 
     // Three small fireballs walking a circular path — "orbiting" is a
     // continuous re-trigger of a small BurstSphere shell at each orbit
@@ -217,11 +239,11 @@ export class OrbitAuraSkill extends Ability {
     if (this._orbTimer <= 0) {
       this._orbTimer = 0.28;
       for (let i = 0; i < count; i++) {
-        const theta = (i / count) * TAU + this.age * 0.6 * TAU;
+        const theta = (i / count) * TAU + this.age * orbitSpeed * TAU;
         _pos.set(
-          this.position.x + Math.cos(theta) * combat.radius,
+          this.position.x + Math.cos(theta) * radius,
           1.1,
-          this.position.z + Math.sin(theta) * combat.radius
+          this.position.z + Math.sin(theta) * radius
         );
         this.ctx.bursts.spawn(BurstMode.FIRE, _pos, {
           radius: c.orbSize * 0.6,
@@ -242,9 +264,9 @@ export class OrbitAuraSkill extends Ability {
     if (moteCount > 0) {
       const theta = Math.random() * TAU;
       _pos.set(
-        this.position.x + Math.cos(theta) * combat.radius,
+        this.position.x + Math.cos(theta) * radius,
         1.1,
-        this.position.z + Math.sin(theta) * combat.radius
+        this.position.z + Math.sin(theta) * radius
       );
       _emit.position = _pos;
       _emit.radius = c.orbSize;

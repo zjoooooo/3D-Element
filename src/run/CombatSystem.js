@@ -1,5 +1,6 @@
 // src/run/CombatSystem.js
 import { settings } from '../config/settings.js';
+import { bpScale, bpAdd, bpReplace, bpFlag } from './breakpoints.js';
 
 /**
  * Reads live ability state each tick and turns it into targets calls (spec §3).
@@ -17,16 +18,29 @@ import { settings } from '../config/settings.js';
 const LINE_SAMPLES = 3;
 
 export class CombatSystem {
-  constructor(targets, modifiers = null) {
+  /**
+   * @param {(element: string) => number} [levelOf] M6 T12: the run's
+   *   loadout.levelOf, injected so breakpoints.js's bpScale/bpAdd/bpReplace/
+   *   bpFlag calls below have a level to read. Null (every pre-T12 call
+   *   site, and the sandbox — App only wires this inside its runMode block)
+   *   reads as a constant Lv1 via `_level()`, which is identity everywhere:
+   *   CombatSystem stays sandbox-agnostic and never imports Loadout.
+   */
+  constructor(targets, modifiers = null, levelOf = null) {
     this.targets = targets;
     /** Damage multipliers from the run's upgrade layer; null in the sandbox. */
     this.mods = modifiers;
+    this.levelOf = levelOf;
     this._castIds = new WeakMap();
     this._nextCast = 1;
     // Both keyed by numeric castId, so plain Map/Set — a WeakMap rejects
     // primitives. Entries are dropped via release() when a cast finishes.
     this._tickBudget = new Map(); // per-cast dot accumulator
     this._detonated = new Set(); // castIds whose burst already went off
+    // M6 T12 (陨石 Lv5 extraWave): castIds whose *second* detonation already
+    // went off — separate from `_detonated` above (which gates the first)
+    // so the two can never be confused; released alongside it.
+    this._extraDetonated = new Set();
     this._sweptU = new Map(); // per-cast u the sweep has been sampled up to
     this._p = { x: 0, z: 0 }; // scratch point, reused — no allocs per tick
     /** This run's per-skill damage ledger (spec §1 results screen top-3).
@@ -97,8 +111,16 @@ export class CombatSystem {
     this._castIds.delete(ability);
     this._tickBudget.delete(id);
     this._detonated.delete(id);
+    this._extraDetonated.delete(id);
     this._sweptU.delete(id);
     return id;
+  }
+
+  /** M6 T12: `element`'s skill level for this tick's breakpoint reads — 1
+   * (identity) with no `levelOf` injected, same null-safe shape `this.mods`
+   * already uses a few lines up. */
+  _level(element) {
+    return this.levelOf ? this.levelOf(element) : 1;
   }
 
   /**
@@ -115,6 +137,10 @@ export class CombatSystem {
       if (!c || c.kind === 'self') continue;
       const castId = this._castKey(ability);
       const wux = settings.combat.wuxingOf[ability.element] ?? -1;
+      // M6 T12: this cast's skill level, read once per ability per tick —
+      // every case below folds its own relevant params through bpScale/
+      // bpAdd/bpReplace/bpFlag off this same number.
+      const level = this._level(ability.element);
 
       switch (c.kind) {
         case 'sweep': {
@@ -131,18 +157,26 @@ export class CombatSystem {
           const landed = ability.phase === 'impact' || ability.phase === 'fade';
           if (!travelling && !(landed && from < 1)) break;
           const to = travelling ? ability.u : 1;
-          const stepU = Math.max(0.01, c.width / ability.length);
-          const amt = c.damage * this._amp(ability);
+          // M6 T12: width feeds both the damage sample radius and the slow
+          // radius below, so it's scaled once here rather than at each use.
+          const width = c.width * bpScale(ability.element, 'width', level);
+          const stepU = Math.max(0.01, width / ability.length);
+          const amt = c.damage * this._amp(ability) * bpScale(ability.element, 'damage', level);
           for (let t = from; ; t += stepU) {
             const u = Math.min(t, to);
             this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * u;
-            this._book(ability.element, amt, this.targets.damageOnce(castId, this._p, c.width, amt, wux));
+            this._book(ability.element, amt, this.targets.damageOnce(castId, this._p, width, amt, wux));
             if (u >= to) break;
           }
           this._sweptU.set(castId, to);
-          if (c.slowFactor && travelling) {
-            this.targets.slow(ability.position, c.width * 1.5, c.slowFactor, c.slowTime);
+          // M6 T12: slowFactor REPLACEs (thunder arms from 0, snare 0.45→0.65
+          // — see breakpoints.js's REPLACE_KEYS) rather than scaling; falls
+          // back to the row's own base when no breakpoint tier applies.
+          const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+          if (slowFactor && travelling) {
+            const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
+            this.targets.slow(ability.position, width * 1.5, slowFactor, slowTime);
           }
           break;
         }
@@ -153,25 +187,46 @@ export class CombatSystem {
           // 60Hz, so any time window is seen once per queued tick, not once.
           // The per-cast Set fires it exactly once — on 'fade' too, since a
           // stalled frame can jump clean past 'impact'.
+          // M6 T12: resolved once — the detonation, the burn dot and
+          // extraWave below all share this same (already Lv3-scaled)
+          // footprint, so meteor's second wave "×0.6"s the real thing.
+          const radius =
+            (c.radius ?? settings[ability.element].zoneRadius ?? 2) *
+            bpScale(ability.element, 'radius', level);
           if (
             (ability.phase === 'impact' || ability.phase === 'fade') &&
             !this._detonated.has(castId)
           ) {
             this._detonated.add(castId);
-            const radius = c.radius ?? settings[ability.element].zoneRadius ?? 2;
             const amt = c.damage * this._amp(ability);
             this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
-            if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
+            // M6 T12: slowFactor REPLACEs, same rule as the sweep case above.
+            const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+            if (slowFactor) {
+              const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
+              this.targets.slow(ability.position, radius, slowFactor, slowTime);
+            }
             // M6 T4: boulder's stun — a full-strength (1.0) slow rather than a
             // new mechanic, same debuff channel/resonance/淤塞 interactions
             // c.slowFactor above already rides.
-            if (c.stunTime) this.targets.slow(ability.position, radius, 1.0, c.stunTime);
+            if (c.stunTime) {
+              const stunTime = c.stunTime * bpScale(ability.element, 'stunTime', level);
+              this.targets.slow(ability.position, radius, 1.0, stunTime);
+            }
             // quake's 震地波 shove — an extra shockwave impulse beyond the
             // baseline the damage() hit itself already applied.
-            if (c.knockback) this.targets.knockback(ability.position, radius, c.knockback);
+            if (c.knockback) {
+              this.targets.knockback(
+                ability.position,
+                radius,
+                c.knockback * bpScale(ability.element, 'knockback', level)
+              );
+            }
             // M6 T4: lifebloom's self-heal. CombatSystem stays player-agnostic
             // (see tick()'s own doc) — accumulate and hand it back to the caller.
-            if (c.healPlayer) healDue += c.healPlayer * this._amp(ability);
+            if (c.healPlayer) {
+              healDue += c.healPlayer * this._amp(ability) * bpScale(ability.element, 'healPlayer', level);
+            }
           }
           // Meteor's lava keeps burning through the fade, but the lava stops
           // burning when the knob says so, not when the VFX happens to fade:
@@ -189,8 +244,29 @@ export class CombatSystem {
             const resonance = wux === 3 ? this.mods?.dotMult?.() ?? 1 : 1;
             if (this._dot(castId, step, c.burnDps * this._amp(ability) * resonance)) {
               const amt = this._take(castId);
-              this._book(ability.element, amt, this.targets.damage(ability.position, c.radius, amt, wux));
+              this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
             }
+          }
+          // M6 T12 (陨石 Lv5 extraWave): a second, smaller detonation at the
+          // same spot, 0.5s after the first — reuses the burn block's own
+          // "impactTime+fadeTime is seconds since impact" clock rather than
+          // opening a fresh timer. Gated on the first wave having actually
+          // gone off (`_detonated`) and on this one not having fired yet
+          // (`_extraDetonated`, a separate Set — see its own doc up top).
+          if (
+            bpFlag(ability.element, 'extraWave', level) &&
+            this._detonated.has(castId) &&
+            !this._extraDetonated.has(castId) &&
+            (ability.phase === 'impact' || ability.phase === 'fade') &&
+            ability.impactTime + ability.fadeTime >= 0.5
+          ) {
+            this._extraDetonated.add(castId);
+            const extraAmt = c.damage * this._amp(ability) * 0.6;
+            this._book(
+              ability.element,
+              extraAmt,
+              this.targets.damage(ability.position, radius * 0.6, extraAmt, wux)
+            );
           }
           break;
         }
@@ -207,15 +283,15 @@ export class CombatSystem {
           // ring up for (see that class's own doc).
           if (!this._detonated.has(castId)) {
             this._detonated.add(castId);
-            const amt = c.amount * this._amp(ability);
+            const amt = c.amount * this._amp(ability) * bpScale(ability.element, 'amount', level);
             // Take the larger of two casts that happen to detonate the same
             // tick (a near-impossible coincidence, but resolved the same
             // order-independent way PlayerState.addShield's own take-max
             // already is) rather than reporting both.
             if (amt >= this.shieldDue.amount) {
               this.shieldDue.amount = amt;
-              this.shieldDue.duration = c.duration;
-              this.shieldDue.reflectShare = c.reflectShare ?? 0;
+              this.shieldDue.duration = c.duration * bpScale(ability.element, 'duration', level);
+              this.shieldDue.reflectShare = (c.reflectShare ?? 0) * bpScale(ability.element, 'reflectShare', level);
             }
           }
           break;
@@ -223,23 +299,28 @@ export class CombatSystem {
 
         case 'lineTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
-          const perSecond = (c.dps * this._amp(ability)) / LINE_SAMPLES;
+          const width = c.width * bpScale(ability.element, 'width', level);
+          const perSecond = (c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level)) / LINE_SAMPLES;
           const amt = perSecond * step;
           for (let s = 1; s <= LINE_SAMPLES; s++) {
             const t = (s / LINE_SAMPLES) * ability.u;
             this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * t;
-            this._book(ability.element, amt, this.targets.damage(this._p, c.width, amt, wux));
+            this._book(ability.element, amt, this.targets.damage(this._p, width, amt, wux));
           }
           break;
         }
 
         case 'zoneTick': {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
-          const radius = settings[ability.element].zoneRadius ?? 2;
+          const radius = (settings[ability.element].zoneRadius ?? 2) * bpScale(ability.element, 'radius', level);
           const amt = c.dps * this._amp(ability) * step;
           this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
-          if (c.slowFactor) this.targets.slow(ability.position, radius, c.slowFactor, c.slowTime);
+          const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+          if (slowFactor) {
+            const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
+            this.targets.slow(ability.position, radius, slowFactor, slowTime);
+          }
           break;
         }
 
@@ -255,12 +336,14 @@ export class CombatSystem {
           // occupy, not a filled disc: an enemy standing on the caster's own feet,
           // well inside the ring, should take nothing (WYSIWYG).
           if (ability.phase === 'idle' || ability.phase === 'done') break;
-          const inner = Math.max(0, c.radius - (c.band ?? 0));
-          const amt = c.dps * this._amp(ability) * step;
+          const radius = c.radius * bpScale(ability.element, 'radius', level);
+          const band = (c.band ?? 0) * bpScale(ability.element, 'band', level);
+          const inner = Math.max(0, radius - band);
+          const amt = c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level) * step;
           this._book(
             ability.element,
             amt,
-            this.targets.damageRing(ability.position, inner, c.radius, amt, wux)
+            this.targets.damageRing(ability.position, inner, radius, amt, wux)
           );
           break;
         }

@@ -86,6 +86,18 @@ export class Ability {
     return settings[this.element];
   }
 
+  /** M6 T12: this cast's skill level, for breakpoints.js's bpScale/bpAdd/
+   * bpReplace/bpFlag calls — shared by every subclass that reads a
+   * combat-row/VFX shape param straight off settings itself (the template
+   * classes, and the self-resolving specials that bypass CombatSystem
+   * entirely) rather than through CombatSystem's own already-levelled tick().
+   * `ctx.levelOf` is null in the sandbox (App wires it only inside its
+   * runMode block, same shape CombatSystem's own `_level()` uses), which
+   * reads as a constant Lv1 — identity everywhere, sandbox unchanged. */
+  get bpLevel() {
+    return this.ctx.levelOf ? this.ctx.levelOf(this.element) : 1;
+  }
+
   get isActive() {
     return this.phase !== AbilityPhase.IDLE && this.phase !== AbilityPhase.DONE;
   }

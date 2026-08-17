@@ -25,6 +25,7 @@ import { sequenceRefund } from '../run/sequence.js';
 import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
 import { canAffordCast, manaCostOf } from '../run/manaGate.js';
 import { CombatSystem } from '../run/CombatSystem.js';
+import { bpFlag, bpScale } from '../run/breakpoints.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
 import { Modifiers } from '../run/Modifiers.js';
@@ -74,6 +75,11 @@ const HDR_URL = './hdri/spruit_sunrise.hdr';
 
 const UP = new Vector3(0, 1, 0);
 const _deathPos = new Vector3();
+/** _maybeCastTwice's own rotated-copy scratch (M6 T12 冰枪 Lv5 castTwice) —
+ * never carries state between calls, re-aimed in place each time. */
+const _twiceDir = new Vector3();
+/** ±8° in radians — the second bolt's angle offset off the first (spec). */
+const CAST_TWICE_ANGLE = (8 * Math.PI) / 180;
 /** _syncAuras()'s throwaway direction — a permanent aura's cast never travels
  * anywhere (OrbitAuraSkill pins its own position every frame instead), so any
  * unit vector satisfies Ability.spawn()'s contract. */
@@ -293,7 +299,15 @@ export class App {
       // FireballAbility reads ctx.mods?.damageMult() straight from the ability
       // context; every other element's damage rides CombatSystem below instead.
       this.abilities.ctx.mods = this.modifiers;
-      this.combat = new CombatSystem(this.targets, this.modifiers);
+      // M6 T12: breakpoints.js's bpScale/bpAdd/bpReplace/bpFlag calls all
+      // need a level per element — CombatSystem gets it through the
+      // constructor (same shape `modifiers` already rides), every other
+      // ability class through `ctx.levelOf` (Ability#bpLevel's own doc).
+      // Both read `this.loadout` fresh on every call rather than snapshotting
+      // it, so an upgrade picked mid-run is live on the very next tick.
+      const levelOf = (element) => this.loadout.levelOf(element);
+      this.combat = new CombatSystem(this.targets, this.modifiers, levelOf);
+      this.abilities.ctx.levelOf = levelOf;
       // FireballAbility books its self-resolved hits straight into the run's
       // damage ledger (D-M3-8) — same wiring shape as ctx.mods above.
       this.abilities.ctx.stats = this.combat;
@@ -1025,24 +1039,56 @@ export class App {
    */
   _dashDisplace(direction) {
     if (!this.runMode) return;
+    // M6 T12 (弑神一闪 Lv3 冲程×1.3): scales the physical teleport distance —
+    // implementer's choice, needs review: the ability's own cast `distance`
+    // (its ribbon/damage-line length) still comes from AimController's
+    // unscaled aim-drag, out of this task's file scope, so a max-range Lv3+
+    // dash can physically land a little past where the damage line swept.
+    const range = settings.dashstrike.range * bpScale('dashstrike', 'range', this.loadout.levelOf('dashstrike'));
     const start = this.character.root.position;
-    const target = dashTarget(
-      start.x,
-      start.z,
-      direction.x,
-      direction.z,
-      settings.dashstrike.range,
-      settings.character.roamRadius
-    );
+    const target = dashTarget(start.x, start.z, direction.x, direction.z, range, settings.character.roamRadius);
     this._dodgeStart.copy(start);
     this._dodgeTarget.set(target.x, 0, target.z);
     // The ability's own travel timing (range/speed) already lands its VFX
     // impact at ~0.2s — inside the brief's own 0.15-0.25s dash-duration
     // ballpark — so the physical body rides the identical window and
     // arrives with it, rather than a second, independently-tuned duration.
-    this._dodgeDuration = Math.max(0.05, settings.dashstrike.range / Math.max(1, settings.dashstrike.speed));
+    this._dodgeDuration = Math.max(0.05, range / Math.max(1, settings.dashstrike.speed));
     this._dodgeT = 0;
     this.playerState.iframes = Math.max(this.playerState.iframes, settings.run.dodgeIframes);
+  }
+
+  /**
+   * M6 T12 (冰枪 Lv5 castTwice): fires a second bolt at a small angle offset
+   * the instant the first one's own `abilities.cast()` already succeeded —
+   * straight through AbilityManager, bypassing every gate the triggering
+   * cast already cleared (mana/cooldown/sequence/echo), the same way a
+   * fusion's second parent does. One trigger, one stamp: this never touches
+   * `this.cooldowns`/`_applySequence`/`_echoAt` itself, so both bolts share
+   * the single write the caller already made for the first. Still a full,
+   * independent Ability spawn (pooled like any other cast, its own
+   * `autocast`/`fusionMult`/`quenched` written so a reused instance never
+   * carries a stale flag forward — same five-field rule every other spawn
+   * site in this file follows), just copying the triggering bolt's own
+   * flags rather than re-deriving them.
+   *
+   * No-op with nothing to fire twice yet (only ice carries `castTwice`
+   * today) or when the triggering cast itself never went off (a refused
+   * cast, or an aura this never applies to in the first place).
+   */
+  _maybeCastTwice(element, ability, origin, direction, distance) {
+    if (!ability) return;
+    const level = this.loadout ? this.loadout.levelOf(element) : 1;
+    if (!bpFlag(element, 'castTwice', level)) return;
+    const cos = Math.cos(CAST_TWICE_ANGLE);
+    const sin = Math.sin(CAST_TWICE_ANGLE);
+    _twiceDir.set(direction.x * cos - direction.z * sin, 0, direction.x * sin + direction.z * cos);
+    const second = this.abilities.cast(origin, _twiceDir, distance, element);
+    if (second) {
+      second.autocast = ability.autocast;
+      second.fusionMult = ability.fusionMult;
+      second.quenched = ability.quenched;
+    }
   }
 
   _cast(origin, direction, distance) {
@@ -1091,6 +1137,9 @@ export class App {
     // M6 T6: see _dashDisplace's own doc — sandbox-safe via its own runMode
     // guard, so this only needs the element check.
     if (element === 'dashstrike') this._dashDisplace(direction);
+    // M6 T12: see _maybeCastTwice's own doc — sandbox-safe (this.loadout is
+    // undefined there, reading as a constant Lv1/never armed).
+    this._maybeCastTwice(element, ability, origin, direction, distance);
     const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
@@ -1236,7 +1285,8 @@ export class App {
       castAnim = settings[a].castAnim;
     } else {
       const c = settings[element];
-      const ability = this.abilities.cast(origin, direction, this._quickCastDistance(element, rawDist), element);
+      const dist = this._quickCastDistance(element, rawDist);
+      const ability = this.abilities.cast(origin, direction, dist, element);
       if (ability) {
         ability.autocast = autocast;
         ability.fusionMult = 1;
@@ -1245,6 +1295,12 @@ export class App {
       // M6 T6: see _dashDisplace's own doc for why !demo — autocast dashing
       // into a crowd is a real, intentional consequence of the toggle.
       if (element === 'dashstrike' && !demo) this._dashDisplace(direction);
+      // M6 T12: see _maybeCastTwice's own doc — reachable here via autocast
+      // (a Lv5 ice seat with autocast toggled on) or a demo (moot in
+      // practice: a demo only ever fires right after acquiring a skill,
+      // always Lv1, so bpFlag never arms — left unconditional for the same
+      // reason autocast/fusionMult/quenched above are always written).
+      this._maybeCastTwice(element, ability, origin, direction, dist);
       if (!demo) this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
       castAnim = c.castAnim;
     }

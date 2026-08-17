@@ -8,6 +8,7 @@ import { frame } from '../core/FrameUniforms.js';
 import { settings } from '../config/settings.js';
 import { getColor } from '../utils/color.js';
 import { lerp, saturate, Easing } from '../utils/math.js';
+import { bpScale } from '../run/breakpoints.js';
 
 const _emit = {};
 const _pos = new Vector3();
@@ -358,9 +359,15 @@ export class FireballAbility extends Ability {
     // skill instead of the dead `wuxingOf.fireball` entry (D-M3-8), and the
     // landed-hit count books it into the run's damage ledger — this path
     // never told CombatSystem's stats about its damage at all before.
+    // M6 T12 (火弹 Lv3 爆炸半径×1.35, Lv5 damage×1.3): kind:'self' resolves
+    // its own hits (never through CombatSystem), so both scale by hand here.
     const amt =
-      c.damage * (this.ctx.mods?.damageMult(this.element) ?? 1) * (this.autocast ? settings.run.autocastDamage : 1);
-    const hits = this.ctx.targets.damage(_pos, c.damageRadius, amt, settings.combat.wuxingOf[this.element] ?? -1);
+      c.damage *
+      (this.ctx.mods?.damageMult(this.element) ?? 1) *
+      (this.autocast ? settings.run.autocastDamage : 1) *
+      bpScale(this.element, 'damage', this.bpLevel);
+    const damageRadius = c.damageRadius * bpScale(this.element, 'radius', this.bpLevel);
+    const hits = this.ctx.targets.damage(_pos, damageRadius, amt, settings.combat.wuxingOf[this.element] ?? -1);
     this.ctx.stats?.book?.(this.element, amt * hits);
 
     this.ctx.shake.add(

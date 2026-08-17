@@ -26,6 +26,7 @@ import { PlayerState } from '../src/run/PlayerState.js';
 import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
 import { chainHops, resolveTarget } from '../src/abilities/templates/ChainBoltSkill.js';
 import { dashTarget, dashLineHits } from '../src/abilities/templates/DashStrikeSkill.js';
+import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
@@ -2723,6 +2724,417 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(globals.particleCount, 1.0, 'perfPreset: a second "off" is a no-op');
 
   console.log('ok  perf preset');
+}
+
+/* ---- M6 T12: breakpoints.js — pure bpScale/bpAdd/bpReplace/bpFlag semantics ---- */
+{
+  // Identity below Lv3, lv3 armed at 3-4, lv5 folds in on top at 5+ (ice: a
+  // real width breakpoint at lv3, a real castTwice flag at lv5, no lv5
+  // numeric override for width — so width itself must hold at ×1.5 forever
+  // once armed, not regress or double up).
+  assert.equal(bpScale('ice', 'width', 1), 1, 'bpScale: Lv1 identity');
+  assert.equal(bpScale('ice', 'width', 2), 1, 'bpScale: Lv2 identity');
+  assert.equal(bpScale('ice', 'width', 3), 1.5, 'bpScale: Lv3 applies');
+  assert.equal(bpScale('ice', 'width', 4), 1.5, 'bpScale: Lv4 still just lv3');
+  assert.equal(bpScale('ice', 'width', 5), 1.5, 'bpScale: Lv5 keeps lv3\'s width (no lv5 override for it)');
+  assert.equal(bpFlag('ice', 'castTwice', 4), false, 'bpFlag: castTwice unarmed below Lv5');
+  assert.equal(bpFlag('ice', 'castTwice', 5), true, 'bpFlag: castTwice armed at Lv5');
+
+  // No table entry → identity, for a real element/param that just isn't
+  // breakpointed, and for a nonexistent element entirely.
+  assert.equal(bpScale('ice', 'radius', 5), 1, 'bpScale: ice has no radius entry — identity');
+  assert.equal(bpAdd('ice', 'radius', 5), 0, 'bpAdd: same, additive side');
+  assert.equal(bpScale('nope', 'width', 5), 1, 'bpScale: unknown element — identity');
+  assert.equal(bpFlag('nope', 'castTwice', 5), false, 'bpFlag: unknown element — false');
+
+  // Additive whitelist: hops/count add via bpAdd, and — the guard — never
+  // multiply if bpScale is (wrongly) called on one instead.
+  assert.equal(bpAdd('chainbolt', 'hops', 2), 0, 'bpAdd: hops Lv1/2 identity (0)');
+  assert.equal(bpAdd('chainbolt', 'hops', 3), 2, 'bpAdd: chainbolt hops +2 at Lv3');
+  assert.equal(bpAdd('chainbolt', 'hops', 5), 2, 'bpAdd: hops has no lv5 entry — stays +2');
+  assert.equal(bpScale('chainbolt', 'hops', 3), 1, 'bpScale: hops is additive-only — guarded to identity');
+  assert.equal(bpAdd('swordrain', 'count', 3), 4, 'bpAdd: swordrain 剑数 +4 at Lv3');
+  assert.equal(bpAdd('bladeorbit', 'count', 3), 2, 'bpAdd: bladeorbit 刃数 +2 at Lv3');
+  assert.equal(bpAdd('sunwheel', 'count', 3), 1, 'bpAdd: sunwheel 球数 +1 at Lv3');
+  assert.equal(bpAdd('ice', 'width', 5), 0, 'bpAdd: width is multiplicative-only — guarded to identity');
+
+  // Replace semantics: undefined (no override) below the tier, the literal
+  // table value once armed — never compounded with the base.
+  assert.equal(bpReplace('chainbolt', 'hopDecay', 3), undefined, 'bpReplace: chainbolt has no lv3 hopDecay');
+  assert.equal(bpReplace('chainbolt', 'hopDecay', 5), 0.92, 'bpReplace: hopDecay 0.85→0.92 at Lv5');
+  assert.equal(bpReplace('snare', 'slowFactor', 3), undefined, 'bpReplace: snare has no lv3 slowFactor');
+  assert.equal(bpReplace('snare', 'slowFactor', 5), 0.65, 'bpReplace: slowFactor 0.45→0.65 at Lv5');
+  assert.equal(bpReplace('thunder', 'slowFactor', 5), 0.3, 'bpReplace: thunder slowFactor arms to 0.3 at Lv5');
+  assert.equal(bpReplace('ice', 'width', 5), undefined, 'bpReplace: width isn\'t a replace key at all');
+  assert.equal(bpScale('snare', 'slowFactor', 5), 1, 'bpScale: slowFactor is replace-only — guarded to identity');
+
+  // extraWave mirrors castTwice's own flag shape on a different skill.
+  assert.equal(bpFlag('meteor', 'extraWave', 4), false, 'bpFlag: extraWave unarmed below Lv5');
+  assert.equal(bpFlag('meteor', 'extraWave', 5), true, 'bpFlag: extraWave armed at Lv5');
+
+  // Genuine same-key cumulative stacking: both tiers targeting the SAME
+  // param multiply together at Lv5, not just "the higher tier wins". None of
+  // the real 20 skills happen to double up a key across both their own
+  // tiers (each skill's lv3/lv5 always name different params — see the
+  // table pin below), so this is exercised against a scratch entry.
+  settings._bpScratch = { breakpoints: { lv3: { width: 2 }, lv5: { width: 3 } } };
+  assert.equal(bpScale('_bpScratch', 'width', 4), 2, 'bpScale: lv3 alone at Lv4');
+  assert.equal(bpScale('_bpScratch', 'width', 5), 6, 'bpScale: lv3×lv5 compound at Lv5 (2×3)');
+  delete settings._bpScratch;
+
+  console.log('ok  M6 T12: breakpoints.js pure semantics');
+}
+
+/* ---- M6 T12: the 40-entry breakpoint table, pinned verbatim ---- */
+{
+  // Transcription guard: every one of the twenty skills' settings.breakpoints
+  // block must match the brief's table exactly, key for key, value for value.
+  const BP_EXPECTED = {
+    ice: { lv3: { width: 1.5 }, lv5: { castTwice: true } },
+    thunder: { lv3: { width: 1.4 }, lv5: { damage: 1.3, slowFactor: 0.3 } },
+    meteor: { lv3: { radius: 1.3 }, lv5: { extraWave: true } },
+    beam: { lv3: { width: 1.5 }, lv5: { dps: 1.35 } },
+    snare: { lv3: { radius: 1.3 }, lv5: { slowFactor: 0.65 } },
+    glacier: { lv3: { radius: 1.3 }, lv5: { slowTime: 1.6 } },
+    fireball: { lv3: { radius: 1.35 }, lv5: { damage: 1.3 } },
+    swordrain: { lv3: { count: 4 }, lv5: { radius: 1.4 } },
+    bladeorbit: { lv3: { count: 2 }, lv5: { radius: 1.3 } },
+    dashstrike: { lv3: { range: 1.3 }, lv5: { damage: 1.4 } },
+    chainbolt: { lv3: { hops: 2 }, lv5: { hopDecay: 0.92 } },
+    lifebloom: { lv3: { healPlayer: 1.5 }, lv5: { radius: 1.4 } },
+    frostnova: { lv3: { radius: 1.35 }, lv5: { slowTime: 1.5 } },
+    iceshield: { lv3: { amount: 1.4 }, lv5: { duration: 1.5 } },
+    firering: { lv3: { band: 1.35 }, lv5: { dps: 1.35 } },
+    sunwheel: { lv3: { count: 1 }, lv5: { orbitSpeed: 1.3 } },
+    rockspikes: { lv3: { width: 1.5 }, lv5: { damage: 1.35 } },
+    boulder: { lv3: { radius: 1.3 }, lv5: { stunTime: 1.6 } },
+    quake: { lv3: { radius: 1.35 }, lv5: { knockback: 1.5 } },
+    stoneskin: { lv3: { amount: 1.4 }, lv5: { reflectShare: 1.6 } }
+  };
+  assert.equal(Object.keys(BP_EXPECTED).length, 20, 'T12 table: twenty skills expected');
+  for (const element of ELEMENTS) {
+    assert.deepEqual(
+      settings[element].breakpoints,
+      BP_EXPECTED[element],
+      `T12 table: ${element}'s breakpoints block doesn't match the brief's table`
+    );
+  }
+  console.log('ok  M6 T12: forty-entry breakpoint table pinned verbatim');
+}
+
+/* ---- M6 T12: CombatSystem consumption — one representative per kind ---- */
+{
+  // sweep (ice): width scales the sample/slow radius at Lv3; a `new
+  // CombatSystem(targets)` with no levelOf (every pre-T12 call site, and the
+  // sandbox) must still read the unscaled base — sandbox byte-identical.
+  {
+    const radii = [];
+    const targets = { damageOnce: (id, p, r) => (radii.push(r), 1), damage: () => 1, slow: () => {} };
+    const ice = {
+      element: 'ice', phase: 'travel', age: 0.2,
+      position: { x: 3, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 8, u: 0.4
+    };
+    new CombatSystem(targets).tick(1 / 60, [ice]);
+    assert.ok(radii.every((r) => Math.abs(r - settings.combat.ice.width) < 1e-9),
+      'T12: no levelOf injected — ice sweep stays at base width (sandbox unchanged)');
+
+    radii.length = 0;
+    new CombatSystem(targets, null, () => 3).tick(1 / 60, [{ ...ice }]);
+    const want = settings.combat.ice.width * 1.5;
+    assert.ok(radii.length > 0 && radii.every((r) => Math.abs(r - want) < 1e-9),
+      `T12: ice sweep at Lv3 samples at width×1.5 (want ${want}, got ${radii[0]})`);
+  }
+
+  // sweep (thunder): Lv1 the new slowFactor/slowTime field stays inert (0 is
+  // falsy, no slow call at all); Lv5 REPLACEs slowFactor to 0.3 and arms the
+  // existing slow channel with slowTime's already-final base of 1s, while
+  // damage separately scales ×1.3 — two different verbs, one tick.
+  {
+    const hits = [];
+    const slows = [];
+    const targets = {
+      damageOnce: (id, p, r, amt) => (hits.push(amt), 1),
+      damage: () => 1,
+      slow: (p, r, f, d) => slows.push({ f, d })
+    };
+    const thunder = {
+      element: 'thunder', phase: 'travel', age: 0.2,
+      position: { x: 3, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 8, u: 0.4
+    };
+    new CombatSystem(targets, null, () => 1).tick(1 / 60, [{ ...thunder }]);
+    assert.equal(slows.length, 0, 'T12: thunder Lv1 — the unarmed slow field fires no slow call');
+    assert.ok(hits.every((amt) => Math.abs(amt - settings.combat.thunder.damage) < 1e-9),
+      'T12: thunder Lv1 damage unscaled');
+
+    hits.length = 0;
+    new CombatSystem(targets, null, () => 5).tick(1 / 60, [{ ...thunder }]);
+    const wantDmg = settings.combat.thunder.damage * 1.3;
+    assert.ok(hits.length > 0 && hits.every((amt) => Math.abs(amt - wantDmg) < 1e-9),
+      `T12: thunder Lv5 damage ×1.3 (want ${wantDmg}, got ${hits[0]})`);
+    assert.equal(slows.length, 1, 'T12: thunder Lv5 arms exactly one slow call');
+    assert.ok(Math.abs(slows[0].f - 0.3) < 1e-9, 'T12: thunder Lv5 slowFactor replaces to 0.3');
+    assert.ok(Math.abs(slows[0].d - 1) < 1e-9, 'T12: thunder Lv5 slowTime is its already-final base (1s)');
+  }
+
+  // burst (lifebloom healPlayer Lv3, quake knockback Lv5 — extends the
+  // pre-T12 knockback assertion with a levelOf stub).
+  {
+    const healCombat = new CombatSystem({ damage: () => 1, damageOnce: () => 1, slow: () => {} }, null, () => 3);
+    const lifebloom = {
+      element: 'lifebloom', phase: 'impact', age: 0.2, impactTime: 0.05, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 1
+    };
+    const healed = healCombat.tick(1 / 60, [lifebloom]);
+    const wantHeal = settings.combat.lifebloom.healPlayer * 1.5;
+    assert.ok(Math.abs(healed - wantHeal) < 1e-9, `T12: lifebloom Lv3 healPlayer ×1.5 (want ${wantHeal}, got ${healed})`);
+
+    // Capture what CombatSystem hands to targets.knockback() directly — the
+    // pre-T12 knockback test (above, in the M6 T4 block) already covers
+    // EnemySystem.knockback()'s own physics off a raw value; this only needs
+    // to pin that the value itself is Lv5-scaled before it gets there.
+    const knocks = [];
+    const kbCombat = new CombatSystem(
+      { damage: () => 1, damageOnce: () => 1, slow: () => {}, knockback: (p, r, kb) => knocks.push(kb) },
+      null,
+      () => 5
+    );
+    const quake = {
+      element: 'quake', phase: 'impact', age: 0.2, impactTime: 0.05, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 1
+    };
+    kbCombat.tick(1 / 60, [quake]);
+    const wantKb = settings.combat.quake.knockback * 1.5;
+    assert.equal(knocks.length, 1, 'T12: quake Lv5 knockback call fires exactly once');
+    assert.ok(Math.abs(knocks[0] - wantKb) < 1e-9, `T12: quake Lv5 knockback×1.5 (want ${wantKb}, got ${knocks[0]})`);
+  }
+
+  // extraWave (meteor Lv5): the first detonation, then a second at 0.5s
+  // post-impact — same radius/damage ×0.6, and only ever fires once. Meteor
+  // also carries a burnDps dot (unrelated to T12) that keeps calling
+  // targets.damage() every tick for its own 2.5s burnTime at the *full*
+  // radius — extraWave's ×0.6 radius is what tells its one call apart from
+  // both that ongoing dot and the main blast, in a single bucket a plain
+  // detonation count can't isolate.
+  {
+    const mainHits = [];
+    const extraHits = [];
+    const wantRadius = settings.combat.meteor.radius * 1.3;
+    const wantExtraRadius = wantRadius * 0.6;
+    const countTargets = {
+      damageOnce: () => 1,
+      damage: (p, r, amt) => {
+        if (Math.abs(r - wantExtraRadius) < 1e-6) extraHits.push(amt);
+        else if (Math.abs(r - wantRadius) < 1e-6 && Math.abs(amt - settings.combat.meteor.damage) < 1e-6) mainHits.push(amt);
+        return 1;
+      },
+      slow: () => {}
+    };
+    const waveCombat = new CombatSystem(countTargets, null, () => 5);
+    const meteor = {
+      element: 'meteor', phase: 'impact', age: 0,
+      position: { x: 2, z: 2 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 10, u: 1, impactTime: 0, fadeTime: 0
+    };
+    // Walk to just under 0.5s: only the first (Lv3-scaled) detonation has fired.
+    for (let t = 0; t < 29; t++) {
+      meteor.impactTime += 1 / 60;
+      waveCombat.tick(1 / 60, [meteor]);
+    }
+    assert.equal(mainHits.length, 1, 'T12: meteor Lv5 first wave detonates once, at the Lv3-scaled radius');
+    assert.equal(extraHits.length, 0, 'T12: extraWave hasn\'t fired yet at ~0.48s');
+
+    // Cross 0.5s: the second wave fires exactly once, at ×0.6 of the first.
+    for (let t = 0; t < 5; t++) {
+      meteor.impactTime += 1 / 60;
+      waveCombat.tick(1 / 60, [meteor]);
+    }
+    assert.equal(extraHits.length, 1, 'T12: extraWave lands at ×0.6 the (already Lv3-scaled) radius');
+    assert.ok(Math.abs(extraHits[0] - settings.combat.meteor.damage * 0.6) < 1e-6, 'T12: extraWave deals ×0.6 damage');
+
+    // Keep ticking well past (past burnTime too) — it never fires a third time.
+    for (let t = 0; t < 180; t++) {
+      meteor.impactTime += 1 / 60;
+      waveCombat.tick(1 / 60, [meteor]);
+    }
+    assert.equal(extraHits.length, 1, 'T12: extraWave detonates exactly once per cast');
+    assert.equal(mainHits.length, 1, 'T12: ...and the main blast still only once, same as pre-T12');
+  }
+
+  // lineTick (beam): both tiers on one skill — width×1.5 (Lv3) and dps×1.35
+  // (Lv5) compound at Lv5 (each on its own independent param, not the same
+  // key — see the table pin above for the genuine same-key cumulative case).
+  {
+    const calls = [];
+    const beamCombat = new CombatSystem(
+      { damage: (p, r, amt) => (calls.push({ r, amt }), 1), damageOnce: () => 1, slow: () => {} },
+      null,
+      () => 5
+    );
+    const beam = {
+      element: 'beam', phase: 'impact', age: 0.5, impactTime: 0.2,
+      position: { x: 8, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 8, u: 1
+    };
+    beamCombat.tick(1 / 60, [beam]);
+    const wantWidth = settings.combat.beam.width * 1.5;
+    assert.ok(calls.every((c) => Math.abs(c.r - wantWidth) < 1e-9), 'T12: beam Lv5 samples at width×1.5');
+    const totalDmg = calls.reduce((s, c) => s + c.amt, 0);
+    const wantDps = settings.combat.beam.dps * 1.35;
+    // One tick's worth, split across LINE_SAMPLES — sums to dps×step, not dps.
+    assert.ok(Math.abs(totalDmg - wantDps / 60) < 1e-9, `T12: beam Lv5 dps×1.35 (want ${wantDps / 60}, got ${totalDmg})`);
+  }
+
+  // zoneTick (snare): radius×1.3 (Lv3) and slowFactor REPLACE 0.45→0.65 (Lv5).
+  {
+    const slows = [];
+    const snareCombat = new CombatSystem(
+      { damage: () => 1, damageOnce: () => 1, slow: (p, r, f) => slows.push({ r, f }) },
+      null,
+      () => 5
+    );
+    const snare = {
+      element: 'snare', phase: 'travel', age: 0.5,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 0.5
+    };
+    snareCombat.tick(1 / 60, [snare]);
+    assert.equal(slows.length, 1, 'T12: snare Lv5 still applies exactly one slow call');
+    // combat.snare carries no radius field of its own — zoneTick's fallback
+    // reads settings.snare.zoneRadius, so that's what Lv3's radius scales.
+    const wantRadius = settings.snare.zoneRadius * 1.3;
+    assert.ok(Math.abs(slows[0].r - wantRadius) < 1e-9, `T12: snare Lv3 radius×1.3 (want ${wantRadius}, got ${slows[0].r})`);
+    assert.ok(Math.abs(slows[0].f - 0.65) < 1e-9, 'T12: snare Lv5 slowFactor replaces to 0.65');
+  }
+
+  // aura (firering band×1.35 Lv3 + dps×1.35 Lv5; bladeorbit radius×1.3 Lv5).
+  {
+    const hits = [];
+    const auraCombat = new CombatSystem(
+      { damage: () => 0, damageOnce: () => 0, slow: () => {}, damageRing: (p, inner, outer, amt) => (hits.push({ inner, outer, amt }), 1) },
+      null,
+      () => 5
+    );
+    const firering = {
+      element: 'firering', phase: 'travel', age: 1,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 0
+    };
+    auraCombat.tick(1 / 60, [firering]);
+    const row = settings.combat.firering;
+    const wantOuter = row.radius; // firering carries no radius breakpoint
+    const wantBand = row.band * 1.35;
+    const wantAmt = row.dps * 1.35 * (1 / 60);
+    assert.ok(Math.abs(hits[0].outer - wantOuter) < 1e-9, 'T12: firering radius unaffected (no breakpoint on it)');
+    assert.ok(Math.abs(hits[0].inner - (wantOuter - wantBand)) < 1e-9, `T12: firering Lv3 band×1.35 (want inner ${wantOuter - wantBand}, got ${hits[0].inner})`);
+    assert.ok(Math.abs(hits[0].amt - wantAmt) < 1e-9, `T12: firering Lv5 dps×1.35 (want ${wantAmt}, got ${hits[0].amt})`);
+
+    hits.length = 0;
+    const bladeorbit = {
+      element: 'bladeorbit', phase: 'travel', age: 1,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 0
+    };
+    auraCombat.tick(1 / 60, [bladeorbit]);
+    const wantBladeRadius = settings.combat.bladeorbit.radius * 1.3;
+    assert.ok(Math.abs(hits[0].outer - wantBladeRadius) < 1e-9, `T12: bladeorbit Lv5 radius×1.3 (want ${wantBladeRadius}, got ${hits[0].outer})`);
+  }
+
+  // shield (iceshield amount×1.4 Lv3 + duration×1.5 Lv5; stoneskin reflectShare×1.6 Lv5).
+  {
+    const shieldCombat = new CombatSystem({ damage: () => 1, damageOnce: () => 1, slow: () => {} }, null, () => 5);
+    const iceshield = {
+      element: 'iceshield', phase: 'travel', age: 0.01, impactTime: 0, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 0
+    };
+    shieldCombat.tick(1 / 60, [iceshield]);
+    const wantAmount = settings.combat.iceshield.amount * 1.4;
+    const wantDuration = settings.combat.iceshield.duration * 1.5;
+    assert.ok(Math.abs(shieldCombat.shieldDue.amount - wantAmount) < 1e-9, `T12: iceshield Lv3 amount×1.4 (want ${wantAmount})`);
+    assert.ok(Math.abs(shieldCombat.shieldDue.duration - wantDuration) < 1e-9, `T12: iceshield Lv5 duration×1.5 (want ${wantDuration})`);
+
+    const shieldCombat2 = new CombatSystem({ damage: () => 1, damageOnce: () => 1, slow: () => {} }, null, () => 5);
+    const stoneskin = {
+      element: 'stoneskin', phase: 'travel', age: 0.01, impactTime: 0, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 0
+    };
+    shieldCombat2.tick(1 / 60, [stoneskin]);
+    const wantReflect = settings.combat.stoneskin.reflectShare * 1.6;
+    assert.ok(Math.abs(shieldCombat2.shieldDue.reflectShare - wantReflect) < 1e-9,
+      `T12: stoneskin Lv5 reflectShare×1.6 (want ${wantReflect})`);
+  }
+
+  console.log('ok  M6 T12: CombatSystem consumption (sweep/burst/lineTick/zoneTick/aura/shield + extraWave)');
+}
+
+/* ---- M6 T12: shield gate — T5 watch item (iceshield Lv3 vs stoneskin base) ---- */
+{
+  // addShield's take-max compares the new cast against the CURRENT REMAINING
+  // shield, not the original cast amount — pin both halves of that: a
+  // refresh below the remaining pool is a no-op (the documented window), and
+  // one that reaches or exceeds it lands, including reflectShare riding
+  // along with amount/duration as one bundle.
+  const player = new PlayerState();
+  player.addShield(56, 6, 0); // iceshield Lv3 (40×1.4), no reflectShare
+
+  player.addShield(55, 7, 0.3); // stoneskin base — 55 < remaining 56: no-op
+  assert.equal(player.shield, 56, 'T5 watch item: a weaker refresh while remaining ≥ its amount is a no-op');
+  assert.equal(player.reflectShare, 0, 'T5 watch item: the no-op leaves the old (weaker) reflectShare in place too');
+
+  player.shield = 40; // drains below stoneskin's 55, as real combat would over a few seconds
+  player.addShield(55, 7, 0.3);
+  assert.equal(player.shield, 55, 'T5 watch item: once remaining < the new amount, the refresh lands');
+  assert.equal(player.shieldT, 7, 'T5 watch item: ...and its duration is restored');
+  assert.equal(player.reflectShare, 0.3, 'T5 watch item: ...and reflectShare is restored with it (one bundle)');
+
+  console.log('ok  M6 T12: shield gate — stoneskin refresh lands once remaining < its amount');
+}
+
+/* ---- M6 T12: UpgradePool — the Lv3/Lv5 card carries its breakpoint line ---- */
+{
+  const saved = settings.run.draftLoadout;
+  settings.run.draftLoadout = true;
+  const loadout = new Loadout();
+  loadout.reset();
+  const mods = new Modifiers();
+  const pool = new UpgradePool(createRng(77), loadout, mods);
+  const element = loadout.elementAt(0);
+
+  // draw() is weighted-random over every offerable candidate — the pre-T12
+  // "exhaustion" test above already leans on the same trick: seat and max
+  // every other candidate (the remaining 5 seats, every passive) so
+  // `element`'s own upgrade card is the only thing left in the pool, and a
+  // one-item weighted pick is deterministic.
+  const others = ELEMENTS.filter((el) => el !== element).slice(0, 5);
+  for (const el of others) loadout.acquire(el);
+  for (const el of others) {
+    while (!loadout.isMaxed(el)) loadout.upgrade(el);
+  }
+  for (const id of Object.keys(PASSIVES)) {
+    while (mods.bumpPassive(id)) { /* to max */ }
+  }
+
+  loadout.upgrade(element); // Lv1 → Lv2: next pick offers Lv3
+  const hand3 = pool.draw(2);
+  const card3 = hand3.find((c) => c.kind === 'upgrade' && c.element === element);
+  assert.ok(card3, 'T12: an upgrade card is on offer at Lv2→3');
+  assert.ok(card3.body.includes(t(`bp.${element}.lv3`)), `T12: Lv3 card body carries bp.${element}.lv3`);
+
+  loadout.upgrade(element); // → Lv3
+  loadout.upgrade(element); // → Lv4: next pick offers Lv5
+  const hand5 = pool.draw(4);
+  const card5 = hand5.find((c) => c.kind === 'upgrade' && c.element === element);
+  assert.ok(card5, 'T12: an upgrade card is on offer at Lv4→5');
+  assert.ok(card5.body.includes(t(`bp.${element}.lv5`)), `T12: Lv5 card body carries bp.${element}.lv5`);
+  assert.ok(!card5.body.includes(t(`bp.${element}.lv3`)), 'T12: the Lv5 card doesn\'t also carry the Lv3 line');
+
+  settings.run.draftLoadout = saved;
+  console.log('ok  M6 T12: upgrade cards show their breakpoint line at Lv3/Lv5');
 }
 
 console.log('\nevery game-logic check passed');

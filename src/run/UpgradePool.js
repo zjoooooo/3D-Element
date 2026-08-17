@@ -1,6 +1,7 @@
 import { settings, ELEMENTS } from '../config/settings.js';
 import { PASSIVES } from './Modifiers.js';
 import { ABILITY_TYPES } from '../abilities/AbilityManager.js';
+import { t } from '../ui/strings.js';
 
 /**
  * What the level-up can offer (spec §6 卡池).
@@ -28,13 +29,18 @@ export class UpgradePool {
 
     for (const element of this.loadout.equippedList()) {
       if (this.loadout.isMaxed(element)) continue;
+      const nextLevel = this.loadout.levelOf(element) + 1;
+      // M6 T12: Lv3/Lv5 are 质变 breakpoints, not just another +25% — append
+      // that tier's one-line description (strings `bp.<element>.lv3`/`.lv5`,
+      // t() so a language flip picks it up like every other UI string).
+      const bp = nextLevel === 3 || nextLevel === 5 ? ` · ${t(`bp.${element}.lv${nextLevel}`)}` : '';
       candidates.push({
         weight: w.upgrade,
         card: {
           kind: 'upgrade',
           element,
-          title: `升级 · Lv${this.loadout.levelOf(element) + 1}`,
-          body: UPGRADE_BODY
+          title: `升级 · Lv${nextLevel}`,
+          body: UPGRADE_BODY + bp
         }
       });
     }

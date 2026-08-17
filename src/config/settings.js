@@ -436,7 +436,12 @@ export const settings = {
    */
   combat: {
     ice: { kind: 'sweep', damage: 20, width: 1.4, slowFactor: 0.35, slowTime: 1.2 },
-    thunder: { kind: 'sweep', damage: 26, width: 1.0 },
+    // M6 T12: slowFactor/slowTime start inert (0 is falsy — CombatSystem's
+    // sweep case never calls targets.slow() below Lv5) and breakpoints.lv5
+    // REPLACEs slowFactor with 0.3, arming the existing slow channel with no
+    // new mechanic — slowTime is already its intended final value (1s) from
+    // the start, just unused until slowFactor turns truthy.
+    thunder: { kind: 'sweep', damage: 26, width: 1.0, slowFactor: 0, slowTime: 1 },
     meteor: { kind: 'burst', damage: 55, radius: 2.6, burnDps: 12, burnTime: 2.5 },
     beam: { kind: 'lineTick', dps: 60, width: 0.9 },
     // slowTime: seconds each tick's slow lingers on an enemy
@@ -555,6 +560,10 @@ export const settings = {
    * meshes on disk.
    */
   ice: {
+    // M6 T12 (质变节点): Lv3 widens the sweep, Lv5 is the castTwice code hook
+    // (App's cast path fires a second bolt at ±8°) — see src/run/breakpoints.js.
+    breakpoints: { lv3: { width: 1.5 }, lv5: { castTwice: true } },
+
     /* --- the cast itself --- */
     range: 15.0, // maximum cast distance, metres
     minRange: 2.5, // closer than this and the cast is refused
@@ -721,6 +730,12 @@ export const settings = {
    * event, not a dimension — the same rule `IceAbility` follows.
    */
   thunder: {
+    // M6 T12: Lv5's slowFactor/slowTime REPLACE combat.thunder's own base
+    // (0/1, inert until then — see that row's own comment) rather than add,
+    // so one verb (bpReplace) covers both this "0 → armed" swap and snare's
+    // "0.45 → 0.65" swap below.
+    breakpoints: { lv3: { width: 1.4 }, lv5: { damage: 1.3, slowFactor: 0.3 } },
+
     /* --- the cast --- */
     range: 24.0, // maximum cast distance, metres
     minRange: 2.0, // closer than this and the cast is refused
@@ -903,6 +918,10 @@ export const settings = {
    * dragging `chunkSpeed` re-throws debris that has already landed.
    */
   meteor: {
+    // M6 T12: Lv5 is the extraWave code hook (CombatSystem's burst case
+    // re-detonates once more, 0.5s later, at ×0.6) — see breakpoints.js.
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { extraWave: true } },
+
     /* --- the cast --- */
     range: 20.0, // maximum cast distance, metres
     minRange: 3.0, // closer than this and the cast is refused
@@ -1192,6 +1211,10 @@ export const settings = {
    * re-bores a beam that is already burning, with the clock stopped.
    */
   beam: {
+    // M6 T12: both tiers land on CombatSystem's lineTick case (width is also
+    // the per-sample hit radius, dps the sustained tick rate).
+    breakpoints: { lv3: { width: 1.5 }, lv5: { dps: 1.35 } },
+
     /* --- the cast --- */
     range: 26.0, // maximum cast distance, metres
     minRange: 3.0, // closer than this and the cast is refused
@@ -1469,6 +1492,10 @@ export const settings = {
    * under the sliders with the clock stopped.
    */
   snare: {
+    // M6 T12: Lv5's slowFactor REPLACES the base 0.45 outright (spec's own
+    // "0.45→0.65" phrasing — bpReplace, not a multiply/add).
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { slowFactor: 0.65 } },
+
     /* --- the cast --- */
     range: 20.0, // maximum cast distance, metres
     minRange: 0.0, // a trap can legitimately be dropped on your own feet
@@ -1739,6 +1766,10 @@ export const settings = {
    * under the sliders with the clock stopped.
    */
   glacier: {
+    // M6 T12: both tiers land on CombatSystem's burst case (radius via the
+    // zoneRadius fallback below, slowTime alongside the existing slowFactor).
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { slowTime: 1.6 } },
+
     /* --- the cast --- */
     range: 18.0, // maximum cast distance, metres
     minRange: 0.0, // a wall of ice around your own feet is a legitimate play
@@ -2046,6 +2077,11 @@ export const settings = {
    * `size` 0.4: a ball you could hold, not a meteor.
    */
   fireball: {
+    // M6 T12: fireball is kind:'self' (resolves its own hits, see combat.fireball's
+    // own comment) — both tiers are read straight off this block by
+    // FireballAbility.onImpact() itself, never through CombatSystem.
+    breakpoints: { lv3: { radius: 1.35 }, lv5: { damage: 1.3 } },
+
     /* --- the cast --- */
     range: 20.0, // maximum throw, metres
     minRange: 0, // it is a bolt, not an eruption — casting at your feet is fine
@@ -2183,6 +2219,10 @@ export const settings = {
 
   // --- 金 swordrain: 万剑诀, a falling rain of blades on a dropped circle ---
   swordrain: {
+    // M6 T12: 剑数 (blade count) is additive on `count`, read at spawn by
+    // ZoneBurstSkill against swordCount below; 半径 is CombatSystem's own
+    // burst radius (WYSIWYG — ZoneBurstSkill._radius() reads the same value).
+    breakpoints: { lv3: { count: 4 }, lv5: { radius: 1.4 } },
     range: 14, minRange: 0, speed: 20, cooldown: 2.6, manaCost: 0, castAnim: 'cast1',
     zoneRadius: 4.0, // footprint the circle indicator measures out — matches combat.swordrain.radius
     swordCount: 14, swordSize: 0.5, dropTime: 0.4, // pre-effect: instanced blades falling (T4)
@@ -2195,6 +2235,9 @@ export const settings = {
 
   // --- 金 bladeorbit: 剑域, five swords orbiting the caster — permanent aura ---
   bladeorbit: {
+    // M6 T12: 刃数 (blade count) additive on `count`; 环带半径 multiplies the
+    // combat row's radius — both read live by OrbitAuraSkill (WYSIWYG).
+    breakpoints: { lv3: { count: 2 }, lv5: { radius: 1.3 } },
     range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
     bladeCount: 5, bladeSize: 0.4, orbitSpeed: 1.2, // revolutions/second
     color: '#f0d885', colorGlow: '#fff6d9',
@@ -2206,6 +2249,12 @@ export const settings = {
 
   // --- 金 dashstrike: 弑神一闪, a short teleport-slash (DashStrikeSkill, T6) ---
   dashstrike: {
+    // M6 T12: 冲程 (reach) scales `range`, read only at the physical-teleport
+    // call site (App#_dashDisplace) — implementer's choice, needs review: the
+    // ability's own cast `distance` (ribbon/damage-line length) still comes
+    // from AimController's unscaled drag, out of this task's file scope, so a
+    // max-range Lv3+ dash can teleport slightly past where the line swept.
+    breakpoints: { lv3: { range: 1.3 }, lv5: { damage: 1.4 } },
     range: 8, minRange: 0, speed: 40, cooldown: 7, manaCost: 30, castAnim: 'cast1',
     // controller-ruled (T6 dispatch): 50×7s×0.8窄线 = 280; 位移+i帧 utility 由
     // 30 蓝定价 (D-M6-1 live anchor) — self-resolved (kind:'self'), exempt
@@ -2222,6 +2271,9 @@ export const settings = {
 
   // --- 木 chainbolt: 连锁闪电, a bolt hopping between enemies (ChainBoltSkill, T6) ---
   chainbolt: {
+    // M6 T12: 跳数 (hops) is additive; 衰减 15%→8% REPLACES hopDecay outright
+    // (0.85→0.92 — bpReplace, spec's own "X%→Y%" phrasing, not compounding).
+    breakpoints: { lv3: { hops: 2 }, lv5: { hopDecay: 0.92 } },
     range: 14, minRange: 1, speed: 45, cooldown: 1.2, manaCost: 0, castAnim: 'cast1',
     // controller-ruled (T6 dispatch): 首跳 20 平冰枪; 满链
     // 20×(1+.85+.7225+.614+.522) ≈ 74 ≈ 预算60×1.23, 定价链条利用率 80%.
@@ -2235,6 +2287,8 @@ export const settings = {
 
   // --- 木 lifebloom: 生命绽放, a healing burst with a spore DoT ---
   lifebloom: {
+    // M6 T12: 治疗 scales combat.lifebloom.healPlayer; 半径 scales its burst radius.
+    breakpoints: { lv3: { healPlayer: 1.5 }, lv5: { radius: 1.4 } },
     range: 10, minRange: 0, speed: 18, cooldown: 3.2, manaCost: 0, castAnim: 'cast1',
     zoneRadius: 2.2, // matches combat.lifebloom.radius
     petalCount: 8, bloomSize: 0.6,
@@ -2245,6 +2299,7 @@ export const settings = {
 
   // --- 水 frostnova: 寒霜新星, a self-centred ring of freeze ---
   frostnova: {
+    breakpoints: { lv3: { radius: 1.35 }, lv5: { slowTime: 1.5 } },
     range: 1, minRange: 0, speed: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     ringCount: 3, crystalSize: 0.4,
     color: '#7fd4ff', colorGlow: '#e8f9ff',
@@ -2254,6 +2309,13 @@ export const settings = {
 
   // --- 水 iceshield: 冰晶甲, a personal shield that sprays shards when it breaks ---
   iceshield: {
+    // M6 T12: 盾量/时长 both scale combat.iceshield's own amount/duration.
+    // T5 watch item (shield gate): addShield's take-max compares the new cast
+    // against the CURRENT REMAINING shield (PlayerState.shield keeps draining
+    // in place, never the original cast amount) — so a Lv3 iceshield
+    // (40×1.4=56) briefly outweighing stoneskin's base 55 is a no-op window
+    // that drains away within seconds, not a stuck state. See task-12-report.md.
+    breakpoints: { lv3: { amount: 1.4 }, lv5: { duration: 1.5 } },
     range: 1, minRange: 0, speed: 0, cooldown: 9, manaCost: 30, castAnim: 'cast1',
     shieldSize: 1.1, crystalCount: 6,
     color: '#9fe8ff', colorGlow: '#eefbff',
@@ -2265,6 +2327,9 @@ export const settings = {
 
   // --- 火 firering: 燃阵, a ring of ground fire around the caster — permanent aura ---
   firering: {
+    // M6 T12: 环带宽 scales combat.firering.band (the annulus's own thickness,
+    // not its outer radius); dps scales the aura's tick rate.
+    breakpoints: { lv3: { band: 1.35 }, lv5: { dps: 1.35 } },
     range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
     flameHeight: 0.8, ringWidth: 0.5,
     color: '#ff8a4c', colorGlow: '#ffe0c2',
@@ -2273,14 +2338,19 @@ export const settings = {
 
   // --- 火 sunwheel: 日轮, three fireballs orbiting the caster — permanent aura ---
   sunwheel: {
+    // M6 T12: 球数 additive on `count`; 公转速 scales the new orbitSpeed field
+    // below (mirrors bladeorbit's own orbitSpeed — OrbitAuraSkill's
+    // _updateSunOrbs() used to hard-code this rotation rate as a bare 0.6).
+    breakpoints: { lv3: { count: 1 }, lv5: { orbitSpeed: 1.3 } },
     range: 1, minRange: 0, speed: 0, cooldown: 0, manaCost: 0, castAnim: 'cast1',
-    orbCount: 3, orbSize: 0.35,
+    orbCount: 3, orbSize: 0.35, orbitSpeed: 0.6, // revolutions/second
     color: '#ffb347', colorGlow: '#ffe8c2',
     lightColor: '#ffe8c2', lightIntensity: 4, lightRadius: 5.5
   },
 
   // --- 土 rockspikes: 岩刺突贯, spikes tearing up along a line (ice's skeleton, T4) ---
   rockspikes: {
+    breakpoints: { lv3: { width: 1.5 }, lv5: { damage: 1.35 } },
     range: 15, minRange: 2.2, speed: 24, cooldown: 2.4, manaCost: 0, castAnim: 'cast1',
     spikeCount: 16, riseTime: 0.15,
     color: '#b8875a', colorGlow: '#e6d3ba',
@@ -2294,6 +2364,7 @@ export const settings = {
 
   // --- 土 boulder: 落石, a single stunning rock dropped on a circle ---
   boulder: {
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { stunTime: 1.6 } },
     range: 16, minRange: 0, speed: 16, cooldown: 3.0, manaCost: 0, castAnim: 'cast1',
     zoneRadius: 2.4, // matches combat.boulder.radius
     rockSize: 1.3, fallTime: 0.5,
@@ -2304,6 +2375,8 @@ export const settings = {
 
   // --- 土 quake: 震地波, a self-centred shockwave with heavy knockback ---
   quake: {
+    // M6 T12: 击退 scales combat.quake.knockback (the sweep wired in bd7aa5a).
+    breakpoints: { lv3: { radius: 1.35 }, lv5: { knockback: 1.5 } },
     range: 1, minRange: 0, speed: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     waveCount: 2, waveSpeed: 6.0,
     color: '#8a7355', colorGlow: '#d6c9b3',
@@ -2313,6 +2386,8 @@ export const settings = {
 
   // --- 土 stoneskin: 石肤, rock armour that reflects a share of absorbed damage ---
   stoneskin: {
+    // M6 T12: see iceshield's own copy of the shield-gate watch-item note.
+    breakpoints: { lv3: { amount: 1.4 }, lv5: { reflectShare: 1.6 } },
     range: 1, minRange: 0, speed: 0, cooldown: 10, manaCost: 30, castAnim: 'cast1',
     shieldSize: 1.2, crackCount: 5,
     color: '#a68968', colorGlow: '#e3d3bd',

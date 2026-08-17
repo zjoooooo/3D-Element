@@ -8,6 +8,7 @@ import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
 import { saturate, Easing } from '../../utils/math.js';
+import { bpAdd, bpReplace } from '../../run/breakpoints.js';
 
 /** Hard ceiling on additional hops — the editor's `hops` slider (T8) would
  * clamp here; also sizes the chain's point/ribbon buffers (+2 for the
@@ -389,11 +390,16 @@ export class ChainBoltSkill extends Ability {
     this._chainCount = 2;
     this._applyHit(first, baseAmt, wux);
 
-    const hopBudget = Math.min(MAX_HOPS, Math.max(0, Math.round(c.hops)));
+    // M6 T12 (连锁闪电 Lv3 跳数+2): additive, off this.bpLevel — self-resolved
+    // (kind:'self'), so this bypasses CombatSystem the same way baseAmt above does.
+    const hopBudget = Math.min(MAX_HOPS, Math.max(0, Math.round(c.hops + bpAdd(this.element, 'hops', this.bpLevel))));
     const hopIdx = chainHops(enemies, first, hopBudget, c.hopRadius, this._hitSet);
+    // M6 T12 (Lv5 衰减15%→8%): hopDecay 0.85→0.92 REPLACES the base outright
+    // (spec's own "X%→Y%" phrasing — bpReplace, not a multiply).
+    const hopDecay = bpReplace(this.element, 'hopDecay', this.bpLevel) ?? c.hopDecay;
     let amt = baseAmt;
     for (let i = 0; i < hopIdx.length; i++) {
-      amt *= c.hopDecay;
+      amt *= hopDecay;
       const idx = hopIdx[i];
       this._chainPoints[this._chainCount].set(enemies.x[idx], 1.0, enemies.z[idx]);
       this._chainCount++;

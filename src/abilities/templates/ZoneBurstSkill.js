@@ -10,6 +10,7 @@ import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
 import { saturate, lerp, Easing } from '../../utils/math.js';
+import { bpScale, bpAdd } from '../../run/breakpoints.js';
 
 const MAX_BLADES = 24;
 const TAU = Math.PI * 2;
@@ -159,9 +160,12 @@ export class ZoneBurstSkill extends Ability {
     return super.advance(dt);
   }
 
-  /** Live zone radius — read off the combat row directly (see class doc). */
+  /** Live zone radius — read off the combat row directly (see class doc). M6
+   * T12: scaled by the same bpScale('radius') CombatSystem's own burst case
+   * applies to the hit footprint, off this same `bpLevel` (WYSIWYG). */
   _radius() {
-    return settings.combat[this.element]?.radius ?? settings[this.element].zoneRadius ?? 2;
+    const radius = settings.combat[this.element]?.radius ?? settings[this.element].zoneRadius ?? 2;
+    return radius * bpScale(this.element, 'radius', this.bpLevel);
   }
 
   /** Seconds of travel left before the front reaches the target — used to
@@ -184,6 +188,14 @@ export class ZoneBurstSkill extends Ability {
     this.blades.count = 0;
 
     if (this._hasBladeRain) {
+      // M6 T12 (万剑诀 Lv3 剑数+4): how many of MAX_BLADES this cast actually
+      // drops, resolved once at spawn (spec: template classes read shape
+      // params at spawn) — fixes a pre-existing gap where every cast dropped
+      // all MAX_BLADES regardless of `swordCount`, which made this field dead.
+      this._bladeWanted = Math.min(
+        MAX_BLADES,
+        Math.max(1, Math.round(settings[this.element].swordCount + bpAdd(this.element, 'count', this.bpLevel)))
+      );
       for (const record of this.bladeRecords) {
         record.angle = Math.random() * TAU;
         record.radial = Math.sqrt(Math.random()); // even fill, not centre-piled
@@ -206,7 +218,12 @@ export class ZoneBurstSkill extends Ability {
     const staggerWindow = dropTime * 0.35;
 
     if (this._timeToImpact() <= dropTime) {
-      for (const record of this.bladeRecords) {
+      // M6 T12: only the first `_bladeWanted` records ever start — the rest
+      // sit at their onSpawn-reset `started = false` forever, which is what
+      // keeps a Lv1 cast's blade count honest to `swordCount` instead of
+      // always drawing all MAX_BLADES (see onSpawn's own doc).
+      for (let i = 0; i < this._bladeWanted; i++) {
+        const record = this.bladeRecords[i];
         if (!record.started) {
           record.started = true;
           record.fallStart = this.age + record.delay * staggerWindow;
@@ -215,7 +232,8 @@ export class ZoneBurstSkill extends Ability {
     }
 
     let used = 0;
-    for (const record of this.bladeRecords) {
+    for (let i = 0; i < this._bladeWanted; i++) {
+      const record = this.bladeRecords[i];
       if (!record.started) continue;
       const t = saturate((this.age - record.fallStart) / dropTime);
       if (t <= 0) continue;

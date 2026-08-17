@@ -8,6 +8,7 @@ import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
 import { saturate, Easing } from '../../utils/math.js';
+import { bpScale } from '../../run/breakpoints.js';
 
 /** Ribbon tessellation — a short 8m line needs nowhere near this many nodes;
  * picked so the trailing window (below) still reads smooth. */
@@ -211,12 +212,16 @@ export class DashStrikeSkill extends Ability {
     // fireball's ctx.mods?./autocast handling, extended to also honour
     // quenched/fusionMult like the invariant asks — fireball itself predates
     // both and was never updated to read them; not touched by this task).
+    // M6 T12 (弑神一闪 Lv5 伤害×1.4): self-resolved (kind:'self' bypasses
+    // CombatSystem entirely, see class doc), so bpScale is applied by hand
+    // here, off this.bpLevel, same as the four factors above it.
     const amt =
       c.damage *
       (this.ctx.mods?.damageMult(this.element) ?? 1) *
       (this.autocast ? settings.run.autocastDamage : 1) *
       (this.quenched ? 1.5 : 1) *
-      (this.fusionMult ?? 1);
+      (this.fusionMult ?? 1) *
+      bpScale(this.element, 'damage', this.bpLevel);
     const wux = settings.combat.wuxingOf[this.element] ?? -1;
     const hits = dashLineHits(
       this.ctx.targets,

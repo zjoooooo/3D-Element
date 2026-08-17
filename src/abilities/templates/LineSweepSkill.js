@@ -9,6 +9,7 @@ import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
 import { saturate, Easing, randRange } from '../../utils/math.js';
+import { bpScale } from '../../run/breakpoints.js';
 
 /** Hard ceiling on spikes per cast — the editor's count slider clamps here. */
 const MAX_SPIKES = 48;
@@ -142,9 +143,13 @@ export class LineSweepSkill extends Ability {
   }
 
   /** Visual half-width of the band — read off the combat row directly so the
-   * silhouette can never drift from what actually gets hit (WYSIWYG). */
+   * silhouette can never drift from what actually gets hit (WYSIWYG). M6
+   * T12: scaled by the same bpScale('width') CombatSystem's own sweep case
+   * applies to the hitbox, off this same `bpLevel`, so a Lv3 rockspikes
+   * field is exactly as wide on screen as it is to a sweep sample. */
   _halfWidth() {
-    return (settings.combat[this.element]?.width ?? 1.4) * 0.5;
+    const width = settings.combat[this.element]?.width ?? 1.4;
+    return width * bpScale(this.element, 'width', this.bpLevel) * 0.5;
   }
 
   /* ------------------------------------------------------------------ */
