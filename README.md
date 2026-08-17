@@ -238,7 +238,37 @@ The editor's thirteen new folders are all one function: `_buildGenericSkill` ref
 | 土 Earth | 震地波 | Quake | Self-centred shockwave with heavy knockback |
 | 土 Earth | 石肤 | Stone Skin | Shield that reflects a share of what it absorbs |
 
-To validate the game loop headless, run `npm run check:game` — sixty-three blocks of logic tests including the mixed-horde stress gate (measures tick time at the 300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
+M8 adds a **second wave of ten**, two more to each wuxing, and almost all of it is
+configuration: four ride the templates M6 already built, two share one new
+"timed field" template distilled from M7's prism array, three are small classes
+assembled out of parts that already existed (the metal ultimate's execute floor,
+the chain-bolt strike, the volcano's wave/scatter hand-off), and exactly one
+needed a genuinely new judged shape — a cone.
+
+| 五行 | 中文 | English | What it does |
+| --- | --- | --- | --- |
+| 金 Metal | 磁暴 | Magnet Storm | A ring that cuts its band and drags bodies toward the eye |
+| 金 Metal | 破军贯穿 | Breaker Lance | A long, narrow line that runs everything through, then finishes anything left under an absolute floor |
+| 木 Wood | 雷暴领域 | Storm Field | A wide field that drops a bolt on a random body inside it every three-quarters of a second |
+| 木 Wood | 荆棘之路 | Thorn Road | A line of bramble that keeps burning where it stood, and tangles what it burns |
+| 水 Water | 潮汐涌浪 | Tidal Surge | A wall of water that sweeps the line and carries bodies along with it |
+| 水 Water | 冰雹风暴 | Hailstorm | Six waves of hail walking outward across a wide circle |
+| 火 Fire | 烈焰喷吐 | Flame Breath | A channelled wedge of dragon-fire out of the caster's own mouth |
+| 火 Fire | 流火雨 | Mortar Rain | Five shells walked across a scattered footprint |
+| 土 Earth | 沙暴领域 | Sand Field | A solid disc that grinds and blinds |
+| 土 Earth | 石柱擎天 | Stone Pillar | One heavy column that throws bodies clear and stuns them |
+
+Two rules came out of building them, both the hard way. A per-tick channel has
+to declare whether its number is a **rate or a single impulse** — the same
+mistake landed three times in one milestone, each time letting a skill shove its
+own targets out of the area it was damaging. And a test that freezes one thing to
+isolate another must be paired with one that freezes nothing: pinning positions
+to measure a cone's geometry also neutralised the shove that was breaking it,
+and read as a pass.
+
+To validate the game loop headless, run `npm run check:game` — seventy-odd blocks
+of logic tests including the mixed-horde stress gate (measures tick time at the
+300-enemy spawn cap, spitter shots live; must stay under 2 ms/tick).
 
 ---
 
