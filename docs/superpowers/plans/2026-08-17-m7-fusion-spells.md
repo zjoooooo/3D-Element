@@ -164,4 +164,28 @@
 
 ## 执行后勘误(执行会话填写)
 
-(留空)
+### 续作指引(2026-08-17 会话交接,给下一个会话)
+
+**从 Task 4(锋岩星阵)开始。** T1-T3 已完成、已评审、已合入 main。执行顺序:T4 → T5 霜刃洪流 → T6 回春雷泽 → T7 回归收官。流程:每任务 = 断言 RED → 实现 → 双套件绿(`npm run check:game` + `npm run check`)→ 浏览器逐项 → 评审(独立视角审 diff)→ 修复轮 → 提交;里程碑末 T7 后做全支终审。提交规范见 Global Constraints;**推送需问用户**。
+
+T4 执行要点(计划正文之外的上下文):
+- T1 的 App 光环拒施门(`settings.combat[element]?.kind === 'aura'`)查的是 settings.combat 顶层,融合 id 走 `rowFor`——fusion id 在 settings.combat 下 undefined,所以**不会**误拒 aura 行的融合;加结构 pin 防未来重构静默弄坏(断言:rowFor 对 'fusion:…' 解到 aura 行而 settings.combat['fusion:…'] 为 undefined)。
+- `applyVuln(point, innerRadius, radius, amt, time)` 加在 EnemySystem(镜像 damageRing 的循环含内缘 pad)+ Targets 可选链透传;**语义对齐既有 vuln 通道**(先读 _applyDebuff 怎么写 vulnT/vulnAmt——强弱覆盖规则照抄,断言钉住"弱不降级强")。
+- 阵是**限时施放**(3s 生命周期,正常五字段/冷却/法力),不是常驻光环;类不挪 ability.position(静置);band=radius → damageRing 实心盘退化,加断言。
+- wux 线程:'4+0' → (子0金, 母4土);淬炼(子系金)应在施放时消耗并 ×1.5 全程研磨 tick——浏览器验证。
+
+### T1 双属性命中 + 融合施放骨架(ed951a0 + 修复 09d8ab1)
+- 约定定案:damage 系尾参 **wux=子系, wuxB=母系**(单属性 wuxB=-1 语义零变);матchup 取双系更优(双被克时取 0.8,不落底 1);挂印/减益/引爆只看子系。计划正文一处母子写反已勘正(f901b73)。
+- 融合施放:单 bespoke ability(element=fusion id),row cd × cooldownMult,fusionMult = 1+0.25×(lv-1)(budget 1.2 退役),淬炼子系一次,轮转子系;光环父融合后停常驻(equippedList 驱动,融合 id 不再展开)。
+- 修复轮:AimController 暴露 `rawDistance`(_resolve 单命中支同步写,退化时沿用旧值同 direction 约定)→ 融合快速施放落在光标点(近点 3.75m 精确浮点、远点钳 row.range);pairKeyOf 加有界 Map 缓存;'1+3'/'0+2' 补 kind:'self' 哨兵。
+- 共鸣双计 M4 起就对(_refreshResonance flatMap),已加 pin;demo 流不触融合卡(已验证)。
+
+### T2 业火燎原 VineBlazeSkill(a3db173 + 70ab21d + 771ba02,两轮修复)
+- 主燃区 r2.2/dps45/4s;区内击杀 → 尸位分叉 2 子区(dps27,寿命=主区余量,每 cast 上限 5,子区不再分叉);RunManager 新 `onKillAt` 监听表 fan-out(spawn 订阅/retire 退订,swap-remove)。fusionMult 必须在 **onImpact 读**(onSpawn 先于五字段盖章执行——实现者自查出并 pin)。
+- 修复 1:zoneTick 每帧对象字面量分配 → 标量返回/原位累加(CombatSystem._dot/_take 先例);真实链路重入回归测试(区自身 tick 击杀 → 循环中分叉)。
+- 修复 2(评审复审实证抓出):模块级 scratch `_pos` 按引用递入 EnemySystem.damage(逐敌重读 point.x/z),重入 _spawnZone 中途改写 → 迭代后段敌人按错圆心判定静默零伤(实证:邻敌死否翻转幸存者 18.3↔20)。修法:重入路径专用 `_forkPos`。**铁律(M4 反应队列教训的姊妹):凡递入可触发重入调用的 scratch,重入路径必须用独立 scratch**——T3 起各融合类均须遵守。
+- 分叉全链到上限的实机观察受浏览器节流所限,以真实类头绪化+变异测试证明(报告存档)。
+
+### T3 地心火山 VolcanoSkill(502c30e,一次通过)
+- burst `waves` 通用化:行级可选 `waves:[{delay,damageMult,radiusMult}]`,per-cast 游标 Map 随 release 清理;时序保证:时钟先于 abilities.update,类以 0.25s FLIGHT_TIME 提前挪 position(5× dt 钳幅裕度);纯数据行(无类)也可多波。陨石 Lv5 extraWave 迁移到同通道**逐字节等价**(测试文件 0 删除;_extraDetonated 机器退役)。
+- 3 弹 0.6/1.5/2.4 @95/r2.0/晕0.8(晕在 wave 循环内=每波);熔岩池类内自决(VineBlaze 区模式,上限 3,30/1.6/4s;行字段迁至 settings.fusions['3+4'].lavaDps/lavaRadius/lavaLife——combat 行的 burnDps 形状不适配三个独立出格池,已按计划数值表归位);wux (4子土,3母火) 双路径一致;散布种子化(Math.random 仅锥体装饰 yaw)。
