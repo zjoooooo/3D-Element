@@ -62,6 +62,12 @@ export class EnemyRenderer {
     });
 
     this.mesh = new InstancedMesh(geometry, material, cap);
+    // Instance transforms never enter the geometry's own bounding sphere, so
+    // the default frustum cull tests a ~1m capsule at the origin and drops the
+    // ENTIRE horde the moment the camera stops looking at (0,0) — fight at the
+    // arena edge and every enemy vanishes while still biting (found staging
+    // the M6 og shot; every other world-space pool here already opts out).
+    this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     // Minted eagerly so the colour buffer carries the dynamic hint too —
     // setColorAt would otherwise lazily create it with the static default.
@@ -87,6 +93,7 @@ export class EnemyRenderer {
       }),
       TELEGRAPH_POOL
     );
+    this.telegraphs.frustumCulled = false; // same origin-sphere cull as the horde mesh above
     this.telegraphs.instanceMatrix.setUsage(DynamicDrawUsage);
     this.telegraphs.count = 0;
     this.telegraphs.layers.set(LAYER.VFX);
