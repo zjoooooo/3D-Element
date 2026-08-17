@@ -3,7 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Elemental Sandbox — Procedural Ice &amp; Lightning VFX Playground</title>
+    <title>五行降世 · Wuxing Descends</title>
+
+    <!--
+      Favicon: 五行五色圆环纹, hand-written inline SVG data-URI (no build step,
+      no extra file). Five arcs in 相生 order (金生水生木生火生土) around a dark
+      disc so it reads at 16px. `#` in each hex colour is escaped to `%23` —
+      unescaped it would truncate the data URI at a URL fragment.
+    -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='30' fill='%230a0e14'/><circle cx='32' cy='32' r='22' fill='none' stroke='%23d8b46a' stroke-width='10' stroke-dasharray='20 118.23' transform='rotate(0 32 32)'/><circle cx='32' cy='32' r='22' fill='none' stroke='%236fb8e8' stroke-width='10' stroke-dasharray='20 118.23' transform='rotate(72 32 32)'/><circle cx='32' cy='32' r='22' fill='none' stroke='%2374d7a8' stroke-width='10' stroke-dasharray='20 118.23' transform='rotate(144 32 32)'/><circle cx='32' cy='32' r='22' fill='none' stroke='%23e86f4f' stroke-width='10' stroke-dasharray='20 118.23' transform='rotate(216 32 32)'/><circle cx='32' cy='32' r='22' fill='none' stroke='%23b58f5e' stroke-width='10' stroke-dasharray='20 118.23' transform='rotate(288 32 32)'/></svg>" />
+
+    <!-- Open Graph / Twitter card (spec §9.5 门面三件套) — outside the WebGL2
+         gate below on purpose: a crawler never runs JS, so these have to sit
+         as plain markup for og:image/description to show up when the link is
+         shared, regardless of whether the visitor's browser ever clears the
+         gate. og:image is repo-relative (`/og.png`) since there's no deployed
+         domain yet to give it an absolute URL — swap in the full URL once one
+         exists. -->
+    <meta property="og:title" content="五行降世 · Wuxing Descends" />
+    <meta property="og:description" content="十五分钟，五行相生相克，一人对抗潮汐" />
+    <meta property="og:image" content="/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="stylesheet" href="./src/ui/styles.css" />
   </head>
   <body>
