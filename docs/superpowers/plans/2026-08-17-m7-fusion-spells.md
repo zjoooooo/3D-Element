@@ -42,7 +42,7 @@
 - Modify: `src/run/EnemySystem.js`(damage/damageOnce/damageRing 增 `wuxingB = -1` 尾参;`_applyWux(i, amount, wuxing, wuxingB)`)
 - Modify: `src/run/Targets.js`(三个透传补尾参)
 - Modify: `src/run/fusions.js`(增 `pairKeyOf(fusionId)`:由双亲 wuxingOf 得 `'母+子'` key;增 `FUSION_ROWS` 常量名单导出可选)
-- Modify: `src/run/CombatSystem.js`(行解析:`isFusionId(element) ? settings.combat.fusions[pairKeyOf(element)] : settings.combat[element]`;wux 解析双属性:融合时 `wuxA=母系, wuxB=子系` 传入 damage 系调用)
+- Modify: `src/run/CombatSystem.js`(行解析:`isFusionId(element) ? settings.combat.fusions[pairKeyOf(element)] : settings.combat[element]`;wux 解析双属性:融合时 `wux=子系, wuxB=母系` 传入 damage 系调用(与 Interfaces 约定一致;T1 实现即此序))
 - Modify: `src/core/App.js`(`_quickCast` 融合瞄准借用改读 `settings.fusions[pairKey].range`;`_quickCastToward` 融合支:删 per-parent 循环,spawn 单 ability(element=fusionId),`fusionMult = 1 + settings.fusion.levelMult×(lv-1)`,cd = `settings.fusions[pairKey].cooldown × cooldownMult`,castAnim = 'cast1';`_syncAuras` 融合父不再产常驻;dash 部件钩删除(bespoke 融合无位移——`_castsDash` 相应收窄回 `element === 'dashstrike'`))
 - Modify: `src/config/settings.js`(新 `fusions` 顶层块 5 行(cd/range/VFX 参数,数值表照抄);`settings.combat.fusions` 5 行 combat 数据;`settings.fusion.budget` 删除,注释改写)
 - Modify: `src/abilities/AbilityManager.js`(registry:fusion id → pair-key → 类映射;T2-T6 类未到前先占 null→cast 返回 null 安全)
