@@ -56,3 +56,4 @@ scripts/sdd/review-package <BASE> <HEAD>      # 生成评审 diff 包 → .super
 - 文案双语:所有玩家可见字符串走 `src/ui/strings.js` zh+en。
 - 角色资产不覆盖:`public/models/` 里 `Standing Idle.fbx / diffuse2.png(已转 .jpg)/ Fast Run-2.fbx / Standing 1H Magic Attack 02.fbx / Stand To Roll.fbx` 是用户手工管线产物,只增不改。
 - 机制级选择:按 spec 先做、在报告/勘误里标记待用户复核,不停车等答复;纯数值按锚直接裁(锚:BASE_DPS = combat.ice.damage / ice.cooldown = 50)。
+- **收尾必查后台任务**:每个任务/里程碑收尾时点一遍还在跑的后台进程,只留下确实还要用的(通常只有一个 `npm run dev`),其余全部杀掉。M8 末尾清出 9 个僵尸等待循环 + 1 个重复 dev 服——**成因值得记住:`until ! pgrep -f verify-xxx; do sleep; done` 里的 `pgrep -f` 会匹配到轮询者自己的命令行,条件永不成立,循环永不退出**。等后台命令要么直接 `run_in_background` 跑那条命令本身、等完成通知,要么按 PID 等(`while kill -0 $PID`),不要按脚本名轮询。
