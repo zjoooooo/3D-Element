@@ -9,6 +9,7 @@ import { LineSweepSkill } from './templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
 import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
 import { ShieldSkill } from './templates/ShieldSkill.js';
+import { TimedAuraSkill } from './templates/TimedAuraSkill.js';
 import { DashStrikeSkill } from './templates/DashStrikeSkill.js';
 import { ChainBoltSkill } from './templates/ChainBoltSkill.js';
 import { ELEMENTS } from '../config/settings.js';
@@ -64,6 +65,11 @@ export const ABILITY_TYPES = {
   frostnova: ZoneBurstSkill,
   boulder: ZoneBurstSkill,
   quake: ZoneBurstSkill,
+
+  // M8 T3: timed fields — an ordinary cast that borrows the aura hit test
+  // (NOT seated-means-standing; see permanentAuraElements).
+  cyclonecut: TimedAuraSkill,
+  sandfield: TimedAuraSkill,
 
   bladeorbit: OrbitAuraSkill,
   firering: OrbitAuraSkill,

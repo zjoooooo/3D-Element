@@ -38,8 +38,8 @@ export class Targets {
     return total;
   }
 
-  slow(point, radius, factor, duration) {
-    for (const p of this._populations) p.slow?.(point, radius, factor, duration);
+  slow(point, radius, factor, duration, innerRadius = 0) {
+    for (const p of this._populations) p.slow?.(point, radius, factor, duration, innerRadius);
   }
 
   knockback(point, radius, impulse) {

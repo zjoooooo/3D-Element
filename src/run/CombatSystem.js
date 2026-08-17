@@ -439,10 +439,21 @@ export class CombatSystem {
           // otherwise juggle enemies out of its own footprint (the row's own
           // comment has the numbers). Absent (every permanent aura) reads 1:
           // bladeorbit's blade-wall shove ships unchanged.
+          // `kbMult` on an aura row is a RATE, not an impulse — ×step, the
+          // same ruling the sweep case took at M8 T2 and for the same
+          // reason: a field pushes (or pulls) continuously the whole time a
+          // body stands in it, so a value sized like a one-shot detonation
+          // and applied 60×/s overwhelms everything. 磁暴's inward pull
+          // reached ~45 m/s that way and sucked bodies through its own
+          // cutting band into the immune eye inside a fifth of a second,
+          // delivering a twentieth of its budget. A row that leaves kbMult
+          // out keeps the plain baseline shove (`?? 1`, no scaling) — that
+          // is the permanent rings' shipped behaviour and must not move.
+          const kbScale = c.kbMult === undefined ? 1 : c.kbMult * step;
           this._book(
             ability.element,
             amt,
-            this.targets.damageRing(ability.position, inner, radius, amt, wux, wuxB, c.kbMult ?? 1)
+            this.targets.damageRing(ability.position, inner, radius, amt, wux, wuxB, kbScale)
           );
           // M7 T4 (锋岩星阵's 破甲): a row may carry vulnAmt/vulnTime — the
           // same band gets its vuln refreshed every tick, AFTER the damage
@@ -455,6 +466,26 @@ export class CombatSystem {
           // like _applyDebuff's own, never damage-amped.
           if (c.vulnAmt) {
             this.targets.applyVuln(ability.position, inner, radius, c.vulnAmt, c.vulnTime);
+          }
+          // M8 T3 (沙暴领域's 转向迟钝, read as a slow — spec's own word is
+          // "转向迟钝", which this engine expresses through the one slow
+          // channel every other control already rides). Covers the whole
+          // field, not just the band: a sandstorm blinds wherever it blows.
+          // A row without `slowFactor` (the three permanent rings) never
+          // reaches this.
+          const auraSlow = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+          if (auraSlow) {
+            // Same band the damage and the vuln use, not the whole disc
+            // (review catch): a ring-shaped field would otherwise slow a
+            // crowd standing in an eye it cannot touch — control and damage
+            // must agree on what shape the field is.
+            this.targets.slow(
+              ability.position,
+              radius,
+              auraSlow,
+              c.slowTime * bpScale(ability.element, 'slowTime', level),
+              inner
+            );
           }
           break;
         }

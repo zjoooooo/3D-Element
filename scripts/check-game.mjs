@@ -41,6 +41,7 @@ import { ThunderMarshSkill } from '../src/abilities/fusions/ThunderMarshSkill.js
 import { FUSION_CLASSES, ABILITY_TYPES } from '../src/abilities/AbilityManager.js';
 import { LineSweepSkill } from '../src/abilities/templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from '../src/abilities/templates/ZoneBurstSkill.js';
+import { TimedAuraSkill } from '../src/abilities/templates/TimedAuraSkill.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -491,6 +492,191 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M8 T2: sweep knockback / lineTick slow (+regressions), four template arts, aura/bp guards');
+}
+
+/* ---- M8 T3: aura slow field, the magnet's inward pull, TimedAuraSkill ---- */
+{
+  // --- aura.slowFactor (沙暴领域's 转向迟钝, approximated as a slow) ---
+  {
+    const slows = [];
+    const combat = new CombatSystem({
+      damage: () => 0, damageOnce: () => 0, slow: (p, r, f, d) => slows.push({ r, f, d }),
+      damageRing: () => 1, applyVuln: () => {}
+    });
+    const sand = {
+      element: 'sandfield', phase: 'impact', impactTime: 0.5, fadeTime: 0,
+      position: { x: 4, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 9, u: 1,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [sand]);
+    assert.equal(slows.length, 1, 'aura: a row with slowFactor slows what it grinds');
+    assert.equal(slows[0].f, settings.combat.sandfield.slowFactor, "aura slow: the row's own factor");
+    assert.equal(slows[0].d, settings.combat.sandfield.slowTime, "aura slow: the row's own duration");
+    assert.ok(Math.abs(slows[0].r - settings.combat.sandfield.radius) < 1e-9, 'aura slow: covers the whole field');
+
+    // Zero regression: a permanent ring with no slowFactor never slows.
+    slows.length = 0;
+    const orbit = {
+      element: 'bladeorbit', phase: 'travel', age: 1,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 1, u: 0,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [orbit]);
+    assert.equal(slows.length, 0, 'aura: a row without slowFactor never slows (bladeorbit regression)');
+  }
+
+  // --- 磁暴's negative kbMult: the ring PULLS instead of shoving ---
+  {
+    // Data pin (review catch): the ratio assertion below is self-referential
+    // — it proves the CHANNEL carries the sign, not that the number is the
+    // one the 数值表 chose. A rate, not an impulse: an aura's kbMult is
+    // multiplied by step, so -3.0 means "three metres per second per second
+    // of pull", not "three metres per second, sixty times a second".
+    assert.equal(settings.combat.cyclonecut.kbMult, -3.0, "fixture: 磁暴's pull rate, per second");
+    assert.equal(settings.combat.sandfield.kbMult, 0, 'fixture: 沙暴 grinds without shoving');
+    assert.equal(settings.combat.cyclonecut.band, 2.0, 'fixture: the magnet eye is 1.0m — narrower than a body, so the gather cannot park anyone out of reach');
+  }
+  {
+    const enemies = new EnemySystem(createRng(81));
+    const live = new CombatSystem(enemies);
+    // On the ring band (radius 3.0, band 2.0 → inner edge 1.0), out along +x.
+    const onRing = enemies.spawnAt(6.6, 0, 0, 3); // 2.6m from the cast point at x=4
+    enemies.hp[onRing] = 5000;
+    const cyclone = {
+      element: 'cyclonecut', phase: 'impact', impactTime: 0.3, fadeTime: 0,
+      position: { x: 4, z: 0 }, origin: { x: 0, z: 0 },
+      direction: { x: 1, z: 0 }, length: 9, u: 1,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    const hp0 = enemies.hp[onRing];
+    live.tick(1 / 60, [cyclone]);
+    assert.ok(enemies.hp[onRing] < hp0, 'magnet: the ring band cuts what stands in it');
+    assert.ok(
+      enemies.kbX[onRing] < 0,
+      `magnet: a negative kbMult pulls the body back toward the centre (got kbX ${enemies.kbX[onRing]})`
+    );
+
+    // The pull is proportional: |kbMult| 1.2 against the baseline shove.
+    const enemies2 = new EnemySystem(createRng(82));
+    const ref = enemies2.spawnAt(6.6, 0, 0, 3);
+    enemies2.hp[ref] = 5000;
+    enemies2.damageRing({ x: 4, z: 0 }, 0, 3, 1, -1); // default kbScale 1 → outward
+    // Ratio against the plain outward shove: sign mirrored, magnitude the
+    // row's rate × one step (NOT the raw row value — that was the
+    // self-referential form the review caught).
+    const ratio = enemies.kbX[onRing] / enemies2.kbX[ref];
+    assert.ok(
+      Math.abs(ratio - settings.combat.cyclonecut.kbMult / 60) < 1e-4,
+      `magnet: one tick of pull is the row's rate × step, mirrored (ratio ${ratio.toFixed(5)}, want ${(settings.combat.cyclonecut.kbMult / 60).toFixed(5)})`
+    );
+
+    // Dead centre still takes nothing — band < radius is a genuine annulus
+    // (环切) — but the eye is now narrower than a body, so only something
+    // sitting exactly on the pin escapes.
+    const centre = enemies.spawnAt(4, 0, 0, 3);
+    enemies.hp[centre] = 5000;
+    const centreHp = enemies.hp[centre];
+    live.tick(1 / 60, [cyclone]);
+    assert.equal(enemies.hp[centre], centreHp, 'magnet: dead centre is still outside the cutting band');
+  }
+
+  // --- TimedAuraSkill: the two fields, headless ---
+  assert.equal(ABILITY_TYPES.cyclonecut, TimedAuraSkill, 'registry: cyclonecut rides TimedAuraSkill');
+  assert.equal(ABILITY_TYPES.sandfield, TimedAuraSkill, 'registry: sandfield rides TimedAuraSkill');
+  for (const el of ['cyclonecut', 'sandfield']) {
+    assert.ok(settings[el].shardCount > 0, `${el}: shardCount present — the template builds its ring from it`);
+    let acquired = 0, released = 0;
+    const decalOpts = [];
+    const ctx = {
+      lights: { acquire: () => (acquired++, { n: acquired }), release: (h) => { if (h) released++; }, set: () => {} },
+      decals: { spawn: (type, pos, opts) => (decalOpts.push(opts), { mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {}, emit() {}
+        })
+      },
+      mods: null
+    };
+    const ability = new TimedAuraSkill(ctx, el);
+    ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 8);
+    ability.autocast = false;
+    ability.fusionMult = 1;
+    ability.quenched = false;
+
+    // Parked before the first update — combat.tick sees a manual cast once in
+    // TRAVEL, and the field must already be on the target (T4 frame-order).
+    assert.ok(
+      Math.abs(ability.position.x - 8) < 1e-6 && Math.abs(ability.position.z) < 1e-6,
+      `${el}: parks at the aimed point at spawn`
+    );
+    ability.update(1 / 60);
+    assert.equal(ability.phase, 'impact', `${el}: reaches IMPACT on the first tick (no travel)`);
+    assert.equal(ability.impactDuration, settings[el].life, `${el}: the grind window IS the row's own life`);
+
+    // WYSIWYG (review catch — all three of these sailed through before):
+    // the ground mark is the ROW's radius, and the shard ring rides the
+    // band's own middle, not the outer rim.
+    assert.equal(decalOpts.length, 1, `${el}: one ground mark per cast`);
+    assert.ok(
+      Math.abs(decalOpts[0].radius - settings.combat[el].radius) < 1e-9,
+      `${el}: the mark on the floor is the footprint that gets hit (got ${decalOpts[0].radius}, row ${settings.combat[el].radius})`
+    );
+    assert.equal(ability._shards.length, settings[el].shardCount, `${el}: the ring is shardCount shards wide`);
+    {
+      ability.update(1 / 60); // the orbit is driven from onFade, one frame in
+      const row = settings.combat[el];
+      const wantR = Math.max(0.2, row.radius - (row.band ?? 0) * 0.5);
+      const s = ability._shards[0];
+      const gotR = Math.hypot(s.position.x - ability.position.x, s.position.z - ability.position.z);
+      assert.ok(
+        Math.abs(gotR - wantR) < 1e-6,
+        `${el}: shards orbit the band's midline (got ${gotR.toFixed(3)}, want ${wantR.toFixed(3)})`
+      );
+    }
+
+    for (let i = 0; i < 60; i++) ability.update(1 / 60);
+    assert.ok(
+      Math.abs(ability.position.x - 8) < 1e-6 && Math.abs(ability.position.z) < 1e-6,
+      `${el}: 静置 — the field never follows the player`
+    );
+
+    while (!ability.isFinished) ability.update(0.1);
+    ability.destroy();
+    assert.equal(released, acquired, `${el}: every acquired light came back to the pool`);
+
+    // Pooled re-cast lands at its own new point.
+    ability.spawn({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, 5);
+    ability.update(1 / 60);
+    assert.ok(
+      Math.abs(ability.position.z - 5) < 1e-6 && Math.abs(ability.position.x) < 1e-6,
+      `${el}: a pooled re-cast parks at its own new point`
+    );
+    ability.destroy();
+  }
+
+  // Sandbox shape: no decals/targets/mods, 500 ticks, no throw.
+  {
+    const bare = new TimedAuraSkill({
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {}, emit() {}
+        })
+      }
+    }, 'cyclonecut');
+    bare.autocast = false; bare.fusionMult = 1; bare.quenched = false;
+    assert.doesNotThrow(() => {
+      bare.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 8);
+      for (let i = 0; i < 500; i++) bare.update(1 / 60);
+      bare.destroy();
+    }, 'TimedAuraSkill: a bare-VFX ctx never throws');
+  }
+
+  console.log('ok  M8 T3: aura slow field, magnet pull, TimedAuraSkill lifecycle');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

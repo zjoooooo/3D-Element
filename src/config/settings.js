@@ -483,7 +483,12 @@ export const settings = {
      * check-game's own M8 block). Rows whose kind/fields land in a later
      * task sit inert until then — an unknown kind no-ops in tick()'s
      * switch (M7 T1 precedent), an unknown field is never read. */
-    cyclonecut: { kind: 'aura', radius: 3.0, band: 0.8, dps: 80, kbMult: -1.2 }, // 磁暴: 环切 + 拽向圆心 (负拉力, T4 kbScale 语义)
+    // 磁暴: 环切 + 拽向圆心. kbMult is a per-SECOND rate on an aura row (M8
+    // T3 review): the first cut sized it like a one-shot impulse and the
+    // 60Hz stream dragged bodies through the cutting band into the eye in a
+    // fifth of a second. band 2.0 (eye 1.0m, narrower than a body) keeps the
+    // gather from parking anyone somewhere the ring cannot reach.
+    cyclonecut: { kind: 'aura', radius: 3.0, band: 2.0, dps: 80, kbMult: -3.0 },
     piercelance: { kind: 'self', executeBelow: 90 }, // 破军贯穿: 类内线伤 320 + 处决线 (T4 task)
     stormfield: { kind: 'self' }, // 雷暴领域: 类内落雷 (T4 task)
     thornroad: { kind: 'lineTick', dps: 55, width: 1.2, slowFactor: 0.3, slowTime: 1 }, // 荆棘之路 (slow 字段 T2 生效)
@@ -2506,7 +2511,7 @@ export const settings = {
   /* ------------------------------------------------------------------ */
   cyclonecut: {
     range: 9, minRange: 0, cooldown: 6, manaCost: 30, castAnim: 'cast1',
-    life: 2.5, zoneRadius: 3.0,
+    life: 2.5, zoneRadius: 3.0, shardCount: 8,
     color: '#d8b46a', colorGlow: '#f0e2b8',
     lightColor: '#f0e2b8', lightIntensity: 6, lightRadius: 6
   },
@@ -2572,7 +2577,7 @@ export const settings = {
   },
   sandfield: {
     range: 9, minRange: 0, cooldown: 9, manaCost: 0, castAnim: 'cast1',
-    life: 4, zoneRadius: 4.2,
+    life: 4, zoneRadius: 4.2, shardCount: 10,
     color: '#c9a06a', colorGlow: '#e8d4ad',
     lightColor: '#e8d4ad', lightIntensity: 5, lightRadius: 7
   },

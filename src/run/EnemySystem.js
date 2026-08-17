@@ -472,11 +472,18 @@ export class EnemySystem {
     return this.tuning.disadvantage || settings.combat.matchup.disadvantage;
   }
 
-  slow(point, radius, factor, duration) {
+  /** `innerRadius` (M8 T3, default 0 = a filled disc) skips bodies deeper
+   * inside than their own collision radius, exactly the way damageRing and
+   * applyVuln already do — so a ring-shaped field's control matches its
+   * damage instead of reaching into an eye it can't touch. */
+  slow(point, radius, factor, duration, innerRadius = 0) {
     const dur = duration * this.tuning.slowDurMult;
     for (let i = 0; i < this.count; i++) {
-      const reach = radius + settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
-      if (Math.hypot(this.x[i] - point.x, this.z[i] - point.z) >= reach) continue;
+      const pad = settings.enemies[BEHAVIORS[this.behavior[i]]].radius;
+      const reach = radius + pad;
+      const dist = Math.hypot(this.x[i] - point.x, this.z[i] - point.z);
+      if (dist >= reach) continue;
+      if (innerRadius > 0 && dist < innerRadius - pad) continue;
       // 淤塞: a standing slowAmp doubles this slow's own factor before it merges.
       const f = this.slowAmpT[i] > 0
         ? Math.min(settings.combat.debuffs.slowAmp.cap, factor * settings.combat.debuffs.slowAmp.mult)
