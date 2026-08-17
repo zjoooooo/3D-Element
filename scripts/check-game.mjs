@@ -2457,17 +2457,21 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
 
 /* ---- M7 T2: VineBlazeSkill (业火燎原) — pure helpers ---- */
 {
-  // zoneTick: leaky-bucket accumulation, mirrors CombatSystem's own _dot/_take.
-  let r = zoneTick(45, 1 / 60, 0);
-  assert.equal(r.amount, 0, 'zoneTick: nothing banked below 1');
-  assert.ok(Math.abs(r.accum - 0.75) < 1e-9, 'zoneTick: accumulates dps×step exactly');
-  r = zoneTick(45, 1 / 60, r.accum); // 0.75 + 0.75 = 1.5, crosses 1
-  assert.ok(r.amount >= 1, 'zoneTick: pays out once the bucket reaches 1');
-  assert.ok(Math.abs(r.amount - 1.5) < 1e-9, 'zoneTick: pays the WHOLE bucket, not a clamped 1');
-  assert.equal(r.accum, 0, 'zoneTick: resets to 0 after paying out');
+  // zoneTick: leaky-bucket accumulation, mirrors CombatSystem's own _dot/_take
+  // — mutates the caller's own accum array in place (fix round: no object
+  // literal allocated per call), returns just the paid amount.
+  const acc = new Float32Array(1);
+  let amt = zoneTick(acc, 0, 45, 1 / 60);
+  assert.equal(amt, 0, 'zoneTick: nothing banked below 1');
+  assert.ok(Math.abs(acc[0] - 0.75) < 1e-9, 'zoneTick: accumulates dps×step exactly, in place');
+  amt = zoneTick(acc, 0, 45, 1 / 60); // 0.75 + 0.75 = 1.5, crosses 1
+  assert.ok(amt >= 1, 'zoneTick: pays out once the bucket reaches 1');
+  assert.ok(Math.abs(amt - 1.5) < 1e-9, 'zoneTick: pays the WHOLE bucket, not a clamped 1');
+  assert.equal(acc[0], 0, 'zoneTick: resets to 0 in place after paying out');
 
-  r = zoneTick(90, 1, 0); // a single tick alone already exceeds 1
-  assert.ok(Math.abs(r.amount - 90) < 1e-9, 'zoneTick: a single oversized tick still pays its whole amount');
+  amt = zoneTick(acc, 0, 90, 1); // a single tick alone already exceeds 1
+  assert.ok(Math.abs(amt - 90) < 1e-9, 'zoneTick: a single oversized tick still pays its whole amount');
+  assert.equal(acc[0], 0, 'zoneTick: stays reset in place after an oversized single tick');
 
   assert.equal(liveZoneCount(new Float32Array([4, 0, 2, 0, 0])), 2, 'liveZoneCount: counts life > 0 only');
 
@@ -2625,6 +2629,101 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(lightsReleased, lightsAcquired, 'VineBlaze: every acquired light (base + every child) was released, none leaked');
 
   console.log('ok  M7 T2: VineBlazeSkill zone lifecycle (fork/cap/retire/wux), headless');
+}
+
+/* ---- M7 T2 fix round: real-path fork reentrancy (reviewer-recommended) ---- */
+{
+  // Every fork assertion above injects killHook[0](x, z, elite) directly —
+  // none exercise the REAL synchronous chain a live kill actually takes:
+  // _payoutZone → ctx.targets.damage → EnemySystem#_kill → onDeath → the
+  // fan-out → this SAME ability's own _onKillAt, all firing synchronously
+  // from *inside* onFade's own `for` loop over `this.zlife`. Reviewer
+  // traced this seam safe (a fork only ever writes to a DEAD slot — never
+  // the slot currently being iterated, which is alive by construction, so
+  // it can't self-corrupt) — this pins the real path, not a stand-in for
+  // it, so a future change to any link in that chain can't quietly break it.
+  const rng = createRng(19);
+  const enemies = new EnemySystem(rng);
+  const targets = new Targets();
+  targets.register(enemies);
+
+  // Minimal real onDeath→fan-out: the exact one-line loop RunManager's own
+  // constructor wires (src/run/RunManager.js), without standing up the
+  // other seven collaborators (pickups/player/modifiers/tides/projectiles/
+  // combat/ultimate) a full RunManager needs for this one seam.
+  const killHook = [];
+  enemies.onDeath = (x, z, element, elite) => {
+    for (let i = 0; i < killHook.length; i++) killHook[i](x, z, elite);
+  };
+
+  const ctx = {
+    targets,
+    killHook,
+    stats: { book() {} },
+    decals: {
+      spawn: () => ({
+        mesh: { scale: { setScalar() {} } },
+        material: { uniforms: { uColorA: { value: { lerpColors() {} } } } }
+      })
+    },
+    lights: { acquire: () => ({}), release() {}, set() {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    },
+    mods: null
+  };
+
+  const ability = new VineBlazeSkill(ctx, fusionId('thunder', 'fireball'));
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 10);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  ability.update(1 / 60); // TRAVEL→IMPACT, plants the main zone at (10, 0)
+  const mainX = ability.zx[0];
+  const mainZ = ability.zz[0];
+
+  // Seed two pre-existing children the ordinary (synthetic) way — real
+  // state to prove untouched by the real reentrant fork below, not an
+  // empty main zone with nothing at stake.
+  killHook[0](mainX, mainZ, 0);
+  assert.equal(liveZoneCount(ability.zlife), 3, 'fixture: two pre-existing children seeded');
+  const before = [1, 2].map((i) => ({ x: ability.zx[i], z: ability.zz[i], dps: ability.zdps[i] }));
+
+  // A REAL enemy, sitting exactly where the main zone will hit it, hp low
+  // enough that the MAIN zone's own payout (processed first, i=0, in the
+  // onFade loop below) is what kills it — not a child's.
+  const idx = enemies.spawnAt(mainX, mainZ, 0, 0, 0, 0);
+  enemies.hp[idx] = 5;
+  const enemiesBefore = enemies.count;
+
+  // One real tick: onFade's own loop reaches i=0, ticks the main zone's
+  // dps into a payout, targets.damage() kills the enemy for real,
+  // EnemySystem#_kill fires onDeath synchronously, the fan-out above calls
+  // straight back into this SAME ability's _onKillAt — still mid-loop.
+  assert.doesNotThrow(() => ability.update(1), 'VineBlaze: a real reentrant kill-triggered fork must not throw');
+
+  assert.equal(enemies.count, enemiesBefore - 1, 'VineBlaze: the real enemy actually died');
+  assert.equal(
+    liveZoneCount(ability.zlife),
+    5,
+    'VineBlaze: the real kill forks exactly 2 more children, filling the cap (2 pre-existing + 2 new)'
+  );
+  assert.ok(
+    ability.zlife[0] > 0,
+    'VineBlaze: the main zone itself survives being the one whose own payout triggered the reentrant fork'
+  );
+  for (let i = 1; i <= 2; i++) {
+    const b = before[i - 1];
+    assert.equal(ability.zx[i], b.x, `VineBlaze: pre-existing child ${i}'s position untouched by the real reentrant fork`);
+    assert.equal(ability.zz[i], b.z, `VineBlaze: pre-existing child ${i}'s position untouched by the real reentrant fork`);
+    assert.equal(ability.zdps[i], b.dps, `VineBlaze: pre-existing child ${i}'s dps untouched by the real reentrant fork`);
+  }
+
+  console.log('ok  M7 T2 fix round: real-path fork reentrancy (EnemySystem→onDeath→killHook, mid-onFade-loop)');
 }
 
 /* ---- M7 T2: sandbox null-safety — no ctx.targets/killHook, VFX only ---- */

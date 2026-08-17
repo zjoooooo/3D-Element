@@ -39,16 +39,29 @@ const EMBER_RATE = 10;
  * more than 1 in a single call, exactly like `_dot`/`_take` already does for
  * meteor's lava pool.
  *
- * @param {number} dps    this zone's own damage-per-second (already amp'd)
- * @param {number} step   seconds since the last tick
- * @param {number} accum  the bucket's current value
- * @returns {{amount:number, accum:number}} amount to pay this tick (0 if
- *   nothing banked yet) and the bucket's new value
+ * Mutates `accum[i]` in place rather than returning a fresh object literal —
+ * `onFade` calls this once per LIVE zone, up to 5×/frame, so an allocating
+ * return would be a real per-frame allocation, not the zero-alloc hot path
+ * this file otherwise holds to. Mirrors `chainHops`' own `seen` collaborator
+ * / `pointAt(s, out)`'s "mutate the caller's own scratch" shape, used
+ * throughout this codebase for exactly this reason (reviewer fix round:
+ * `CombatSystem#_dot`/`_take`'s own split into two scalar-returning calls is
+ * the same idea, one step further — this keeps it to one call instead of two).
+ *
+ * @param {Float32Array} accum  this cast's own per-zone accumulator array
+ * @param {number} i            which zone
+ * @param {number} dps          this zone's own damage-per-second (already amp'd)
+ * @param {number} step         seconds since the last tick
+ * @returns {number} amount to pay this tick, 0 if nothing banked yet
  */
-export function zoneTick(dps, step, accum) {
-  const next = accum + dps * step;
-  if (next >= 1) return { amount: next, accum: 0 };
-  return { amount: 0, accum: next };
+export function zoneTick(accum, i, dps, step) {
+  const next = accum[i] + dps * step;
+  if (next >= 1) {
+    accum[i] = 0;
+    return next;
+  }
+  accum[i] = next;
+  return 0;
 }
 
 /** How many live zones a flat `life` array currently holds (life[i] > 0 is
@@ -362,8 +375,7 @@ export class VineBlazeSkill extends Ability {
         continue;
       }
 
-      const { amount, accum } = zoneTick(this.zdps[i], dt, this.zaccum[i]);
-      this.zaccum[i] = accum;
+      const amount = zoneTick(this.zaccum, i, this.zdps[i], dt);
       if (amount > 0) this._payoutZone(i, amount);
     }
   }
