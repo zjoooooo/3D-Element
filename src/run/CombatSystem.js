@@ -19,6 +19,22 @@ import { isFusionId, fusionParents, pairKeyOf } from './fusions.js';
 const LINE_SAMPLES = 3;
 
 /**
+ * M7 T3: the 'burst' case's wave table, generalised off 陨石 Lv5's old
+ * bespoke extraWave branch (spec §4.7, 地心火山's three magma bombs). A row
+ * with no `waves` field of its own detonates through this single implicit
+ * entry — delay 0, ×1 damage, ×1 radius — reproducing the pre-M7-T3 "one
+ * unconditional hit on first sight of impact/fade" behaviour exactly.
+ * Frozen and shared: every such row reads this exact same array reference,
+ * never a fresh one per tick (zero-alloc hot path).
+ */
+const DEFAULT_WAVE = Object.freeze([{ delay: 0, damageMult: 1, radiusMult: 1 }]);
+
+/** 陨石 Lv5's extraWave, now data instead of a bespoke branch: one more
+ * detonation 0.5s after the cast's own last wave, at ×0.6 damage and ×0.6
+ * radius — the exact numbers the old hardcoded branch used. */
+const EXTRA_WAVE = Object.freeze({ delay: 0.5, damageMult: 0.6, radiusMult: 0.6 });
+
+/**
  * `element`'s combat row (spec §4.7): a fusion id resolves through its
  * pair-key into `settings.combat.fusions`, a plain id straight into
  * `settings.combat` — the one lookup `tick()` uses below, exported so a
@@ -47,11 +63,15 @@ export class CombatSystem {
     // Both keyed by numeric castId, so plain Map/Set — a WeakMap rejects
     // primitives. Entries are dropped via release() when a cast finishes.
     this._tickBudget = new Map(); // per-cast dot accumulator
-    this._detonated = new Set(); // castIds whose burst already went off
-    // M6 T12 (陨石 Lv5 extraWave): castIds whose *second* detonation already
-    // went off — separate from `_detonated` above (which gates the first)
-    // so the two can never be confused; released alongside it.
-    this._extraDetonated = new Set();
+    this._detonated = new Set(); // castIds whose burst already went off (shield kind only, as of M7 T3 — 'burst' tracks itself via _waveCursor below)
+    // M7 T3: per-cast "how many waves have detonated" cursor for the
+    // 'burst' case — replaces the old `_detonated`+`_extraDetonated` pair
+    // there (shield still uses `_detonated` above, on its own, unaffected).
+    // A row's own `damage`/`radius` are one implicit wave (`DEFAULT_WAVE`,
+    // delay 0) unless it supplies its own `waves` table (地心火山's three
+    // bombs); 陨石 Lv5's `extraWave` flag is `EXTRA_WAVE`, appended after
+    // whichever list applies — one channel instead of two parallel Sets.
+    this._waveCursor = new Map();
     this._sweptU = new Map(); // per-cast u the sweep has been sampled up to
     this._p = { x: 0, z: 0 }; // scratch point, reused — no allocs per tick
     /** This run's per-skill damage ledger (spec §1 results screen top-3).
@@ -122,7 +142,7 @@ export class CombatSystem {
     this._castIds.delete(ability);
     this._tickBudget.delete(id);
     this._detonated.delete(id);
-    this._extraDetonated.delete(id);
+    this._waveCursor.delete(id);
     this._sweptU.delete(id);
     return id;
   }
@@ -201,51 +221,78 @@ export class CombatSystem {
         }
 
         case 'burst': {
-          // One detonation per cast. A phase-window gate double-fires here:
-          // abilities advance on the render frame while this runs at a fixed
-          // 60Hz, so any time window is seen once per queued tick, not once.
-          // The per-cast Set fires it exactly once — on 'fade' too, since a
-          // stalled frame can jump clean past 'impact'.
-          // M6 T12: resolved once — the detonation, the burn dot and
-          // extraWave below all share this same (already Lv3-scaled)
-          // footprint, so meteor's second wave "×0.6"s the real thing.
+          // A cast's detonations are an ordered list of "waves" (M7 T3,
+          // generalised off 陨石 Lv5's old bespoke extraWave branch): a row
+          // with its own `waves` table (地心火山's three magma bombs, each
+          // scattered to its own landing point by the class — see that
+          // row's own comment) fires exactly that list; a row with no
+          // `waves` field (every other burst skill) falls back to
+          // `DEFAULT_WAVE`, one implicit hit at delay 0 — byte-identical to
+          // the old unconditional "first sight of impact/fade" detonation.
+          // `extraWave` (陨石 Lv5) appends `EXTRA_WAVE` after whichever list
+          // applies; meteor never defines its own `waves`, so arming it is
+          // exactly the old "primary, then one more 0.5s later at ×0.6".
+          // `_waveCursor` (per-cast, released alongside the others) is how
+          // many waves have fired — replaces `_detonated`+`_extraDetonated`
+          // for this case (shield still uses `_detonated` on its own).
+          // A phase-window gate double-fires here: abilities advance on the
+          // render frame while this runs at a fixed 60Hz, so any time
+          // window is seen once per queued tick, not once — the cursor only
+          // ever moves forward, so a wave that already fired can't re-fire,
+          // and a stalled frame that jumps clean past several delays at
+          // once still fires each of them exactly once (catch-up loop).
           const radius =
             (c.radius ?? settings[ability.element].zoneRadius ?? 2) *
             bpScale(ability.element, 'radius', level);
-          if (
-            (ability.phase === 'impact' || ability.phase === 'fade') &&
-            !this._detonated.has(castId)
-          ) {
-            this._detonated.add(castId);
-            const amt = c.damage * this._amp(ability);
-            this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
-            // M6 T12: slowFactor REPLACEs, same rule as the sweep case above.
-            const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
-            if (slowFactor) {
-              const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
-              this.targets.slow(ability.position, radius, slowFactor, slowTime);
+          if (ability.phase === 'impact' || ability.phase === 'fade') {
+            const age = ability.impactTime + ability.fadeTime; // seconds since impact
+            const waves = c.waves ?? DEFAULT_WAVE;
+            const total = waves.length + (bpFlag(ability.element, 'extraWave', level) ? 1 : 0);
+            let cursor = this._waveCursor.get(castId) ?? 0;
+            while (cursor < total) {
+              const wave = cursor < waves.length ? waves[cursor] : EXTRA_WAVE;
+              if (age < wave.delay) break;
+              const waveRadius = radius * wave.radiusMult;
+              const amt = c.damage * this._amp(ability) * wave.damageMult;
+              this._book(ability.element, amt, this.targets.damage(ability.position, waveRadius, amt, wux, wuxB));
+              // M6 T12: slowFactor REPLACEs, same rule as the sweep case above.
+              const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+              if (slowFactor) {
+                const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
+                this.targets.slow(ability.position, waveRadius, slowFactor, slowTime);
+              }
+              // M6 T4: boulder's stun (M7 T3: every one of volcano's three
+              // bombs too) — a full-strength (1.0) slow rather than a new
+              // mechanic, same debuff channel/resonance/淤塞 interactions
+              // c.slowFactor above already rides.
+              if (c.stunTime) {
+                const stunTime = c.stunTime * bpScale(ability.element, 'stunTime', level);
+                this.targets.slow(ability.position, waveRadius, 1.0, stunTime);
+              }
+              // quake's 震地波 shove — an extra shockwave impulse beyond the
+              // baseline the damage() hit itself already applied.
+              if (c.knockback) {
+                this.targets.knockback(
+                  ability.position,
+                  waveRadius,
+                  c.knockback * bpScale(ability.element, 'knockback', level)
+                );
+              }
+              // M6 T4: lifebloom's self-heal. CombatSystem stays player-agnostic
+              // (see tick()'s own doc) — accumulate and hand it back to the caller.
+              if (c.healPlayer) {
+                healDue += c.healPlayer * this._amp(ability) * bpScale(ability.element, 'healPlayer', level);
+              }
+              cursor++;
             }
-            // M6 T4: boulder's stun — a full-strength (1.0) slow rather than a
-            // new mechanic, same debuff channel/resonance/淤塞 interactions
-            // c.slowFactor above already rides.
-            if (c.stunTime) {
-              const stunTime = c.stunTime * bpScale(ability.element, 'stunTime', level);
-              this.targets.slow(ability.position, radius, 1.0, stunTime);
-            }
-            // quake's 震地波 shove — an extra shockwave impulse beyond the
-            // baseline the damage() hit itself already applied.
-            if (c.knockback) {
-              this.targets.knockback(
-                ability.position,
-                radius,
-                c.knockback * bpScale(ability.element, 'knockback', level)
-              );
-            }
-            // M6 T4: lifebloom's self-heal. CombatSystem stays player-agnostic
-            // (see tick()'s own doc) — accumulate and hand it back to the caller.
-            if (c.healPlayer) {
-              healDue += c.healPlayer * this._amp(ability) * bpScale(ability.element, 'healPlayer', level);
-            }
+            this._waveCursor.set(castId, cursor);
+            // M7 T3: how many waves have fired, exposed on the ability
+            // itself so a wave-riding class (VolcanoSkill) can move
+            // `ability.position` to the next scatter point ahead of the
+            // wave that will land there, and detect "a wave just
+            // detonated" to spawn its own trailing VFX (a lava pool) at
+            // that exact spot and moment.
+            ability.waveIndex = cursor;
           }
           // Meteor's lava keeps burning through the fade, but the lava stops
           // burning when the knob says so, not when the VFX happens to fade:
@@ -265,27 +312,6 @@ export class CombatSystem {
               const amt = this._take(castId);
               this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
             }
-          }
-          // M6 T12 (陨石 Lv5 extraWave): a second, smaller detonation at the
-          // same spot, 0.5s after the first — reuses the burn block's own
-          // "impactTime+fadeTime is seconds since impact" clock rather than
-          // opening a fresh timer. Gated on the first wave having actually
-          // gone off (`_detonated`) and on this one not having fired yet
-          // (`_extraDetonated`, a separate Set — see its own doc up top).
-          if (
-            bpFlag(ability.element, 'extraWave', level) &&
-            this._detonated.has(castId) &&
-            !this._extraDetonated.has(castId) &&
-            (ability.phase === 'impact' || ability.phase === 'fade') &&
-            ability.impactTime + ability.fadeTime >= 0.5
-          ) {
-            this._extraDetonated.add(castId);
-            const extraAmt = c.damage * this._amp(ability) * 0.6;
-            this._book(
-              ability.element,
-              extraAmt,
-              this.targets.damage(ability.position, radius * 0.6, extraAmt, wux, wuxB)
-            );
           }
           break;
         }

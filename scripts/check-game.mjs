@@ -34,6 +34,7 @@ import {
   zoneContaining,
   forkPlacement
 } from '../src/abilities/fusions/VineBlazeSkill.js';
+import { VolcanoSkill } from '../src/abilities/fusions/VolcanoSkill.js';
 import { FUSION_CLASSES } from '../src/abilities/AbilityManager.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
@@ -46,6 +47,7 @@ import { getColor } from '../src/utils/color.js';
 import { GameAudio } from '../src/run/GameAudio.js';
 import { applyPerfPreset } from '../src/run/perfPreset.js';
 import { ScreenFlash } from '../src/effects/ScreenFlash.js';
+import { DecalType } from '../src/effects/GroundDecals.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -2917,6 +2919,244 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   console.log('ok  M7 T2: RunManager onKillAt injection + fan-out (existing death flow intact)');
 }
 
+/* ---- M7 T3: CombatSystem 'burst' waves generalisation ---- */
+{
+  // A synthetic row (settings.combat's own scratch-row idiom — mirrors the
+  // T12 breakpoints block's `settings._bpScratch`) with varied damageMult/
+  // radiusMult per wave, so the multiplier math is genuinely exercised
+  // (地心火山's own row happens to use ×1/×1 for all three — proven
+  // separately, against the real row, by the VolcanoSkill lifecycle test
+  // below and the meteor-equivalence pin above).
+  settings.combat._waveTest = {
+    kind: 'burst',
+    damage: 100,
+    radius: 1,
+    waves: [
+      { delay: 0.1, damageMult: 0.5, radiusMult: 2 },
+      { delay: 0.3, damageMult: 2, radiusMult: 0.5 },
+      { delay: 0.5, damageMult: 1, radiusMult: 1 }
+    ],
+    stunTime: 0.4
+  };
+  const hits = [];
+  const slows = [];
+  const combat = new CombatSystem({
+    damage: (p, r, amt) => (hits.push({ x: p.x, z: p.z, r, amt }), 1),
+    damageOnce: () => 1,
+    slow: (p, r, f, d) => slows.push({ f, d })
+  });
+  const ability = {
+    element: '_waveTest',
+    phase: 'impact',
+    position: { x: 0, z: 0 },
+    origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 },
+    length: 1,
+    u: 1,
+    impactTime: 0,
+    fadeTime: 0
+  };
+
+  ability.impactTime = 0.05;
+  combat.tick(1 / 60, [ability]);
+  assert.equal(hits.length, 0, "waves: nothing fires before the first wave's own delay");
+
+  // Move `position` BEFORE crossing wave 0's delay — the hit must land at
+  // the NEW point, not wherever it was when the cast started.
+  ability.position.x = 5;
+  ability.position.z = 7;
+  ability.impactTime = 0.15;
+  combat.tick(1 / 60, [ability]);
+  assert.equal(hits.length, 1, 'waves: wave 0 fires exactly once, once its own delay is reached');
+  assert.ok(hits[0].x === 5 && hits[0].z === 7, 'waves: position read fresh — wave 0 lands where it was just moved to');
+  assert.ok(Math.abs(hits[0].amt - 50) < 1e-9, 'waves: wave 0 damage = base(100) × its own damageMult(0.5)');
+  assert.ok(Math.abs(hits[0].r - 2) < 1e-9, 'waves: wave 0 radius = base(1) × its own radiusMult(2)');
+  assert.equal(slows.length, 1, "waves: stunTime applies once per wave — wave 0's own hit included");
+  assert.ok(
+    Math.abs(slows[0].f - 1) < 1e-9 && Math.abs(slows[0].d - 0.4) < 1e-9,
+    "waves: wave 0's stun is full-strength (1.0), at the row's own stunTime"
+  );
+
+  // Move again, cross wave 1's own delay.
+  ability.position.x = -2;
+  ability.position.z = 3;
+  ability.impactTime = 0.35;
+  combat.tick(1 / 60, [ability]);
+  assert.equal(hits.length, 2, "waves: wave 1 fires once its own delay is reached, wave 0 doesn't re-fire");
+  assert.ok(hits[1].x === -2 && hits[1].z === 3, "waves: wave 1 also reads position fresh, at its own moved spot");
+  assert.ok(Math.abs(hits[1].amt - 200) < 1e-9, 'waves: wave 1 damage = base(100) × its own damageMult(2)');
+  assert.ok(Math.abs(hits[1].r - 0.5) < 1e-9, 'waves: wave 1 radius = base(1) × its own radiusMult(0.5)');
+  assert.equal(slows.length, 2, "waves: wave 1 applies its own stun too");
+
+  // A stalled-frame jump crosses wave 2's delay in one tick — catch-up
+  // fires it exactly once, not skipped and not double-fired on the next tick.
+  ability.impactTime = 10;
+  combat.tick(1 / 60, [ability]);
+  assert.equal(hits.length, 3, 'waves: a stalled-frame jump still fires the last wave exactly once (catch-up)');
+  combat.tick(1 / 60, [ability]);
+  assert.equal(hits.length, 3, 'waves: once every wave has fired, further ticks are no-ops');
+
+  const castId = combat._castIds.get(ability);
+  assert.equal(combat._waveCursor.get(castId), 3, 'waves: cursor lands on the wave count once every wave has fired');
+  const releasedId = combat.release(ability);
+  assert.ok(!combat._waveCursor.has(releasedId), "waves: release() clears this cast's wave cursor — no leak");
+
+  delete settings.combat._waveTest;
+  console.log('ok  M7 T3: CombatSystem burst waves generalisation');
+}
+
+/* ---- M7 T3: VolcanoSkill (地心火山) — headless lifecycle against the real class ---- */
+{
+  assert.equal(FUSION_CLASSES['3+4'], VolcanoSkill, "AbilityManager: '3+4' resolves to VolcanoSkill");
+
+  const damageCalls = [];
+  const bookCalls = [];
+  const fakeTargets = {
+    damage: (pos, r, amt, wux, wuxB) => (damageCalls.push({ x: pos.x, z: pos.z, r, amt, wux, wuxB }), 1)
+  };
+  const fakeStats = { book: (element, amount) => bookCalls.push({ element, amount }) };
+  const decalSpawns = [];
+  const fakeDecals = { spawn: (type, pos, opts) => (decalSpawns.push({ type, x: pos.x, z: pos.z, opts }), {}) };
+  let lightsAcquired = 0;
+  let lightsReleased = 0;
+  const fakeLights = {
+    acquire: () => (lightsAcquired++, { n: lightsAcquired }),
+    release: () => lightsReleased++,
+    set: () => {}
+  };
+  const fakeParticles = {
+    get: () => ({
+      uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+      setGradient() {},
+      emit() {}
+    })
+  };
+  const fakeBursts = { spawn: () => {} };
+  const ctx = {
+    targets: fakeTargets,
+    stats: fakeStats,
+    decals: fakeDecals,
+    lights: fakeLights,
+    particles: fakeParticles,
+    bursts: fakeBursts,
+    mods: null
+  };
+
+  const ability = new VolcanoSkill(ctx, fusionId('fireball', 'boulder')); // 火(3)+土(4) → '3+4'
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+
+  ability.update(1 / 60);
+  assert.equal(ability.phase, 'impact', 'Volcano: reaches IMPACT on the very first tick (no travel)');
+  assert.ok(
+    Math.abs(ability._conePos.x - 9) < 1e-6 && Math.abs(ability._conePos.z - 0) < 1e-6,
+    'Volcano: the cone lands at the aimed point, not the caster'
+  );
+
+  // Scatter: three bombs, every one within scatterRadius (4m) of the cone.
+  const row = settings.combat.fusions['3+4'];
+  assert.equal(row.waves.length, 3, "Volcano: three bombs, matching the row's own wave count");
+  for (let i = 0; i < row.waves.length; i++) {
+    const d = Math.hypot(ability._bombX[i] - ability._conePos.x, ability._bombZ[i] - ability._conePos.z);
+    // `_bombX`/`_bombZ` are Float32Array (VineBlazeSkill's own zx/zz
+    // precedent) — the tolerance has to clear float32's own rounding
+    // floor for values in this range (~1e-6), not just double-precision noise.
+    assert.ok(d <= settings.fusions['3+4'].scatterRadius + 1e-4, `Volcano: bomb ${i} scatters within scatterRadius`);
+  }
+  // Deterministic given no ctx.rng (forkPlacement's own fallback, proven in
+  // isolation at M7 T2) — a fresh cast off a pooled instance lands the same
+  // three spots, same as any other pooled ability's repeatable shape.
+  const firstBombX = Array.from(ability._bombX);
+  const firstBombZ = Array.from(ability._bombZ);
+  ability.destroy();
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.update(1 / 60);
+  assert.deepEqual(Array.from(ability._bombX), firstBombX, 'Volcano: scatter X is deterministic given the same fixed fallback');
+  assert.deepEqual(Array.from(ability._bombZ), firstBombZ, 'Volcano: scatter Z is deterministic given the same fixed fallback');
+
+  // Drive CombatSystem's own hand-off directly (this is a class-level pool
+  // test — the CombatSystem-level wave firing itself is the block above):
+  // each wave's own detonation writes `waveIndex`, which is all this class
+  // watches to know a bomb has landed. Baseline the light counter here —
+  // the two `spawn()` calls above each already acquired the base class's
+  // own inherited `this.light` (unrelated to this class's per-pool
+  // lights), so only the DELTA from here on is "lights per landed pool".
+  const lightsBeforeLanding = lightsAcquired;
+  ability.waveIndex = 1;
+  ability.update(1 / 60);
+  assert.ok(ability._plife[0] > 0, "Volcano: bomb 0's lava pool is alive once its wave has fired");
+  assert.equal(ability._plife[1], 0, "Volcano: bomb 1's pool hasn't spawned yet");
+  assert.equal(decalSpawns.filter((d) => d.type === DecalType.SCORCH).length, 1, 'Volcano: one lava-pool decal per landed bomb');
+  assert.equal(lightsAcquired - lightsBeforeLanding, 1, 'Volcano: one light per landed pool');
+
+  ability.waveIndex = 2;
+  ability.update(1 / 60);
+  assert.ok(ability._plife[1] > 0, "Volcano: bomb 1's pool spawns once its own wave fires");
+
+  ability.waveIndex = 3;
+  ability.update(1 / 60);
+  assert.ok(ability._plife[2] > 0, "Volcano: bomb 2's pool spawns once its own wave fires");
+  assert.equal(
+    decalSpawns.filter((d) => d.type === DecalType.SCORCH).length,
+    3,
+    'Volcano: exactly 3 lava pools ever — the cap matches the bomb count, no more'
+  );
+
+  // Tick the pools' own DoT — zoneTick's own math is already proven in
+  // isolation (M7 T2); this confirms VolcanoSkill actually wires it, with
+  // the fusion's own (子, 母) = (土 4, 火 3) pair.
+  ability.update(1);
+  assert.ok(damageCalls.length > 0, 'Volcano: lava pools actually pay out damage');
+  assert.ok(
+    damageCalls.every((c) => c.wux === 4 && c.wuxB === 3),
+    'Volcano: every lava-pool hit carries wux=4 (子 earth), wuxB=3 (母 fire)'
+  );
+  assert.ok(
+    bookCalls.length > 0 && bookCalls.every((b) => b.element === ability.element),
+    'Volcano: every lava payout books under the fusion id'
+  );
+
+  // Run the clock out well past every pool's own 4s life.
+  for (let i = 0; i < 6; i++) ability.update(1);
+  assert.ok(ability._plife.every((life) => life <= 0), "Volcano: every pool retires once its own life elapses");
+
+  while (!ability.isFinished) ability.update(0.5);
+  ability.destroy();
+  assert.equal(lightsReleased, lightsAcquired, 'Volcano: every acquired light (one per landed pool) was released, none leaked');
+
+  console.log('ok  M7 T3: VolcanoSkill lifecycle (scatter/waves hand-off/lava pools/cap/wux), headless');
+}
+
+/* ---- M7 T3: sandbox null-safety — no ctx.targets/stats/mods, VFX only ---- */
+{
+  const ctx = {
+    decals: { spawn: () => ({}) },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    }
+    // no targets, no stats, no mods, no bursts — the sandbox shape
+    // (fusions are unreachable there in practice — Global Constraints — but
+    // the class must still not throw if ticked with this shaped a ctx).
+  };
+  const ability = new VolcanoSkill(ctx, fusionId('fireball', 'boulder'));
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  assert.doesNotThrow(() => ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9), 'Volcano: spawn is null-safe with no targets/bursts');
+  assert.doesNotThrow(() => {
+    for (let i = 0; i < 500; i++) ability.update(1 / 60);
+  }, 'Volcano: a full cast ticks with no targets/stats/bursts and never throws');
+  assert.doesNotThrow(() => ability.destroy(), 'Volcano: destroy is null-safe');
+  console.log('ok  M7 T3: VolcanoSkill sandbox null-safety (VFX only, zero errors)');
+}
+
 /* ---- strings: bilingual table + t() fallback chain (spec §9) ---- */
 {
   assert.ok(STRINGS.zh['run.kills'] && STRINGS.en['run.kills'], 'strings: run.kills exists in both languages');
@@ -3650,6 +3890,12 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
     }
     assert.equal(extraHits.length, 1, 'T12: extraWave detonates exactly once per cast');
     assert.equal(mainHits.length, 1, 'T12: ...and the main blast still only once, same as pre-T12');
+
+    // M7 T3 equivalence pin: every assertion above just ran against the
+    // GENERALISED waves channel, not a coincidentally-identical parallel
+    // branch — the old bespoke machinery is gone outright, not just unused.
+    assert.equal(waveCombat._extraDetonated, undefined, 'M7 T3: _extraDetonated retired — _waveCursor is the one channel now');
+    assert.ok(waveCombat._waveCursor.size > 0, 'M7 T3: meteor Lv5 extraWave really did run through _waveCursor');
   }
 
   // lineTick (beam): both tiers on one skill — width×1.5 (Lv3) and dps×1.35

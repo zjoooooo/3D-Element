@@ -487,9 +487,10 @@ export const settings = {
      * rowFor` resolves a fusion element through here instead of the flat
      * per-skill rows above. Numbers copied from the plan's 数值表; fields a
      * later task's own CombatSystem change still has to learn to read
-     * (waves/vulnAmt/vulnTime/the 'marsh' kind itself) already sit here
-     * inert — `tick()`'s switch `default`s to a no-op for a kind it doesn't
-     * know yet, so an unimplemented row never throws, just does nothing.
+     * (vulnAmt/vulnTime/the 'marsh' kind itself — `waves` learned as of M7
+     * T3, see the 'burst' case's own doc) already sit here inert —
+     * `tick()`'s switch `default`s to a no-op for a kind it doesn't know
+     * yet, so an unimplemented row never throws, just does nothing.
      * The two self-resolved rows carry an explicit `kind: 'self'` sentinel,
      * same as `fireball`/`dashstrike`/`chainbolt` above — documents "this
      * class resolves its own hits" on purpose rather than leaving `tick()`
@@ -498,8 +499,11 @@ export const settings = {
     fusions: {
       '1+3': { kind: 'self' }, // 业火燎原 (T2, self-resolved — mirrors fireball/dashstrike/chainbolt)
       '3+4': {
-        // 地心火山: one bomb's own stats; T3 repeats this 3× via `waves`
-        // (extraWave's data-table generalisation) at the given delays.
+        // 地心火山 (T3): one bomb's own stats — all three fire through
+        // `waves` (陨石 Lv5's old bespoke extraWave branch, generalised into
+        // a data table `CombatSystem`'s 'burst' case now reads natively;
+        // see that file's own doc), scattered to three different landing
+        // points by the class (`ability.position` moves between waves).
         kind: 'burst',
         damage: 95, radius: 2.0,
         waves: [
@@ -507,8 +511,19 @@ export const settings = {
           { delay: 1.5, damageMult: 1, radiusMult: 1 },
           { delay: 2.4, damageMult: 1, radiusMult: 1 }
         ],
-        stunTime: 0.8,
-        burnDps: 30, burnTime: 4 // 熔岩池 — rides the existing burst-kind burn channel
+        stunTime: 0.8
+        // No burnDps/burnTime here — T1's first pass carried them, aimed at
+        // the existing burst-kind burn channel below (meteor's own), but
+        // that channel ticks a SINGLE point (`ability.position`) at THIS
+        // row's own `radius` (2.0m). The lava pools are three separate,
+        // wider (1.6m) pools sitting at the three BOMB landing points —
+        // well after `ability.position` has moved on to the next wave — and
+        // they outlive the wave sequence entirely (last bomb lands at
+        // 2.4s, its pool still burns 4s after that). VolcanoSkill
+        // self-resolves them instead (VineBlazeSkill's own zoneTick
+        // pattern) — see `settings.fusions['3+4'].lavaDps/lavaRadius/
+        // lavaLife`, the same 30/1.6/4 numbers moved to where the class
+        // that actually owns them can read them.
       },
       '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3 }, // 锋岩星阵 (T4); band===radius degenerates damageRing to a solid disc already
       '0+2': { kind: 'self' }, // 霜刃洪流 (T5, self-resolved — fireball precedent)
@@ -2471,7 +2486,23 @@ export const settings = {
       radius: 2.2, dps: 45, life: 4, forkDps: 27, forkCount: 2, maxZones: 5, forkOffset: 0.8, birthTime: 0.3,
       lightColor: '#e86f4f', lightIntensity: 6, lightRadius: 5
     },
-    '3+4': { cooldown: 8, range: 9, castAnim: 'cast1', color: '#b58f5e', colorGlow: '#e86f4f' }, // 地心火山
+    // M7 T3 (VolcanoSkill): '3+4' was cast-side-only through T1 (see the
+    // block comment above) — this is the first task to actually spawn the
+    // class, so it picks up the same additions '1+3' needed at M7 T2: its
+    // own mechanism numbers the plan gives exact values for (数值分层铁律
+    // — coneRiseTime/scatterRadius off the brief's own "0.4s"/"≤4m",
+    // lavaDps/lavaRadius/lavaLife off the 数值表's own "30×4s, 1.6",
+    // relocated here from `combat.fusions['3+4']`, see that row's own
+    // comment on why the built-in burst-kind burn channel is the wrong
+    // shape for three separate, wider, outlasting-the-cast lava pools),
+    // and the three light fields `Ability#_updateLight` reads
+    // unconditionally every active frame (NaN-poisons `LightPool.damp()`
+    // permanently if absent — M6 T5/T6 lesson, repeated by '1+3' at M7 T2).
+    '3+4': {
+      cooldown: 8, range: 9, castAnim: 'cast1', color: '#b58f5e', colorGlow: '#e86f4f', // 地心火山
+      coneRiseTime: 0.4, scatterRadius: 4, lavaDps: 30, lavaRadius: 1.6, lavaLife: 4,
+      lightColor: '#e86f4f', lightIntensity: 7, lightRadius: 6
+    },
     '4+0': { cooldown: 7, range: 9, castAnim: 'cast1', color: '#d8b46a', colorGlow: '#f5e6c8' }, // 锋岩星阵
     '0+2': { cooldown: 5, range: 11, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#d8b46a' }, // 霜刃洪流
     '2+1': { cooldown: 7, range: 10, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#7ee08a' } // 回春雷泽
