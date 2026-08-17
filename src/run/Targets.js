@@ -46,6 +46,18 @@ export class Targets {
     for (const p of this._populations) p.knockback?.(point, radius, impulse);
   }
 
+  /** A wedge in front of the caster (M8 T5, 烈焰喷吐). Optional per
+   * population, like the annulus above — the sandbox dummies have no cone
+   * test and quietly contribute nothing rather than falling back to a
+   * circle, which would hit things standing behind you. */
+  damageCone(point, dirX, dirZ, halfAngle, range, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
+    let total = 0;
+    for (const p of this._populations) {
+      total += p.damageCone?.(point, dirX, dirZ, halfAngle, range, amount, wuxing, wuxingB, kbScale) ?? 0;
+    }
+    return total;
+  }
+
   /** Vuln application over the same annulus damageRing tests (M7 T4
    * 锋岩星阵's 破甲). Optional per population, like slow/knockback above —
    * the sandbox dummies carry no vuln channel and quietly skip it. */

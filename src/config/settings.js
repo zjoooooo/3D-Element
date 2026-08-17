@@ -489,8 +489,8 @@ export const settings = {
     // fifth of a second. band 2.0 (eye 1.0m, narrower than a body) keeps the
     // gather from parking anyone somewhere the ring cannot reach.
     cyclonecut: { kind: 'aura', radius: 3.0, band: 2.0, dps: 80, kbMult: -3.0 },
-    piercelance: { kind: 'self', executeBelow: 90 }, // 破军贯穿: 类内线伤 320 + 处决线 (T4 task)
-    stormfield: { kind: 'self' }, // 雷暴领域: 类内落雷 (T4 task)
+    piercelance: { kind: 'self', executeBelow: 90 }, // 破军贯穿: 类内线伤 320 + 沿线处决
+    stormfield: { kind: 'self' }, // 雷暴领域: 类内落雷
     thornroad: { kind: 'lineTick', dps: 55, width: 1.2, slowFactor: 0.3, slowTime: 1 }, // 荆棘之路 (slow 字段 T2 生效)
     tidalsurge: { kind: 'sweep', damage: 190, width: 2.6, knockback: 7 }, // 潮汐涌浪 (sweep kb 字段 T2 生效)
     hailstorm: {
@@ -504,7 +504,7 @@ export const settings = {
         { delay: 1.75, damageMult: 1, radiusMult: 1 }
       ]
     }, // 冰雹风暴: 六波弹幕 (M7 T3 waves 机器, 纯数据)
-    flamebreath: { kind: 'coneTick', dps: 200, halfAngle: 0.55, range: 5.5 }, // 烈焰喷吐 (coneTick kind T5 落地前 inert)
+    flamebreath: { kind: 'coneTick', dps: 200, halfAngle: 0.55, range: 5.5, kbMult: 0 }, // 烈焰喷吐: 龙息只烧不推 (kbMult 是每秒速率, 0 = 不推)
     mortarrain: {
       kind: 'burst', damage: 80, radius: 1.6,
       waves: [

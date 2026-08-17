@@ -124,7 +124,11 @@ export class StormFieldSkill extends Ability {
 
   onImpact() {
     _pos.set(this.position.x, 0.05, this.position.z);
-    this.ctx.decals?.spawn(DecalType.ARC, _pos, {
+    // CRACK, not ARC: ARC's front grows as pow(age, 0.35), so a six-second
+    // field would still be drawing at two-thirds of its radius a second and a
+    // half in while bolts already target the full circle. The same lesson the
+    // timed fields learned at T3 — a standing shape needs a mark that holds.
+    this.ctx.decals?.spawn(DecalType.CRACK, _pos, {
       radius: this._radius(),
       life: this.config.life,
       colorA: getColor(this.config.color),

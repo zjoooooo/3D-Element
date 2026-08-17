@@ -317,6 +317,52 @@ export class EnemySystem {
     return hits;
   }
 
+  /**
+   * A wedge (M8 T5, 烈焰喷吐's 扇形龙息): everything within `range` of
+   * `point` whose bearing off (`dirX`, `dirZ`) is inside `halfAngle`.
+   *
+   * The one new judged shape this milestone adds, and it mirrors damage()'s
+   * loop exactly — same body-radius pad on the reach, same flash, same
+   * knockback, same `_applyWux`, same reaction flush — with one extra
+   * angular test. The angle is compared through the dot product rather than
+   * an `atan2` difference: no wrap-around case to get wrong, and no
+   * transcendental per enemy per tick on a hot path. Bodies at the caster's
+   * own feet (dist ≈ 0) have no bearing to speak of and are always included,
+   * which is what a flamethrower does to something hugging you.
+   */
+  damageCone(point, dirX, dirZ, halfAngle, range, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
+    const tanHalf = Math.tan(halfAngle);
+    let hits = 0;
+    for (let i = this.count - 1; i >= 0; i--) {
+      const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
+      const dx = this.x[i] - point.x;
+      const dz = this.z[i] - point.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist >= range + kind.radius) continue;
+      // Distance along the axis and offset across it, so the body's own
+      // radius pads BOTH edges — the same courtesy damageRing extends at its
+      // inner and outer rims. A pure angular test pads only the far edge,
+      // which leaves a tank visibly swept by the flame and taking nothing
+      // (review catch). `along > 0` keeps the wedge in front; a body at the
+      // apex itself (along ≈ 0, offset ≈ 0 ≤ its radius) is inside, which is
+      // what a flamethrower does to something hugging you.
+      const along = dx * dirX + dz * dirZ;
+      const offset = Math.abs(dx * dirZ - dz * dirX);
+      if (along < 0 || offset > along * tanHalf + kind.radius) continue;
+      hits++;
+      this.flash[i] = 1;
+      if (kbScale) {
+        const d = dist || 1;
+        const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult * kbScale;
+        this.kbX[i] += (dx / d) * kb;
+        this.kbZ[i] += (dz / d) * kb;
+      }
+      this._applyWux(i, amount, wuxing, wuxingB);
+    }
+    this._flushReactions();
+    return hits;
+  }
+
   damageOnce(castId, point, radius, amount, wuxing = -1, wuxingB = -1) {
     let seen = this._hitMemory.get(castId);
     if (!seen) this._hitMemory.set(castId, (seen = new Set()));

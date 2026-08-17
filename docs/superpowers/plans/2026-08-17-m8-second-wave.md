@@ -120,3 +120,29 @@
 - **地贴族选错(WYSIWYG 反了)**:SHOCKWAVE/DUSTRING 的 GLSL 是一次性外扩环(`radius = pow(age, 0.55)`、`alpha ∝ 1-age`),给 2.5s 的静置场用,前半程把环画在**免疫环眼里**、末段几乎透明却仍满 dps。改用 CRACK 族(`1 - smoothstep(0.55, 1, age)`,前 55% 保持满 alpha)——限时静置场只能用"守得住"的地贴族。
 - **其余评审项**:视觉半径/环带补 `bpScale`(平元素真会拿到 breakpoints,融合类的先例在此不成立);aura 的新减速改为**尊重环带内缘**(控制与伤害必须对场的形状给同一个答案,`slow` 增可选 `innerRadius`);删 `instanceCount` 虚报(普通 Mesh 非实例几何);补 sibling 交叉引用注释。
 - **测试盲区四补**(评审 sabotage 全绿穿透):kbMult 数据 fixture(原断言自指:两侧读同一个 settings 值,改 -1.0 照绿)、地贴半径 = 行半径、碎片环 = 环带中线、shardCount 存在性。
+- **复审 SHIP,残留四 minor 已在 T4 一并收掉**:①永久环零回归无断言(stub 丢第 7 参)→ stub 收全参 + 钉「无 kbMult 行仍是基线 1」;②slow 内缘三种拆法全绿(唯一带 slowFactor 的行是实心盘,新参从未以非零执行)→ stub 收第 5 参 + 合成环带行钉传 `radius - band`;③**单位分叉**:`kbMult` 缺省=冲量、存在=速率,一个字段两套单位,恰是自己刚立的规则的反例 → **三永久环显式写 `kbMult: 60`**(60 × 1/60 = 原冲量,数学等价)、通道收敛为 `(c.kbMult ?? 60) * step`,并加"每个 aura 行必须显式声明 kbMult"的完备性钉;④勘误自相矛盾行已划掉重写。两条新钉均 sabotage 验证有判别力。
+
+### T4 破军贯穿 + 雷暴领域
+- 两技均 `kind:'self'`(类内自决),锚2 具名豁免、预算在各自 lifecycle 断言里钉(320/8≈40 对窄线带,52×8/9≈46 对大圈带)。
+- 破军:线判定复用 `dashLineHits`(castId = this,DashStrike 先例),**处决沿同一串采样点扫**`executeBelow`——处决脚印严格等于伤害脚印,线外绝不被处决;onDestroy 自行 `releaseCast(this)`(RunManager 的 release 链只认 CombatSystem 铸的数字 id)。浏览器实测整条线四具各吃一次 400、线外零伤、残血被处决 +1 kill。
+- 雷暴:每 0.75s 一雷、追帧循环补跳帧;目标选取走 `ctx.rng`(种子可复现)/无 rng 时轮询回退;**按位置打击**(kill-swap 免疫,ThunderMarsh 同宗)。无头钉 6s = 8 道精确;浏览器整轮账面 988(19 道当量)——差额是密堆点打溅射(chainbolt 同族语义,M7 T6 已记),分散摆位下与无头一致。
+- 测试夹具教训:处决线断言的"应存活"敌血量必须把**克制加成**算进去(金克木 ×1.25 使 320→400,首版恰好落在阈值线上被误杀)。
+
+### T5 扇形判定 + 烈焰喷吐
+- **本里程碑唯一的新判定形状**:`EnemySystem.damageCone(point, dirX, dirZ, halfAngle, range, amt, wux, wuxB)` 镜像 damage() 的循环(体半径 pad / flash / 击退 / _applyWux / 反应 flush),角判定走**点积**而非 atan2 差(无环绕分支、热路径无三角函数);贴脸(dist≈0)恒中——喷火器对贴身者本就该烧。Targets 对无 cone 种群**不降级为圆**(降级成圆会烧到背后),沙盒假人静默贡献 0。
+- `coneTick` case:窗口 travel+impact(限时形状规则)、dps×step、顶点取 `ability.origin` 而非 position——龙息从嘴里出来沿瞄准线张开,类的粒子扇也以 origin 为顶点、`spread` 直接取行的 halfAngle,画的扇即判的扇。
+- 类是纯 VFX(机制全在行),所以**无头测试必须同时驱动 CombatSystem** 才能看到伤害——首版只推 ability 得 0,是测试写法问题而非实现缺陷。
+- **Critical(评审):冲量当速率,第四次。** `damageCone` 内用的是单次冲量击退,却被 coneTick 每 tick 调一次 → 峰值 |kb| 29.5 m/s,喷口前 1.5m 的敌人被吹到 8.15m(飞出 5.5m 扇形),整条引导只交付 **17% 预算**。修:`damageCone` 补 `kbScale` 尾参(镜像 damageRing)、coneTick 传 `(c.kbMult ?? 0) * step`、行显式 `kbMult: 0`(**龙息只烧不推**),并加"每个 coneTick 行必须显式声明 kbMult"的完备性钉。**至此四个通道(sweep/aura/coneTick + 老 damage 基线)全部按同一规则统一。**
+- **教训(比 bug 本身更重要):我的浏览器验证把这个 bug 掩盖了。** 为隔离扇形几何,我每帧把测试敌钉回原位并清零 kbX/kbZ——恰好也抹掉了击退,于是读到 243/240"达标"。评审的独立探针(不钉位置 + 驱动 `enemies.tick`)才测出 17%。**规则:凡为隔离 A 而冻结 B,必须另有一条不冻结 B 的交付测试**;无头 lifecycle 循环也必须推 `enemies.tick`,否则任何"把目标推出判定域"的缺陷都不可见。已按此补齐两处(无头一行 + 浏览器一段)。
+- **画的扇 ≠ 判的扇(major)**:`ParticleSystem.emit` 的 `spread` 是 0..1 的方向抖动**不是弧度**(实测传 0.55 时 10.2% 的火焰飞出判定扇、内三分之一偏稀),且 `speed = range/life` 忽略了 `uDrag` 的解析阻尼(羽流只到 3.79m / 判定 5.5m,最后 1.5m"看不见火却满伤")。修:引入 `SPREAD_PER_RADIAN = 1/1.61`(经验换算,让羽流外缘落在判定边)与 `plumeSpeed = range·k/(1-e^{-k·life})`(解阻尼方程,19.0 m/s)。
+- **角向 pad**:原点积判定只在距离上加体半径、角度上不加,tank(r 0.7)在 5m 处需要 0.14 rad 角向 pad 才公平。改为**沿轴/横轴分解**(`offset ≤ along·tan(half) + r`),两边都 pad、零三角函数于循环内、顺带天然覆盖贴脸例外。
+- 其余评审项:补 kbMult 完备性钉、`range` 单一来源钉(施法块与 combat 行必须同值)、贴脸钉、去未用 import。
+
+### T4 评审残留(与 T5 修复轮同押)
+- **[major] 自指断言 + 一句不成立的注释**:stormfield/piercelance 是锚2 具名豁免,而 T4 的断言两侧都读同一个 settings 值 —— 把 boltDamage 改成 520、处决线改成 900 **双双全绿**;锚2 的豁免注释却写着"已被 lifecycle 断言钉住"。补数据 fixture(damage/cd/executeBelow/boltDamage/boltEvery/life 六条)。
+- **[minor] 处决脚印裸奔**:把 `executeBelow` 的采样半径放大 20 倍、甚至改成全场一发,套件照绿——因为测试里唯一的线外敌满血。补"线外 3.5m、hp 10 的旁观者必须活"。
+- **[minor] 五因子 amp 链裸奔**:整条 amp 删成裸 damage 也全绿(夹具里每个因子都是 1)。补淬炼 ×1.5 的比值钉(靶必须用**不被自己克制**的元素,否则首发留下的易伤会把比值抬到 1.725)。
+- **[minor] 种子分支无判别**:彻底无视 `ctx.rng` 也全绿(原三条只验各自可复现)。补"常数 rng 必定砸同一具、且与回退序列不同"。
+- **[minor] 地贴族又选错一半**:雷暴用 ARC,其前沿 `pow(age, 0.35)` 使 6s 场在 1.5s 时只画到 63% 半径,而落雷从第 0 秒就按满半径选靶 → 改 CRACK(T3 同一教训的复发)。
+- 三条 sabotage(击退回退为冲量 / 处决脚印放大 20× / 无视 rng)复核后**均被新钉当场击杀**。
+- 待办(记入 T7):`damage()` 自带的基线冲量对 `zoneTick`/`lineTick` 同样逐 tick 施加(实测 snare 峰值 28.7 m/s、thornroad 19.1、beam 17.2)——M8 之前的老账,但本里程碑刚立的通道规则把它变成明账;雷暴"单击"实为 0.5m 溅射盘(密堆下均 3.65 具),文档措辞需回填。

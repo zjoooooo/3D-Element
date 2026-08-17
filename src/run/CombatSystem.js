@@ -409,6 +409,42 @@ export class CombatSystem {
           break;
         }
 
+        case 'coneTick': {
+          // M8 T5 (烈焰喷吐's 扇形龙息): the milestone's one new judged
+          // shape. A channelled wedge, so the timing is zoneTick's (dps ×
+          // step, every tick it stands) and the window is the timed one
+          // (TRAVEL+IMPACT, T4's rule) — a channel's cosmetic tail must not
+          // keep breathing. The wedge is anchored at the caster's ORIGIN
+          // rather than `position`: a breath comes out of the mouth and
+          // spreads forward, so the apex is where the caster stands and the
+          // aim line is its axis (WYSIWYG — that is exactly the shape the
+          // flame is drawn in).
+          if (ability.phase !== 'travel' && ability.phase !== 'impact') break;
+          const amt = c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level) * step;
+          this._book(
+            ability.element,
+            amt,
+            this.targets.damageCone(
+              ability.origin,
+              ability.direction.x,
+              ability.direction.z,
+              c.halfAngle * bpScale(ability.element, 'halfAngle', level),
+              c.range * bpScale(ability.element, 'range', level),
+              amt,
+              wux,
+              wuxB,
+              // A rate, per second — the fourth channel in this milestone to
+              // learn the lesson (sweep, aura, and the fusion grind before
+              // it). A breath applied one full impulse every tick blew its
+              // own targets out of the flame at ~30 m/s and delivered a
+              // sixth of its budget. 烈焰喷吐 declares 0: fire burns, it
+              // does not shove. Every coneTick row must say which it wants.
+              (c.kbMult ?? 0) * step
+            )
+          );
+          break;
+        }
+
         case 'aura': {
           // 装备即常驻 (M6 T4): a permanent cast that never leaves 'travel' (see
           // OrbitAuraSkill) — always ticks while seated. `c.dps` already carries

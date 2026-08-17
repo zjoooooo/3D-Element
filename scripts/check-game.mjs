@@ -44,6 +44,7 @@ import { ZoneBurstSkill } from '../src/abilities/templates/ZoneBurstSkill.js';
 import { TimedAuraSkill } from '../src/abilities/templates/TimedAuraSkill.js';
 import { PierceLanceSkill } from '../src/abilities/PierceLanceSkill.js';
 import { StormFieldSkill } from '../src/abilities/StormFieldSkill.js';
+import { FireBreathSkill } from '../src/abilities/FireBreathSkill.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
@@ -733,6 +734,17 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   assert.equal(ABILITY_TYPES.piercelance, PierceLanceSkill, 'registry: piercelance');
   assert.equal(ABILITY_TYPES.stormfield, StormFieldSkill, 'registry: stormfield');
 
+  // Data pins (review catch): both skills are NAMED exemptions from the
+  // anchor-2 band, and every other assertion in this block reads its
+  // expectation out of the same settings value it is checking — so a
+  // mistyped number would have sailed through with nothing to stop it.
+  assert.equal(settings.piercelance.damage, 320, "fixture: 破军's line damage");
+  assert.equal(settings.piercelance.cooldown, 8, "fixture: 破军's cooldown");
+  assert.equal(settings.combat.piercelance.executeBelow, 90, 'fixture: the execute floor is absolute hp');
+  assert.equal(settings.stormfield.boltDamage, 52, "fixture: one bolt's damage");
+  assert.equal(settings.stormfield.boltEvery, 0.75, 'fixture: the bolt cadence');
+  assert.equal(settings.stormfield.life, 6, "fixture: the field's life");
+
   const mkCtx = (enemies, extra = {}) => ({
     targets: enemies,
     enemies,
@@ -763,6 +775,12 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     const doomed = enemies.spawnAt(8, 0, 0, 1);
     const spared = enemies.spawnAt(9, 0, 0, 1);
     for (const i of [near, far, offLine]) enemies.hp[i] = 50000;
+    // Off the line and nearly dead: the execute must not reach it. Without
+    // this body a footprint widened to the whole arena passed unnoticed
+    // (review sabotage) — every other test body was at full health.
+    const bystander = enemies.spawnAt(6, 3.5, 0, 1);
+    enemies.hp[bystander] = 10;
+    const idBystander = enemies.id[bystander];
     enemies.hp[doomed] = settings.combat.piercelance.executeBelow - 1; // under the floor
     // Comfortably over the floor even after a matchup'd hit (金克木 ×1.25
     // turns 320 into 400 — the first fixture landed exactly ON the floor).
@@ -787,6 +805,7 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     const alive = new Set(Array.from({ length: enemies.count }, (_, i) => enemies.id[i]));
     assert.ok(!alive.has(idDoomed), 'lance: a body under the execute floor is finished outright');
     assert.ok(alive.has(idSpared), 'lance: a body over the floor survives its hit');
+    assert.ok(alive.has(idBystander), 'lance: a dying body OFF the line is not executed — the floor sweeps the lance\'s own footprint, nothing wider');
 
     // Hitting once means once: a second sweep over the same cast adds nothing.
     const settled = enemies.hp[near];
@@ -795,6 +814,38 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     while (!lance.isFinished) lance.update(0.1);
     lance.destroy();
     assert.equal(enemies._hitMemory.size, 0, 'lance: its dedup set goes back with the cast — no leak');
+
+    // The amp chain is real, not decorative: a self-resolved class applies
+    // the four cast-time factors by hand, and with every fixture flag left
+    // at its identity value the whole chain could be deleted unnoticed
+    // (review sabotage). Quench is the cheapest of the four to prove.
+    {
+      const q = new EnemySystem(createRng(94));
+      // 火 body: the lance (金) is BEATEN by it, so no overcoming debuff is
+      // left behind — a 木 body picks up 断枝 from the first cast and the
+      // second one reads 1.5 × 1.15 instead of a clean 1.5.
+      const body = q.spawnAt(4, 0, 0, 3);
+      q.hp[body] = 50000;
+      const plainBefore = q.hp[body];
+      const plain = new PierceLanceSkill(mkCtx(q), 'piercelance');
+      plain.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, cfg.range);
+      plain.autocast = false; plain.fusionMult = 1; plain.quenched = false;
+      for (let i = 0; i < 20; i++) plain.update(1 / 60);
+      const plainDealt = plainBefore - q.hp[body];
+      plain.destroy();
+
+      const hotBefore = q.hp[body];
+      const hot = new PierceLanceSkill(mkCtx(q), 'piercelance');
+      hot.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, cfg.range);
+      hot.autocast = false; hot.fusionMult = 1; hot.quenched = true;
+      for (let i = 0; i < 20; i++) hot.update(1 / 60);
+      const hotDealt = hotBefore - q.hp[body];
+      hot.destroy();
+      assert.ok(
+        Math.abs(hotDealt / plainDealt - 1.5) < 1e-3,
+        `lance: a quenched cast lands 1.5x (got ${(hotDealt / plainDealt).toFixed(3)})`
+      );
+    }
   }
 
   // --- 雷暴领域: a bolt every boltEvery seconds, inside the field only ---
@@ -854,6 +905,17 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     assert.deepEqual(a, b, 'storm: with no rng the strike sequence is deterministic (replayable headless)');
     const seeded = roll(createRng(7));
     assert.equal(seeded.length, a.length, 'storm: a seeded run strikes just as often');
+    // The two branches must be genuinely different code paths — the M8 T1
+    // marsh test proves this by construction, T4's first cut only proved
+    // each was repeatable, so ignoring ctx.rng entirely passed (review
+    // sabotage). A constant rng always picks the first candidate; the
+    // fallback cycles them.
+    const constant = roll(() => 0);
+    assert.ok(
+      constant.some((x, i) => x !== a[i]) || constant.length !== a.length,
+      'storm: a seeded pick really consults the rng rather than falling through to the cycle'
+    );
+    assert.ok(new Set(constant).size === 1, 'storm: a constant rng strikes the same body every time');
     const seededAgain = roll(createRng(7));
     assert.deepEqual(seeded, seededAgain, 'storm: the same seed replays the same sky');
   }
@@ -878,6 +940,188 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M8 T4: pierce lance (line/execute/dedup) + storm field (cadence/bounds/seed)');
+}
+
+/* ---- M8 T5: the cone — a new judged shape, and 烈焰喷吐 that rides it ---- */
+{
+  const row = settings.combat.flamebreath;
+  assert.equal(row.kind, 'coneTick', "fixture: 烈焰喷吐 is the milestone's one new kind");
+  assert.equal(row.halfAngle, 0.55, 'fixture: 数值表 halfAngle');
+  assert.equal(row.range, 5.5, 'fixture: 数值表 range');
+  assert.equal(row.dps, 200, 'fixture: 数值表 dps');
+
+  // --- EnemySystem.damageCone: the geometry ---
+  {
+    const enemies = new EnemySystem(createRng(101));
+    // Cone points down +x from the origin, half-angle 0.55 rad (~31.5°).
+    const straight = enemies.spawnAt(3, 0, 0, 1); // dead ahead
+    const edgeIn = enemies.spawnAt(3, 1.5, 0, 1); // atan(1.5/3) = 0.46 rad — inside
+    const edgeOut = enemies.spawnAt(3, 3.5, 0, 1); // atan(3.5/3) = 0.86 rad — outside, and its pad can't save it
+    const behind = enemies.spawnAt(-3, 0, 0, 1); // directly behind
+    const tooFar = enemies.spawnAt(9, 0, 0, 1); // on axis but past the range
+    for (let i = 0; i < enemies.count; i++) enemies.hp[i] = 5000;
+    const hp0 = Array.from({ length: enemies.count }, (_, i) => enemies.hp[i]);
+
+    const hits = enemies.damageCone({ x: 0, z: 0 }, 1, 0, 0.55, 5.5, 10, -1);
+    assert.equal(hits, 2, 'cone: exactly the two bodies inside the wedge are hit');
+    assert.ok(enemies.hp[straight] < hp0[straight], 'cone: dead ahead is hit');
+    assert.ok(enemies.hp[edgeIn] < hp0[edgeIn], 'cone: inside the wedge is hit');
+    assert.equal(enemies.hp[edgeOut], hp0[edgeOut], 'cone: outside the wedge is spared');
+    assert.equal(enemies.hp[behind], hp0[behind], 'cone: behind the caster is spared');
+    assert.equal(enemies.hp[tooFar], hp0[tooFar], 'cone: past the range is spared');
+
+    // Point blank: a body standing on the apex has no bearing to speak of
+    // and is inside by construction — a flamethrower does not spare whoever
+    // is hugging you.
+    {
+      const hug = new EnemySystem(createRng(105));
+      const onTop = hug.spawnAt(0, 0, 0, 1);
+      hug.hp[onTop] = 5000;
+      assert.equal(hug.damageCone({ x: 0, z: 0 }, 1, 0, 0.55, 5.5, 10, -1), 1, 'cone: point blank is inside the wedge');
+    }
+
+    // A body's own radius pads the reach, exactly like every other area test
+    // in this file — a fat body just past the rim still clips the flame.
+    {
+      const pad = new EnemySystem(createRng(102));
+      const grazing = pad.spawnAt(5.8, 0, 0, 1); // 0.3m past range 5.5, body radius 0.45
+      pad.hp[grazing] = 5000;
+      assert.equal(pad.damageCone({ x: 0, z: 0 }, 1, 0, 0.55, 5.5, 10, -1), 1, 'cone: the range pads by the body radius');
+    }
+
+    // Dual-wuxing threads through the same _applyWux every other shape uses.
+    {
+      const dual = new EnemySystem(createRng(103));
+      const body = dual.spawnAt(2, 0, 0, 3); // 火 body
+      dual.hp[body] = 5000;
+      const before = dual.hp[body];
+      dual.damageCone({ x: 0, z: 0 }, 1, 0, 0.55, 5.5, 10, 0, 2); // 子金 vs 母水 → 水克火 1.25
+      assert.ok(
+        Math.abs(before - dual.hp[body] - 10 * settings.combat.matchup.advantage) < 1e-3,
+        'cone: takes the better of the two candidates, like every other hit'
+      );
+    }
+  }
+
+  // --- Targets facade degrades quietly for a population without cones ---
+  {
+    const targets = new Targets();
+    targets.register({ hits: () => false, damage: () => 0 });
+    assert.doesNotThrow(() => targets.damageCone({ x: 0, z: 0 }, 1, 0, 0.5, 4, 10, -1), 'Targets.damageCone: degrades quietly');
+    const got = [];
+    targets.register({
+      hits: () => false, damage: () => 0,
+      damageCone: (p, dx, dz, half, range, amt, wux, wuxB) => (got.push({ dx, dz, half, range, amt, wux, wuxB }), 2)
+    });
+    const total = targets.damageCone({ x: 0, z: 0 }, 1, 0, 0.5, 4, 10, 3, 4);
+    assert.equal(total, 2, 'Targets.damageCone: sums what the populations report');
+    assert.deepEqual(got[0], { dx: 1, dz: 0, half: 0.5, range: 4, amt: 10, wux: 3, wuxB: 4 }, 'Targets.damageCone: arguments pass through verbatim');
+  }
+
+  // --- CombatSystem's coneTick case ---
+  {
+    const cones = [];
+    const combat = new CombatSystem({
+      damage: () => 0, damageOnce: () => 0, damageRing: () => 0, slow: () => {},
+      damageCone: (p, dx, dz, half, range, amt, wux, wuxB, kb) => (cones.push({ x: p.x, dx, dz, half, range, amt, wux, wuxB, kb }), 1)
+    });
+    const breath = {
+      element: 'flamebreath', phase: 'impact', impactTime: 0.2, fadeTime: 0,
+      position: { x: 2, z: 0 }, origin: { x: 1, z: 0 },
+      direction: { x: 0, z: 1 }, length: 5.5, u: 1,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [breath]);
+    assert.equal(cones.length, 1, 'coneTick: one sweep per tick');
+    assert.equal(cones[0].x, 1, "coneTick: the wedge starts at the caster's ORIGIN, not the front");
+    assert.equal(cones[0].dz, 1, "coneTick: and points down the cast's own direction");
+    assert.ok(Math.abs(cones[0].amt - row.dps / 60) < 1e-9, 'coneTick: dps × step, like every other persistent kind');
+    assert.equal(cones[0].half, row.halfAngle, "coneTick: the row's own half-angle");
+    assert.equal(cones[0].range, row.range, "coneTick: the row's own range");
+
+    // The shove channel, declared: a breath burns rather than pushes, and
+    // any value it did carry would be per second. Unpinned, the first cut
+    // applied a full impulse every tick and blew bodies out of their own
+    // flame at 30 m/s (review catch — the fourth such channel this milestone).
+    assert.equal(settings.combat.flamebreath.kbMult, 0, 'fixture: 龙息只烧不推');
+    for (const el of ELEMENTS) {
+      if (settings.combat[el]?.kind !== 'coneTick') continue;
+      assert.equal(typeof settings.combat[el].kbMult, 'number', `coneTick row ${el} must declare its own kbMult rate`);
+    }
+    assert.ok(Math.abs(cones[0].kb ?? 0) < 1e-12, 'coneTick: the row is passed its shove as a per-step rate (0 here)');
+
+    // One range, not two: the cast block drives aiming, the combat row drives
+    // burning — they must be the same number or the flame and the reticle part.
+    assert.equal(settings.flamebreath.range, settings.combat.flamebreath.range, 'flamebreath: aiming range and judged range are one number');
+
+    // Timed window: fade breathes nothing (T4's rule for timed shapes).
+    breath.phase = 'fade';
+    breath.fadeTime = 0.1;
+    combat.tick(1 / 60, [breath]);
+    assert.equal(cones.length, 1, 'coneTick: the fade tail deals nothing');
+  }
+
+  // --- FireBreathSkill lifecycle ---
+  assert.equal(ABILITY_TYPES.flamebreath, FireBreathSkill, 'registry: flamebreath');
+  {
+    const enemies = new EnemySystem(createRng(104));
+    const ahead = enemies.spawnAt(3, 0, 0, 4); // 土 body — 火克土
+    enemies.hp[ahead] = 50000;
+    const before = enemies.hp[ahead];
+    const ctx = {
+      targets: enemies, enemies, stats: { book: () => {} },
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      decals: { spawn: () => null }, bursts: { spawn: () => {} },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {}, emit() {}
+        })
+      },
+      mods: null
+    };
+    const breath = new FireBreathSkill(ctx, 'flamebreath');
+    breath.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, settings.flamebreath.range);
+    breath.autocast = false; breath.fusionMult = 1; breath.quenched = false;
+    // Driven the way a real frame does: the class is pure VFX, the coneTick
+    // row is the mechanism, so CombatSystem has to tick alongside it.
+    const live = new CombatSystem(enemies);
+    breath.update(1 / 60);
+    assert.equal(breath.phase, 'impact', 'breath: channels from the first tick');
+    assert.equal(breath.impactDuration, settings.flamebreath.life, "breath: the channel IS the row's own life");
+    // The horde has to MOVE for this to mean anything (review catch): a
+    // knockback channel that blows its own targets out of the flame is
+    // invisible to a test whose bodies are nailed down. This one line is
+    // what turns the assertion below into a real delivery check.
+    for (let i = 0; i < 60; i++) {
+      live.tick(1 / 60, [breath]);
+      breath.update(1 / 60);
+      enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
+    }
+    assert.ok(before - enemies.hp[ahead] > 100, `breath: a body in the wedge burns steadily (got ${(before - enemies.hp[ahead]).toFixed(0)})`);
+    const burned = enemies.hp[ahead];
+    while (!breath.isFinished) { live.tick(1 / 60, [breath]); breath.update(1 / 60); enemies.tick(1 / 60, { x: 0, z: 0 }, 0); }
+    assert.ok(enemies.hp[ahead] < burned, 'breath: it keeps burning for the rest of the channel');
+    breath.destroy();
+
+    const bare = new FireBreathSkill({
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      particles: {
+        get: () => ({
+          uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+          setGradient() {}, emit() {}
+        })
+      }
+    }, 'flamebreath');
+    bare.autocast = false; bare.fusionMult = 1; bare.quenched = false;
+    assert.doesNotThrow(() => {
+      bare.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 5.5);
+      for (let i = 0; i < 400; i++) bare.update(1 / 60);
+      bare.destroy();
+    }, 'breath: a bare-VFX ctx never throws');
+  }
+
+  console.log('ok  M8 T5: cone geometry, coneTick case, FireBreathSkill');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

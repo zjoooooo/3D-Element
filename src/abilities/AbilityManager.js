@@ -7,6 +7,7 @@ import { GlacierAbility } from './GlacierAbility.js';
 import { FireballAbility } from './FireballAbility.js';
 import { PierceLanceSkill } from './PierceLanceSkill.js';
 import { StormFieldSkill } from './StormFieldSkill.js';
+import { FireBreathSkill } from './FireBreathSkill.js';
 import { LineSweepSkill } from './templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from './templates/ZoneBurstSkill.js';
 import { OrbitAuraSkill } from './templates/OrbitAuraSkill.js';
@@ -77,6 +78,8 @@ export const ABILITY_TYPES = {
   // and a field that keeps calling the sky down (both kind:'self').
   piercelance: PierceLanceSkill,
   stormfield: StormFieldSkill,
+  // M8 T5: the milestone's one new judged shape — a channelled wedge.
+  flamebreath: FireBreathSkill,
 
   bladeorbit: OrbitAuraSkill,
   firering: OrbitAuraSkill,
