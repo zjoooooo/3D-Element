@@ -155,12 +155,18 @@ export class CombatSystem {
   }
 
   /**
+   * @param {{x:number, z:number}|null} [playerPos] M7 T6: the player's
+   *   position, read-only, threaded in by RunManager for the marsh kind's
+   *   stand-inside heal — optional and null everywhere else (every legacy
+   *   2-arg caller reads exactly as before). CombatSystem still never
+   *   touches PlayerState; position in, healDue out.
    * @returns {number} total healing due to the player this tick (lifebloom's
-   *   `healPlayer` — see the 'burst' case). RunManager is the one place that
-   *   actually calls `player.heal()` with it ("RunManager routes heal"):
-   *   CombatSystem never touches PlayerState, same as it never has.
+   *   `healPlayer` — see the 'burst' case — and the marsh's `healInside`).
+   *   RunManager is the one place that actually calls `player.heal()` with
+   *   it ("RunManager routes heal"): CombatSystem never touches PlayerState,
+   *   same as it never has.
    */
-  tick(step, active) {
+  tick(step, active, playerPos = null) {
     let healDue = 0;
     this.shieldDue.amount = 0;
     for (const ability of active) {
@@ -415,6 +421,31 @@ export class CombatSystem {
           // like _applyDebuff's own, never damage-amped.
           if (c.vulnAmt) {
             this.targets.applyVuln(ability.position, inner, radius, c.vulnAmt, c.vulnTime);
+          }
+          break;
+        }
+
+        case 'marsh': {
+          // 回春雷泽 (M7 T6): a timed pool — TRAVEL+IMPACT only, the same
+          // grind-window rule the timed aura established at T4; FADE is the
+          // pool draining, visually. Every tick refreshes its slow (a hard
+          // 0.5s hold, the plan's own number: leaving the pool sheds it
+          // fast) and banks healInside×step while the player stands inside
+          // — `playerPos` is RunManager's read-only thread-through, and the
+          // heal leaves through tick()'s healDue return exactly like
+          // lifebloom's healPlayer. No damage-family calls here by design
+          // (pinned since T1): the bolts are ThunderMarshSkill's own
+          // self-resolved job.
+          if (ability.phase !== 'travel' && ability.phase !== 'impact') break;
+          const radius = c.radius * bpScale(ability.element, 'radius', level);
+          const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
+          if (slowFactor) this.targets.slow(ability.position, radius, slowFactor, 0.5);
+          if (playerPos && c.healInside) {
+            const dx = playerPos.x - ability.position.x;
+            const dz = playerPos.z - ability.position.z;
+            if (Math.hypot(dx, dz) < radius) {
+              healDue += c.healInside * this._amp(ability) * bpScale(ability.element, 'healInside', level) * step;
+            }
           }
           break;
         }

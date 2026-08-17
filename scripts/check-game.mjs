@@ -37,6 +37,7 @@ import {
 import { VolcanoSkill } from '../src/abilities/fusions/VolcanoSkill.js';
 import { PrismArraySkill } from '../src/abilities/fusions/PrismArraySkill.js';
 import { BladeTideSkill } from '../src/abilities/fusions/BladeTideSkill.js';
+import { ThunderMarshSkill } from '../src/abilities/fusions/ThunderMarshSkill.js';
 import { FUSION_CLASSES } from '../src/abilities/AbilityManager.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
@@ -2437,8 +2438,12 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   console.log('ok  M7 T1: resonance dual-counts a fused seat');
 }
 
-/* ---- M7 T1: an unimplemented combat kind ('marsh') skips silently ---- */
+/* ---- M7 T1→T6: the marsh kind never touches the damage family ---- */
 {
+  // T1 pinned this as "unimplemented kind no-ops"; T6 implemented marsh
+  // (slow refresh + healInside) and the pin's spirit survives verbatim:
+  // marsh STILL makes zero damage-family calls by design — the bolts are
+  // ThunderMarshSkill's own self-resolved job, never CombatSystem's.
   const calls = [];
   const fakeTargets = {
     damage: (...args) => (calls.push(args), 0),
@@ -2448,15 +2453,16 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   };
   const combat = new CombatSystem(fakeTargets, null);
   const marshRow = settings.combat.fusions['2+1'];
-  assert.equal(marshRow.kind, 'marsh', "fixture: 2+1 is the marsh row this milestone doesn't implement yet");
+  assert.equal(marshRow.kind, 'marsh', "fixture: 2+1 is the marsh row");
   const fakeAbility = {
     element: fusionId('iceshield', 'thunder'), // pairKeyOf → '2+1'
     phase: 'travel', u: 0.5, position: { x: 0, z: 0 },
-    origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 4
+    origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 4,
+    autocast: false, quenched: false, fusionMult: 1
   };
-  assert.doesNotThrow(() => combat.tick(1 / 60, [fakeAbility]), 'combat: an unimplemented kind must not throw');
-  assert.equal(calls.length, 0, "combat: an unimplemented kind ('marsh') deals no damage yet — the switch's default silently skips it");
-  console.log("ok  M7 T1: unimplemented combat kind ('marsh') no-ops safely");
+  assert.doesNotThrow(() => combat.tick(1 / 60, [fakeAbility]), 'combat: marsh must not throw');
+  assert.equal(calls.length, 0, 'combat: marsh makes no damage-family calls — the bolts live in the class (T6 pin, T1 wording retired)');
+  console.log("ok  M7 T1→T6: marsh kind stays out of the damage family");
 }
 
 /* ---- M7 T2: VineBlazeSkill (业火燎原) — pure helpers ---- */
@@ -3730,6 +3736,279 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }, 'BladeTide: a full cast ticks with no targets/enemies/camera and never throws');
   assert.doesNotThrow(() => ability.destroy(), 'BladeTide: destroy is null-safe');
   console.log('ok  M7 T5: BladeTideSkill sandbox null-safety (VFX only, zero errors)');
+}
+
+/* ---- M7 T6: CombatSystem marsh kind — slow refresh + healInside routing ---- */
+{
+  const row = settings.combat.fusions['2+1'];
+  assert.equal(row.kind, 'marsh', "fixture: '2+1' is the marsh row");
+  assert.equal(row.radius, 3.5, "fixture: 数值表 radius");
+  assert.equal(row.slowFactor, 0.45, "fixture: 数值表 slowFactor");
+  assert.equal(row.healInside, 6, "fixture: 数值表 healInside 6/s");
+
+  const slows = [];
+  const combat = new CombatSystem({
+    damage: () => 0, damageOnce: () => 0, damageRing: () => 0,
+    slow: (p, r, f, d) => slows.push({ x: p.x, z: p.z, r, f, d })
+  });
+  const marsh = {
+    element: fusionId('iceshield', 'thunder'), // 水(2)+木(1) → '2+1'
+    phase: 'impact', impactTime: 0.5, fadeTime: 0,
+    position: { x: 4, z: -2 }, origin: { x: 0, z: 0 },
+    direction: { x: 1, z: 0 }, length: 9, u: 1,
+    autocast: false, quenched: false, fusionMult: 1
+  };
+
+  // Legacy 2-arg call (every pre-T6 caller): still ticks the slow, reports
+  // no heal, throws nothing — playerPos defaults null.
+  let due = combat.tick(1 / 60, [marsh]);
+  assert.equal(slows.length, 1, 'marsh: one slow refresh per tick');
+  assert.deepEqual(slows[0], { x: 4, z: -2, r: row.radius, f: row.slowFactor, d: 0.5 },
+    'marsh: slow covers the pool at the row factor for the 0.5s refresh window');
+  assert.equal(due, 0, 'marsh: no player position, no heal — legacy callers unchanged');
+
+  // Player inside: healDue = healInside × step (amp 1); outside: 0.
+  due = combat.tick(1 / 60, [marsh], { x: 4.5, z: -2 });
+  assert.ok(Math.abs(due - row.healInside / 60) < 1e-9, 'marsh: player inside the pool banks healInside×step');
+  due = combat.tick(1 / 60, [marsh], { x: 40, z: 0 });
+  assert.equal(due, 0, 'marsh: player outside the pool banks nothing');
+
+  // Amp rides the heal the same way lifebloom's healPlayer does.
+  marsh.fusionMult = 2;
+  due = combat.tick(1 / 60, [marsh], { x: 4.5, z: -2 });
+  assert.ok(Math.abs(due - (row.healInside * 2) / 60) < 1e-9, 'marsh: the heal is amped (fusionMult ×2 doubles it)');
+  marsh.fusionMult = 1;
+
+  // Timed window: FADE neither slows nor heals (T4's aura rule, same shape).
+  const slowsBefore = slows.length;
+  marsh.phase = 'fade';
+  marsh.fadeTime = 0.1;
+  due = combat.tick(1 / 60, [marsh], { x: 4.5, z: -2 });
+  assert.equal(slows.length, slowsBefore, 'marsh: FADE refreshes no slow');
+  assert.equal(due, 0, 'marsh: FADE banks no heal');
+  marsh.phase = 'impact';
+
+  // Against the real horde: enemies inside the pool actually slow down.
+  {
+    const enemies = new EnemySystem(createRng(51));
+    const live = new CombatSystem(enemies);
+    const inside = enemies.spawnAt(4, -2, 0, 1);
+    const outside = enemies.spawnAt(20, 0, 0, 1);
+    live.tick(1 / 60, [marsh]);
+    assert.ok(enemies.slowed[inside] > 0, 'marsh: an enemy in the pool is slowed');
+    assert.equal(enemies.slowed[outside], 0, 'marsh: an enemy outside is not');
+  }
+
+  console.log('ok  M7 T6: CombatSystem marsh kind (slow refresh/healInside/amp/fade gate/legacy call)');
+}
+
+/* ---- M7 T6: RunManager threads the player position into combat.tick ---- */
+{
+  const seen = [];
+  const run = new RunManager({
+    enemies: new EnemySystem(createRng(52)), pickups: new PickupSystem(), player: new PlayerState(), rng: createRng(52),
+    modifiers: new Modifiers(), tides: new TideSchedule(createRng(52)), projectiles: new EnemyProjectiles(),
+    combat: { tick: (step, active, playerPos) => (seen.push(playerPos), 0), release: () => -1, resetStats: () => {}, book: () => {} },
+    targets: { register: () => {} },
+    abilities: { active: [], onRetire: null }
+  });
+  run.start();
+  const pos = { x: 7, z: -3 };
+  run.tick(1 / 60, pos);
+  assert.ok(seen.length > 0 && seen[seen.length - 1] === pos,
+    'RunManager: combat.tick receives the very playerPos object the run tick was driven with');
+  console.log('ok  M7 T6: RunManager passes playerPos to combat.tick');
+}
+
+/* ---- M7 T6: ThunderMarshSkill (回春雷泽) — headless lifecycle ---- */
+{
+  assert.equal(FUSION_CLASSES['2+1'], ThunderMarshSkill, "AbilityManager: '2+1' resolves to ThunderMarshSkill");
+
+  const cfg = settings.fusions['2+1'];
+  assert.equal(cfg.life, 4, "settings.fusions['2+1']: 沼泽 4s");
+  assert.equal(cfg.boltEvery, 0.8, "settings.fusions['2+1']: 落雷每 0.8s 一道");
+  assert.equal(cfg.boltDamage, 20, "settings.fusions['2+1']: 首击 20");
+  assert.equal(cfg.boltDecay, 0.85, "settings.fusions['2+1']: 跳衰 ×0.85");
+  assert.equal(cfg.boltHits, 3, "settings.fusions['2+1']: 每道 3 击 — 数值表锚 5道×51=255 (20+17+14.45), 计划正文'3 跳'按锚裁定为总击数");
+  assert.equal(cfg.hopRadius, 6, "settings.fusions['2+1']: 跳距 6");
+  for (const key of ['lightColor', 'lightIntensity', 'lightRadius']) {
+    assert.ok(cfg[key] !== undefined, `settings.fusions['2+1']: ${key} present (NaN-poison guard)`);
+  }
+
+  const enemies = new EnemySystem(createRng(53));
+  const ctx = {
+    targets: enemies,
+    enemies,
+    stats: { book: () => {} },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    },
+    decals: { spawn: () => ({ mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
+    bursts: { spawn: () => {} },
+    mods: null
+  };
+
+  // 木 (1) bodies: neutral to BOTH candidates (子 1 self; 母 2: BEATS[2]=3≠1,
+  // BEATS[1]=4≠2) — exact amounts. A tight cluster inside the pool, one far
+  // body outside pool AND hop range.
+  const a = enemies.spawnAt(9, 0, 0, 1);
+  const b = enemies.spawnAt(10.2, 0.6, 0, 1);
+  const c2 = enemies.spawnAt(8.2, -0.9, 0, 1);
+  const far = enemies.spawnAt(30, 0, 0, 1);
+  for (const i of [a, b, c2, far]) enemies.hp[i] = 5000;
+
+  const ability = new ThunderMarshSkill(ctx, fusionId('iceshield', 'thunder'));
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+
+  ability.update(1 / 60);
+  assert.equal(ability.phase, 'impact', 'Marsh: reaches IMPACT on the very first tick');
+  assert.ok(
+    Math.abs(ability.position.x - 9) < 1e-6 && Math.abs(ability.position.z) < 1e-6,
+    'Marsh: position parks at the aimed point at spawn (the marsh row reads it every combat tick)'
+  );
+  assert.equal(ability.impactDuration, cfg.life, "Marsh: the impact window IS the row's own 4s");
+
+  const clusterHp = () => 15000 - enemies.hp[a] - enemies.hp[b] - enemies.hp[c2];
+  const perBolt = cfg.boltDamage * (1 + cfg.boltDecay + cfg.boltDecay * cfg.boltDecay); // 51.45
+
+  // First bolt lands once impactTime crosses 0.8 — not before.
+  for (let i = 0; i < 40; i++) ability.update(1 / 60); // ≈0.667
+  assert.equal(clusterHp(), 0, 'Marsh: no bolt before the first 0.8s boundary');
+  for (let i = 0; i < 12; i++) ability.update(1 / 60); // ≈0.867
+  assert.ok(Math.abs(clusterHp() - perBolt) < 1e-2, `Marsh: the first bolt lands 20+17+14.45 across the cluster (got ${clusterHp().toFixed(2)})`);
+
+  // Run the pool out: 5 bolts total (0.8/1.6/2.4/3.2/4.0), far body untouched.
+  while (!ability.isFinished) ability.update(1 / 60);
+  assert.ok(Math.abs(clusterHp() - perBolt * 5) < 5e-2, `Marsh: five bolts land ≈257.25 total (got ${clusterHp().toFixed(2)})`);
+  assert.equal(enemies.hp[far], 5000, 'Marsh: outside the pool and hop range, never struck');
+  assert.equal(enemies._hitMemory.size, 0, 'Marsh: bolts use plain damage — no dedup sets to leak');
+  ability.destroy();
+
+  // Kill-swap outcome contract (re-review pin): a 1-hp seed dies to its own
+  // first strike, swap-remove reshuffles indices mid-bolt — the OUTCOME must
+  // stay exactly the planned chain regardless of implementation detail:
+  // both hops eat their 17/14.45 (found by id, indices untrusted), the
+  // far body that swap-remove slid around takes nothing, the seed is gone.
+  {
+    const swap = new EnemySystem(createRng(56));
+    const ctxSwap = { ...ctx, targets: swap, enemies: swap };
+    const seed = swap.spawnAt(9, 0, 0, 1);
+    swap.hp[seed] = 1;
+    const h1 = swap.spawnAt(9.7, 0.5, 0, 1);
+    const h2 = swap.spawnAt(10.4, -0.4, 0, 1);
+    const farAway = swap.spawnAt(30, 0, 0, 1); // spawned LAST — the body swap-remove slides into the gap
+    swap.hp[h1] = 5000;
+    swap.hp[h2] = 5000;
+    swap.hp[farAway] = 5000;
+    const idSeed = swap.id[seed];
+    const id1 = swap.id[h1];
+    const id2 = swap.id[h2];
+    const idFar = swap.id[farAway];
+    const hpOf = (id) => {
+      for (let i = 0; i < swap.count; i++) if (swap.id[i] === id) return swap.hp[i];
+      return -1;
+    };
+    const bolt = new ThunderMarshSkill(ctxSwap, fusionId('iceshield', 'thunder'));
+    bolt.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+    bolt.autocast = false;
+    bolt.fusionMult = 1;
+    bolt.quenched = false;
+    for (let i = 0; i < 53; i++) bolt.update(1 / 60); // just past the first bolt
+    bolt.destroy();
+    assert.equal(swap.count, 3, 'Marsh swap: the 1-hp seed died to its own first strike');
+    assert.equal(hpOf(idSeed), -1, 'Marsh swap: the seed really is gone');
+    assert.ok(Math.abs(hpOf(id1) - (5000 - 20 * 0.85)) < 1e-2, `Marsh swap: hop 1 ate exactly 17 (got ${(5000 - hpOf(id1)).toFixed(2)})`);
+    assert.ok(Math.abs(hpOf(id2) - (5000 - 20 * 0.85 * 0.85)) < 1e-2, `Marsh swap: hop 2 ate exactly 14.45 (got ${(5000 - hpOf(id2)).toFixed(2)})`);
+    assert.equal(hpOf(idFar), 5000, 'Marsh swap: the swapped-around far body was never struck');
+  }
+
+  // Empty pool: bolts fire into nothing, quietly.
+  {
+    const none = new EnemySystem(createRng(54));
+    const ctx2 = { ...ctx, targets: none, enemies: none };
+    const dry = new ThunderMarshSkill(ctx2, fusionId('iceshield', 'thunder'));
+    dry.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+    dry.autocast = false;
+    dry.fusionMult = 1;
+    dry.quenched = false;
+    assert.doesNotThrow(() => {
+      while (!dry.isFinished) dry.update(1 / 60);
+    }, 'Marsh: an empty pool skips its bolts without throwing');
+    dry.destroy();
+  }
+
+  console.log('ok  M7 T6: ThunderMarshSkill lifecycle (bolt cadence/3-hit chain/pool bounds/no leak), headless');
+}
+
+/* ---- M7 T6: Marsh wux threading + sandbox null-safety ---- */
+{
+  const calls = [];
+  const enemies = new EnemySystem(createRng(55));
+  // FOUR bodies in hop range on purpose (re-review pin): with the chain
+  // unsaturated, "boltHits is TOTAL strikes" becomes discriminating — the
+  // plan body's rejected "3 hops" reading would land a 4th call here.
+  enemies.spawnAt(9, 0, 0, 1);
+  enemies.spawnAt(10, 1, 0, 1);
+  enemies.spawnAt(8, 1, 0, 1);
+  enemies.spawnAt(10.5, -0.8, 0, 1);
+  const ctx = {
+    targets: { damage: (p, r, amt, wux, wuxB) => (calls.push({ amt, wux, wuxB }), 0) },
+    enemies,
+    stats: { book: () => {} },
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    },
+    mods: null
+  };
+  const ability = new ThunderMarshSkill(ctx, fusionId('iceshield', 'thunder'));
+  ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+  ability.autocast = false;
+  ability.fusionMult = 1;
+  ability.quenched = false;
+  for (let i = 0; i < 53; i++) ability.update(1 / 60); // just past the FIRST bolt
+  assert.equal(calls.length, settings.fusions['2+1'].boltHits,
+    '数值锚 pin: one bolt = exactly boltHits (3) strikes, even with a 4th body in hop range — the "3 跳"=4击 reading fails here');
+  assert.ok(
+    Math.abs(calls[0].amt - 20) < 1e-9 && Math.abs(calls[1].amt - 17) < 1e-9 && Math.abs(calls[2].amt - 14.45) < 1e-9,
+    `数值锚 pin: the strikes decay 20/17/14.45 (数值表 51.45/道; got ${calls.map((k) => k.amt.toFixed(2)).join('/')})`
+  );
+  for (let i = 0; i < 60; i++) ability.update(1 / 60);
+  ability.destroy();
+  assert.ok(calls.length > settings.fusions['2+1'].boltHits, 'Marsh: later bolts kept striking');
+  assert.ok(calls.every((k) => k.wux === 1 && k.wuxB === 2), 'Marsh: every strike carries wux=1 (子 wood), wuxB=2 (母 water)');
+
+  const bare = new ThunderMarshSkill({
+    lights: { acquire: () => null, release: () => {}, set: () => {} },
+    particles: {
+      get: () => ({
+        uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } },
+        setGradient() {},
+        emit() {}
+      })
+    }
+  }, fusionId('iceshield', 'thunder'));
+  bare.autocast = false;
+  bare.fusionMult = 1;
+  bare.quenched = false;
+  assert.doesNotThrow(() => {
+    bare.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+    for (let i = 0; i < 500; i++) bare.update(1 / 60);
+    bare.destroy();
+  }, 'Marsh: a bare-VFX ctx (no targets/enemies/decals/bursts) never throws');
+  console.log('ok  M7 T6: Marsh wux threading (子1木/母2水) + sandbox null-safety');
 }
 
 /* ---- M7 T4: PrismArraySkill sandbox null-safety — VFX only, zero errors ---- */

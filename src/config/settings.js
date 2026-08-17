@@ -534,7 +534,7 @@ export const settings = {
       // exactly as shipped (bladeorbit's blade-wall feel).
       '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3, kbMult: 0 },
       '0+2': { kind: 'self' }, // 霜刃洪流 (T5, self-resolved — fireball precedent)
-      '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, healInside: 6 } // 回春雷泽 (T6) — 'marsh' isn't a case in tick()'s switch yet, so this row no-ops safely until then
+      '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, healInside: 6 } // 回春雷泽 (T6): tick() refreshes the slow + banks the stand-inside heal; the bolts are ThunderMarshSkill's own
     },
 
     // 相克 lookup into TideSchedule's BEATS: which wuxing index each skill casts as.
@@ -2536,7 +2536,16 @@ export const settings = {
       outTime: 0.5, hoverTime: 0.2, backTime: 0.5,
       lightColor: '#6fb8e8', lightIntensity: 6, lightRadius: 6
     },
-    '2+1': { cooldown: 7, range: 10, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#7ee08a' } // 回春雷泽
+    // M7 T6 (ThunderMarshSkill): mechanism numbers + the light trio, same
+    // additions every fusion class before it needed. `boltHits: 3` is TOTAL
+    // strikes per bolt (seed + 2 hops) — the 数值表's own anchor (≈5 道 ×51
+    // = 255, i.e. 20+17+14.45 each) resolves the plan body's ambiguous
+    // "3 跳" wording; the pool's slow/heal live in combat.fusions['2+1'].
+    '2+1': {
+      cooldown: 7, range: 10, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#7ee08a', // 回春雷泽
+      life: 4, boltEvery: 0.8, boltDamage: 20, boltDecay: 0.85, boltHits: 3, hopRadius: 6,
+      lightColor: '#7ee08a', lightIntensity: 6, lightRadius: 7
+    }
   },
 
   /* ------------------------------------------------------------------ */

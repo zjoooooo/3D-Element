@@ -239,7 +239,9 @@ export class RunManager {
     this.s.player.tick(step);
     // M6 T4: lifebloom's healPlayer — CombatSystem stays player-agnostic and
     // just reports what's due; this is the one place that actually spends it.
-    const healDue = this.s.combat.tick(step, this.s.abilities.active);
+    // M7 T6: playerPos rides through for the marsh kind's stand-inside heal
+    // — same object this whole tick already steers spawns/projectiles by.
+    const healDue = this.s.combat.tick(step, this.s.abilities.active, playerPos);
     if (healDue > 0) this.s.player.heal(healDue);
     // M6 T5: iceshield/stoneskin's addShield — same routing shape as healDue
     // just above, read off a field instead of tick()'s own return (see
