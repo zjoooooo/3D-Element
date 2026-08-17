@@ -22,18 +22,18 @@ export class Targets {
     return false;
   }
 
-  damage(point, radius, amount, wuxing = -1) {
+  damage(point, radius, amount, wuxing = -1, wuxingB = -1) {
     let total = 0;
-    for (const p of this._populations) total += p.damage(point, radius, amount, wuxing);
+    for (const p of this._populations) total += p.damage(point, radius, amount, wuxing, wuxingB);
     return total;
   }
 
-  damageOnce(castId, point, radius, amount, wuxing = -1) {
+  damageOnce(castId, point, radius, amount, wuxing = -1, wuxingB = -1) {
     let total = 0;
     for (const p of this._populations) {
       total += p.damageOnce
-        ? p.damageOnce(castId, point, radius, amount, wuxing)
-        : p.damage(point, radius, amount, wuxing);
+        ? p.damageOnce(castId, point, radius, amount, wuxing, wuxingB)
+        : p.damage(point, radius, amount, wuxing, wuxingB);
     }
     return total;
   }
@@ -50,12 +50,12 @@ export class Targets {
    * an aura's orbiting ring/flames/orbs occupy a band, not a filled disc).
    * Populations that don't implement it degrade to a plain disc — the same
    * quiet-degradation contract damageOnce already documents above. */
-  damageRing(point, innerRadius, radius, amount, wuxing = -1) {
+  damageRing(point, innerRadius, radius, amount, wuxing = -1, wuxingB = -1) {
     let total = 0;
     for (const p of this._populations) {
       total += p.damageRing
-        ? p.damageRing(point, innerRadius, radius, amount, wuxing)
-        : p.damage(point, radius, amount, wuxing);
+        ? p.damageRing(point, innerRadius, radius, amount, wuxing, wuxingB)
+        : p.damage(point, radius, amount, wuxing, wuxingB);
     }
     return total;
   }

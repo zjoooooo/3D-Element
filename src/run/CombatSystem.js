@@ -1,6 +1,7 @@
 // src/run/CombatSystem.js
 import { settings } from '../config/settings.js';
 import { bpScale, bpAdd, bpReplace, bpFlag } from './breakpoints.js';
+import { isFusionId, fusionParents, pairKeyOf } from './fusions.js';
 
 /**
  * Reads live ability state each tick and turns it into targets calls (spec §3).
@@ -16,6 +17,16 @@ import { bpScale, bpAdd, bpReplace, bpFlag } from './breakpoints.js';
  * distance query replaces it if a wide-line ability ever misses visibly.
  */
 const LINE_SAMPLES = 3;
+
+/**
+ * `element`'s combat row (spec §4.7): a fusion id resolves through its
+ * pair-key into `settings.combat.fusions`, a plain id straight into
+ * `settings.combat` — the one lookup `tick()` uses below, exported so a
+ * caller (or an assertion) can ask the same question without an instance.
+ */
+export function rowFor(element) {
+  return isFusionId(element) ? settings.combat.fusions[pairKeyOf(element)] : settings.combat[element];
+}
 
 export class CombatSystem {
   /**
@@ -133,10 +144,18 @@ export class CombatSystem {
     let healDue = 0;
     this.shieldDue.amount = 0;
     for (const ability of active) {
-      const c = settings.combat[ability.element];
+      const c = rowFor(ability.element);
       if (!c || c.kind === 'self') continue;
       const castId = this._castKey(ability);
-      const wux = settings.combat.wuxingOf[ability.element] ?? -1;
+      // M7 T1 (spec §4.7 双属性判定): a fused cast's hits carry two
+      // candidates — wux = 子系 (the generated half; mark/debuff identity,
+      // same as fusionWux() elsewhere), wuxB = 母系 (matchup-only, see
+      // EnemySystem#_applyWux). A plain element only ever had the one.
+      const fusedParents = isFusionId(ability.element) ? fusionParents(ability.element) : null;
+      const wux = fusedParents
+        ? settings.combat.wuxingOf[fusedParents[1]] ?? -1
+        : settings.combat.wuxingOf[ability.element] ?? -1;
+      const wuxB = fusedParents ? settings.combat.wuxingOf[fusedParents[0]] ?? -1 : -1;
       // M6 T12: this cast's skill level, read once per ability per tick —
       // every case below folds its own relevant params through bpScale/
       // bpAdd/bpReplace/bpFlag off this same number.
@@ -166,7 +185,7 @@ export class CombatSystem {
             const u = Math.min(t, to);
             this._p.x = ability.origin.x + ability.direction.x * ability.length * u;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * u;
-            this._book(ability.element, amt, this.targets.damageOnce(castId, this._p, width, amt, wux));
+            this._book(ability.element, amt, this.targets.damageOnce(castId, this._p, width, amt, wux, wuxB));
             if (u >= to) break;
           }
           this._sweptU.set(castId, to);
@@ -199,7 +218,7 @@ export class CombatSystem {
           ) {
             this._detonated.add(castId);
             const amt = c.damage * this._amp(ability);
-            this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
+            this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
             // M6 T12: slowFactor REPLACEs, same rule as the sweep case above.
             const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
             if (slowFactor) {
@@ -244,7 +263,7 @@ export class CombatSystem {
             const resonance = wux === 3 ? this.mods?.dotMult?.() ?? 1 : 1;
             if (this._dot(castId, step, c.burnDps * this._amp(ability) * resonance)) {
               const amt = this._take(castId);
-              this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
+              this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
             }
           }
           // M6 T12 (陨石 Lv5 extraWave): a second, smaller detonation at the
@@ -265,7 +284,7 @@ export class CombatSystem {
             this._book(
               ability.element,
               extraAmt,
-              this.targets.damage(ability.position, radius * 0.6, extraAmt, wux)
+              this.targets.damage(ability.position, radius * 0.6, extraAmt, wux, wuxB)
             );
           }
           break;
@@ -306,7 +325,7 @@ export class CombatSystem {
             const t = (s / LINE_SAMPLES) * ability.u;
             this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * t;
-            this._book(ability.element, amt, this.targets.damage(this._p, width, amt, wux));
+            this._book(ability.element, amt, this.targets.damage(this._p, width, amt, wux, wuxB));
           }
           break;
         }
@@ -315,7 +334,7 @@ export class CombatSystem {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const radius = (settings[ability.element].zoneRadius ?? 2) * bpScale(ability.element, 'radius', level);
           const amt = c.dps * this._amp(ability) * step;
-          this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux));
+          this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
           const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
           if (slowFactor) {
             const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);
@@ -343,7 +362,7 @@ export class CombatSystem {
           this._book(
             ability.element,
             amt,
-            this.targets.damageRing(ability.position, inner, radius, amt, wux)
+            this.targets.damageRing(ability.position, inner, radius, amt, wux, wuxB)
           );
           break;
         }

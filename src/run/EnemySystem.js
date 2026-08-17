@@ -262,7 +262,7 @@ export class EnemySystem {
     return false;
   }
 
-  damage(point, radius, amount, wuxing = -1) {
+  damage(point, radius, amount, wuxing = -1, wuxingB = -1) {
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
@@ -275,7 +275,7 @@ export class EnemySystem {
       const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult;
       this.kbX[i] += (dx / d) * kb;
       this.kbZ[i] += (dz / d) * kb;
-      this._applyWux(i, amount, wuxing);
+      this._applyWux(i, amount, wuxing, wuxingB);
     }
     this._flushReactions();
     return hits;
@@ -287,7 +287,7 @@ export class EnemySystem {
    * enemy standing well inside the ring (nearer than innerRadius, padded by
    * its own collision radius the same way the outer edge already is) takes
    * nothing. */
-  damageRing(point, innerRadius, radius, amount, wuxing = -1) {
+  damageRing(point, innerRadius, radius, amount, wuxing = -1, wuxingB = -1) {
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
@@ -302,13 +302,13 @@ export class EnemySystem {
       const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult;
       this.kbX[i] += (dx / d) * kb;
       this.kbZ[i] += (dz / d) * kb;
-      this._applyWux(i, amount, wuxing);
+      this._applyWux(i, amount, wuxing, wuxingB);
     }
     this._flushReactions();
     return hits;
   }
 
-  damageOnce(castId, point, radius, amount, wuxing = -1) {
+  damageOnce(castId, point, radius, amount, wuxing = -1, wuxingB = -1) {
     let seen = this._hitMemory.get(castId);
     if (!seen) this._hitMemory.set(castId, (seen = new Set()));
     let hits = 0;
@@ -319,7 +319,7 @@ export class EnemySystem {
       seen.add(this.id[i]);
       hits++;
       this.flash[i] = 1;
-      this._applyWux(i, amount, wuxing);
+      this._applyWux(i, amount, wuxing, wuxingB);
     }
     this._flushReactions();
     // ponytail: memory grows one Set per cast; RunManager clears finished casts.
@@ -329,8 +329,17 @@ export class EnemySystem {
   /**
    * The wuxing half of a hit (spec §4.6): matchup multiplier, live vuln
    * amplification, the debuff channel an overcoming hit inflicts, and mark
-   * resolution. Shared by damage() and damageOnce() so neither hit loop
-   * forks this.
+   * resolution. Shared by damage(), damageOnce() and damageRing() so no hit
+   * loop forks this.
+   *
+   * `wuxingB` (M7 T1, spec §4.7 双属性判定) is a fused cast's second
+   * candidate — call convention is **wuxing = 子系 (child), wuxingB = 母系
+   * (parent)**, defaulted -1 so every pre-M7 single-element call is
+   * bit-identical to before. Matchup weighs BOTH candidates against the
+   * target and takes the better multiplier (更优一系) — but everything
+   * downstream (the overcoming debuff, mark application, detonation) still
+   * reads `wuxing` alone: a hit only inflicts its child's own debuff when
+   * the child itself overcomes, even if the parent's matchup is what won.
    *
    * Order is load-bearing. Matchup first. Then any *live* vuln amplifies
    * this hit's dealt — any wuxing, including none at all, so splash/助燃
@@ -342,17 +351,15 @@ export class EnemySystem {
    * sheng bonus is a separate, additional payoff off the raw pre-matchup
    * amount, not a replacement for the triggering hit's own damage.
    */
-  _applyWux(i, amount, wuxing) {
+  _applyWux(i, amount, wuxing, wuxingB = -1) {
     let dealt = amount;
     let overcoming = false;
     if (wuxing >= 0) {
       const target = this.element[i];
-      if (BEATS[wuxing] === target) {
-        dealt *= this._advantage();
-        overcoming = true;
-      } else if (BEATS[target] === wuxing) {
-        dealt *= this._disadvantage();
-      }
+      let mult = this._matchup(wuxing, target);
+      if (wuxingB >= 0) mult = Math.max(mult, this._matchup(wuxingB, target));
+      dealt *= mult;
+      overcoming = BEATS[wuxing] === target;
     }
     if (this.vulnT[i] > 0) dealt *= 1 + this.vulnAmt[i]; // 易伤/熔甲: live vuln bites every hit
     if (overcoming) this._applyDebuff(i, wuxing);
@@ -435,6 +442,17 @@ export class EnemySystem {
       this.vulnT[i] = ch.duration;
       this.vulnAmt[i] = ch.amount;
     }
+  }
+
+  /** One candidate wuxing's matchup multiplier against `target` (spec §4.7
+   * 更优一系): ×advantage if it overcomes, ×disadvantage if it's overcome,
+   * ×1 (neutral) otherwise. `_applyWux` calls this once per candidate
+   * (wuxing, and wuxingB when a fused cast supplies one) and keeps the
+   * larger of the two. */
+  _matchup(wux, target) {
+    if (BEATS[wux] === target) return this._advantage();
+    if (BEATS[target] === wux) return this._disadvantage();
+    return 1;
   }
 
   _advantage() {

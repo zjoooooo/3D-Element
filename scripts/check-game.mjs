@@ -15,12 +15,12 @@ import { TideSchedule, WUXING, WUXING_LABEL, BEATS, FEEDS } from '../src/run/Tid
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
 import { UpgradePool } from '../src/run/UpgradePool.js';
-import { FUSIONS, fusionId, isFusionId, fusionParents } from '../src/run/fusions.js';
+import { FUSIONS, fusionId, isFusionId, fusionParents, pairKeyOf } from '../src/run/fusions.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
 import { EnemySystem } from '../src/run/EnemySystem.js';
 import { EnemyProjectiles } from '../src/run/EnemyProjectiles.js';
-import { CombatSystem } from '../src/run/CombatSystem.js';
+import { CombatSystem, rowFor } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
 import { PlayerState } from '../src/run/PlayerState.js';
 import { canAffordCast, manaCostOf } from '../src/run/manaGate.js';
@@ -1739,6 +1739,84 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   console.log('ok  matchups & stats');
 }
 
+/* ---- M7 T1: dual-wuxing hits — 更优一系 (spec §4.7 双属性判定) ---- */
+{
+  // furnace scenario from the plan: a fire(3) enemy hit by a fused cast
+  // carrying two wuxing candidates. Call convention is wux=子系(child),
+  // wuxB=母系(parent) — matchup takes the BETTER of the two multipliers,
+  // but mark/debuff identity always stays with the child alone.
+  const enemies = new EnemySystem(createRng(13));
+
+  // Case 1: wux=子(金0), wuxB=母(水2). 金 is beaten BY fire (×0.8, the
+  // child's own matchup loses) but 水 beats fire (×1.25) — the pair still
+  // deals the better number, yet the child never overcame on its own, so
+  // no debuff, and the mark that lands is still the child's (金).
+  const f1 = enemies.spawnAt(0, 0, 0, 3);
+  const before1 = enemies.hp[f1];
+  enemies.damage({ x: 0, z: 0 }, 1, 10, 0, 2);
+  assert.ok(
+    Math.abs(before1 - enemies.hp[f1] - 10 * settings.combat.matchup.advantage) < 1e-6,
+    'dual matchup: 母系(水) wins the multiplier even though 子系(金) lost its own'
+  );
+  assert.equal(enemies.mark[f1], 0, 'dual matchup: mark keys off 子系 (金) regardless of who won the multiplier');
+  assert.equal(enemies.weakT[f1], 0, 'dual matchup: 子系 (金) never overcame on its own → no 熄灭');
+
+  // Case 2: wux=子(水2), wuxB=母(金0), a fresh enemy — the child overcomes
+  // on its own this time; same ×1.25, but now from the child, and its own
+  // overcoming debuff (水 → 熄灭) applies.
+  const f2 = enemies.spawnAt(5, 0, 0, 3);
+  const before2 = enemies.hp[f2];
+  enemies.damage({ x: 5, z: 0 }, 1, 10, 2, 0);
+  assert.ok(
+    Math.abs(before2 - enemies.hp[f2] - 10 * settings.combat.matchup.advantage) < 1e-6,
+    'dual matchup: 子系(水) wins its own matchup, same ×1.25 from the other side'
+  );
+  assert.equal(enemies.mark[f2], 2, 'dual matchup: mark keys off 子系 (水) this time');
+  assert.ok(enemies.weakT[f2] > 0, 'dual matchup: 子系 overcame on its own → 熄灭 applies');
+
+  // Single-element regression: omitting wuxingB must be bit-identical to
+  // passing it explicitly as -1 — the same probe, both ways, on two fresh
+  // wood(1) enemies hit by a metal(0) advantage.
+  const r1 = enemies.spawnAt(10, 0, 0, 1);
+  const r2 = enemies.spawnAt(15, 0, 0, 1);
+  enemies.damage({ x: 10, z: 0 }, 1, 10, 0); // wuxingB omitted
+  enemies.damage({ x: 15, z: 0 }, 1, 10, 0, -1); // wuxingB explicit -1
+  assert.equal(enemies.hp[r1], enemies.hp[r2], 'dual matchup: omitted wuxingB defaults to -1, bit-identical to passing it explicitly');
+
+  // damageOnce/damageRing thread wuxingB through to the same _applyWux path
+  // — a threading smoke test, not a re-derivation of the maths above.
+  const f3 = enemies.spawnAt(20, 0, 0, 3);
+  const before3 = enemies.hp[f3];
+  enemies.damageOnce('m7t1-dual-once', { x: 20, z: 0 }, 1, 10, 0, 2);
+  assert.ok(
+    Math.abs(before3 - enemies.hp[f3] - 10 * settings.combat.matchup.advantage) < 1e-6,
+    'damageOnce: threads wuxingB through to _applyWux'
+  );
+  enemies.releaseCast('m7t1-dual-once');
+
+  const f4 = enemies.spawnAt(25, 0, 0, 3);
+  const before4 = enemies.hp[f4];
+  enemies.damageRing({ x: 25, z: 0 }, 0, 1, 10, 0, 2);
+  assert.ok(
+    Math.abs(before4 - enemies.hp[f4] - 10 * settings.combat.matchup.advantage) < 1e-6,
+    'damageRing: threads wuxingB through to _applyWux'
+  );
+
+  // Targets forwards wuxingB to whichever population implements it.
+  const targets = new Targets();
+  const tEnemies = new EnemySystem(createRng(13));
+  targets.register(tEnemies);
+  const f5 = tEnemies.spawnAt(0, 0, 0, 3);
+  const before5 = tEnemies.hp[f5];
+  targets.damage({ x: 0, z: 0 }, 1, 10, 0, 2);
+  assert.ok(
+    Math.abs(before5 - tEnemies.hp[f5] - 10 * settings.combat.matchup.advantage) < 1e-6,
+    'Targets.damage: threads wuxingB to the registered population'
+  );
+
+  console.log('ok  M7 T1: dual-wuxing matchup (更优一系)');
+}
+
 /* ---- run cadence: composition, elites, rain, shard hand ---- */
 {
   const rng = createRng(31);
@@ -2264,6 +2342,108 @@ import { ScreenFlash } from '../src/effects/ScreenFlash.js';
   assert.equal(loadout.levelOf(id), settings.fusion.maxLevel, 'fusion: capped at its own max');
   settings.run.draftLoadout = true;
   console.log('ok  fusion core');
+}
+
+/* ---- M7 T1: pairKeyOf, rowFor, and the five bespoke fusion rows ---- */
+{
+  const wuxingOf = settings.combat.wuxingOf;
+  // The five FEEDS-legal parent pairs this milestone ships skills for (spec
+  // §4.7 table) — verified FEEDS-legal off wuxingOf before asserting the
+  // key, not assumed (母 generates 子, Loadout#fuse's own eligibility rule).
+  const PAIRS = [
+    ['thunder', 'fireball', '1+3'],
+    ['fireball', 'boulder', '3+4'],
+    ['rockspikes', 'dashstrike', '4+0'],
+    ['dashstrike', 'iceshield', '0+2'],
+    ['iceshield', 'thunder', '2+1']
+  ];
+  for (const [a, b, key] of PAIRS) {
+    assert.equal(FEEDS[wuxingOf[a]], wuxingOf[b], `pairKeyOf: ${a}→${b} must be FEEDS-legal (母生子) to use as a fixture`);
+    assert.equal(pairKeyOf(fusionId(a, b)), key, `pairKeyOf: fusion:${a}+${b} → ${key}`);
+    assert.ok(settings.fusions[key], `settings.fusions: missing row ${key}`);
+    assert.ok(settings.combat.fusions[key], `settings.combat.fusions: missing row ${key}`);
+  }
+  assert.equal(Object.keys(settings.fusions).length, 5, 'settings.fusions: exactly five rows');
+  assert.equal(Object.keys(settings.combat.fusions).length, 5, 'settings.combat.fusions: exactly five rows');
+
+  // Exact cd/range from the plan's 数值表 — a data pin, since the cooldown
+  // wheel's live value can't run headless (the cast site is in App).
+  const CD_RANGE = {
+    '1+3': { cooldown: 6, range: 10 },
+    '3+4': { cooldown: 8, range: 9 },
+    '4+0': { cooldown: 7, range: 9 },
+    '0+2': { cooldown: 5, range: 11 },
+    '2+1': { cooldown: 7, range: 10 }
+  };
+  for (const [key, want] of Object.entries(CD_RANGE)) {
+    assert.equal(settings.fusions[key].cooldown, want.cooldown, `settings.fusions[${key}]: cooldown ${want.cooldown}`);
+    assert.equal(settings.fusions[key].range, want.range, `settings.fusions[${key}]: range ${want.range}`);
+    assert.equal(settings.fusions[key].castAnim, 'cast1', `settings.fusions[${key}]: castAnim`);
+  }
+  assert.equal(settings.fusion.budget, undefined, 'settings.fusion: budget retired — bespoke rows price their own Lv1');
+
+  // rowFor: a fusion id resolves into settings.combat.fusions[pairKey]; a
+  // plain id passes through settings.combat[element] unchanged.
+  assert.equal(rowFor(fusionId('thunder', 'fireball')), settings.combat.fusions['1+3'], 'rowFor: fusion id → combat.fusions row');
+  assert.equal(rowFor('ice'), settings.combat.ice, 'rowFor: plain id unchanged');
+
+  console.log('ok  M7 T1: pairKeyOf/rowFor/settings.fusions data');
+}
+
+/* ---- M7 T1: resonance counts a fused seat's BOTH wuxing (spec §4.8) ---- */
+{
+  // Mirrors App#_refreshResonance's own flatMap (App.js pulls in the
+  // renderer, so it isn't importable headlessly) — a fused seat already
+  // contributes both parents' wuxing there today, unchanged by this task;
+  // this pins that behaviour so a future refactor can't silently drop one
+  // side. Public API only (Modifiers#resonates), same discipline every
+  // other resonance test in this file already follows.
+  const loadout = new Loadout();
+  loadout.acquire('thunder'); // 木(1)
+  loadout.acquire('fireball'); // 火(3)
+  for (const el of ['thunder', 'fireball']) {
+    while (loadout.levelOf(el) < settings.fusion.minLevel) loadout.upgrade(el);
+  }
+  loadout.fuse('thunder', 'fireball');
+  loadout.acquire('chainbolt'); // a second, standalone 木(1) skill
+
+  const wuxingOf = settings.combat.wuxingOf;
+  const wuxingList = loadout.equippedList().flatMap((element) =>
+    isFusionId(element) ? fusionParents(element).map((p) => wuxingOf[p]) : [wuxingOf[element]]
+  );
+  assert.deepEqual(
+    wuxingList.slice().sort(),
+    [1, 1, 3],
+    "resonance: the fused seat contributes both its parents' wuxing, one apiece"
+  );
+
+  const mods = new Modifiers();
+  mods.computeResonance(wuxingList);
+  assert.ok(mods.resonates(1), 'resonance: 木 crosses the threshold — the fused parent + standalone chainbolt, both counted');
+  assert.ok(!mods.resonates(3), "resonance: 火 stays at one (only the fused seat's own share) — below threshold");
+  console.log('ok  M7 T1: resonance dual-counts a fused seat');
+}
+
+/* ---- M7 T1: an unimplemented combat kind ('marsh') skips silently ---- */
+{
+  const calls = [];
+  const fakeTargets = {
+    damage: (...args) => (calls.push(args), 0),
+    damageOnce: (...args) => (calls.push(args), 0),
+    damageRing: (...args) => (calls.push(args), 0),
+    slow: () => {}
+  };
+  const combat = new CombatSystem(fakeTargets, null);
+  const marshRow = settings.combat.fusions['2+1'];
+  assert.equal(marshRow.kind, 'marsh', "fixture: 2+1 is the marsh row this milestone doesn't implement yet");
+  const fakeAbility = {
+    element: fusionId('iceshield', 'thunder'), // pairKeyOf → '2+1'
+    phase: 'travel', u: 0.5, position: { x: 0, z: 0 },
+    origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 4
+  };
+  assert.doesNotThrow(() => combat.tick(1 / 60, [fakeAbility]), 'combat: an unimplemented kind must not throw');
+  assert.equal(calls.length, 0, "combat: an unimplemented kind ('marsh') deals no damage yet — the switch's default silently skips it");
+  console.log("ok  M7 T1: unimplemented combat kind ('marsh') no-ops safely");
 }
 
 /* ---- strings: bilingual table + t() fallback chain (spec §9) ---- */

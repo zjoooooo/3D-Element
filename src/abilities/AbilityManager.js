@@ -13,6 +13,7 @@ import { DashStrikeSkill } from './templates/DashStrikeSkill.js';
 import { ChainBoltSkill } from './templates/ChainBoltSkill.js';
 import { ELEMENTS } from '../config/settings.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
+import { isFusionId, pairKeyOf } from '../run/fusions.js';
 
 /**
  * Registry: adding an ability means adding one line here.
@@ -60,6 +61,25 @@ export const ABILITY_TYPES = {
 
   dashstrike: DashStrikeSkill,
   chainbolt: ChainBoltSkill
+};
+
+/**
+ * Fusion registry (M7 T1 skeleton): a fusion id resolves its class by
+ * pair-key ('4+0'), not by the literal fusion id string — many different
+ * specific parent pairs share one wuxing pair (`fusions.js#pairKeyOf`), and
+ * every one of them casts the same bespoke spell, so `ABILITY_TYPES`'s
+ * flat per-skill-id keying can't answer this the way it answers a plain
+ * element. Every entry is null until its own task (T2-T6) lands a class
+ * here — `cast()` below already treats a null resolve exactly like an
+ * `ABILITY_TYPES` miss (return null, no throw), so a still-unregistered
+ * pair safely no-ops.
+ */
+export const FUSION_CLASSES = {
+  '1+3': null, // 业火燎原 (T2)
+  '3+4': null, // 地心火山 (T3)
+  '4+0': null, // 锋岩星阵 (T4)
+  '0+2': null, // 霜刃洪流 (T5)
+  '2+1': null // 回春雷泽 (T6)
 };
 
 const MAX_CONCURRENT = 4;
@@ -121,7 +141,12 @@ export class AbilityManager {
    * @returns {import('./Ability.js').Ability|null}
    */
   cast(origin, direction, distance, element = this.selected) {
-    if (!ABILITY_TYPES[element]) return null;
+    // M7 T1: a fusion id resolves through FUSION_CLASSES by pair-key
+    // instead of ABILITY_TYPES by literal id (see that registry's own
+    // doc) — every entry is still null, so this is a no-throw no-op until
+    // T2-T6 land real classes.
+    const registered = isFusionId(element) ? FUSION_CLASSES[pairKeyOf(element)] : ABILITY_TYPES[element];
+    if (!registered) return null;
 
     // Retire the oldest cast rather than letting the scene grow without bound.
     // M6 T4: a permanent aura (`ability.permanent` — OrbitAuraSkill) never

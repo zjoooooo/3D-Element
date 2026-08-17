@@ -22,7 +22,7 @@ import { Arena } from '../run/Arena.js';
 import { TideAtmosphere } from '../run/TideAtmosphere.js';
 import { TideSchedule, WUXING_LABEL, BEATS } from '../run/TideSchedule.js';
 import { sequenceRefund } from '../run/sequence.js';
-import { FUSIONS, fusionKey, isFusionId, fusionParents } from '../run/fusions.js';
+import { FUSIONS, isFusionId, fusionParents, pairKeyOf } from '../run/fusions.js';
 import { canAffordCast, manaCostOf } from '../run/manaGate.js';
 import { CombatSystem } from '../run/CombatSystem.js';
 import { bpFlag } from '../run/breakpoints.js';
@@ -104,8 +104,7 @@ const RUN_KEY_SLOTS = { 0: 2, 1: 3, 2: 4, 6: 5 };
 
 /** A fusion id's display name (spec §4.7 table), resolved off its parents' wuxing. */
 function fusionName(id) {
-  const [a, b] = fusionParents(id);
-  return FUSIONS[fusionKey(settings.combat.wuxingOf[a], settings.combat.wuxingOf[b])]?.name ?? id;
+  return FUSIONS[pairKeyOf(id)]?.name ?? id;
 }
 
 /**
@@ -901,18 +900,19 @@ export class App {
     if (settings.combat[element]?.kind === 'aura') return;
     if (isFusionId(element)) {
       if ((this.cooldowns.get(element) ?? 0) > 0) return;
-      const [a, b] = fusionParents(element);
-      const prevAim = this.aim.element;
-      this.aim.setElement(settings[a].range >= settings[b].range ? a : b);
+      // M7 T1: no more parent aim.setElement borrow. The old borrow existed
+      // to resolve a range/direction through *some* element's config — but
+      // AimController#_resolve derives `direction` purely from the pointer
+      // raycast against `origin` (see its own source): it never reads
+      // `this.element` at all, only `.valid`/`.distance` do, and this needs
+      // neither. So resolving on whatever element `aim` currently happens to
+      // be armed with is already correct — nothing to swap out and restore.
+      // The fusion's own range now lives in settings.fusions, not a parent.
+      const row = settings.fusions[pairKeyOf(element)];
       this.aim._resolve();
-      const tx = this.aim.origin.x + this.aim.direction.x * this.aim.distance;
-      const tz = this.aim.origin.z + this.aim.direction.z * this.aim.distance;
+      const tx = this.aim.origin.x + this.aim.direction.x * row.range;
+      const tz = this.aim.origin.z + this.aim.direction.z * row.range;
       this._quickCastToward(element, tx, tz, false);
-      // Give the aim back: it was only borrowed to resolve the fusion's shared
-      // target point, and leaving it on the longer-range parent would corrupt
-      // the next plain quick-cast of the selected element (wrong range/shape),
-      // since only `selectAbility` otherwise keeps `aim.element` in sync.
-      this.aim.setElement(prevAim);
       return;
     }
     if (!ELEMENTS.includes(element)) return;
@@ -1004,11 +1004,15 @@ export class App {
   }
 
   /** True when casting `element` would run DashStrikeSkill's own
-   * displacement hook — directly, or as either half of a fused pair (the
-   * fusion branch of `_quickCastToward` calls `_dashDisplace` per part too,
-   * see its own comment) — i.e. the set `_dashing` needs to gate against. */
+   * displacement hook — i.e. the set `_dashing` needs to gate against.
+   * M7 T1: narrowed back to the literal id. A fused pair used to inherit
+   * this from a dashstrike parent (the old per-parent cast loop actually
+   * called `_dashDisplace` for that part); fusing now casts one bespoke
+   * ability instead, and none of the five gives the caster a teleport, even
+   * when dashstrike is one of its two parents (锋岩星阵/霜刃洪流) — the fused
+   * spell is a wholly different skill, not "dashstrike plus something". */
   _castsDash(element) {
-    return element === 'dashstrike' || (isFusionId(element) && fusionParents(element).includes('dashstrike'));
+    return element === 'dashstrike';
   }
 
   /**
@@ -1236,11 +1240,11 @@ export class App {
     // 法力消费门 (M6 T3, spec 锚2.5): run-mode only, mirrors `_cast`'s own
     // copy above. A fused cast is charged exactly once here — at the max of
     // its two parents' manaCost (manaGate.js's `manaCostOf`, dispatch-
-    // authorized: same "the slower parent sets the pace" reading the
-    // fusion's own cooldown already uses a few lines down, `Math.max(a.cooldown,
-    // b.cooldown)`, rather than summing both parents' pools). Sits before
-    // consumeQuench/the ability spawn loop/cooldown write/sequence stamp/
-    // echo arm below, so a failed gate leaves every one of them untouched.
+    // authorized: "the slower parent sets the pace", rather than summing
+    // both parents' pools — untouched by M7's bespoke-cooldown rewrite
+    // below, which only changed how the *cooldown* itself is priced).
+    // Sits before consumeQuench/the ability spawn/cooldown write/sequence
+    // stamp/echo arm below, so a failed gate leaves every one of them untouched.
     // Demo and echo (`this._echoing`, armed around the echo's own
     // `_quickCast` call in frame()) always afford; a failed autocast
     // (background seat) skips the toast — only a manual miss earns the
@@ -1257,52 +1261,39 @@ export class App {
 
     let castAnim;
     if (isFusionId(element)) {
-      const [a, b] = fusionParents(element);
-      const fusionMult =
-        settings.fusion.budget * (1 + settings.fusion.levelMult * (this.loadout.levelOf(element) - 1));
-      // 淬炼 spends once per fused cast action, not once per parent (I3): b is
-      // the generated half (spec §4.7 挂印取子系), so wuxingOf[b] is exactly
-      // fusionWux(element) — consumeQuench(b) is the fusion's own metal-
-      // identity check and its spend in one call. Stamped onto both parents.
-      // A demo never spends it: consumeQuench(b) is skipped outright rather
-      // than called and discarded.
+      // M7 T1: one bespoke ability now, not a per-parent loop — two spells
+      // became one (spec §4.7), so this spawns exactly the fusion id itself.
+      // No aura-parent skip and no dash-displace hook needed any more
+      // either: an aura half was only ever skipped here because the loop
+      // would otherwise recast it — there is no loop now. A bespoke fusion
+      // has no teleport of its own even when dashstrike is one of its two
+      // parents (`_castsDash` narrows to the literal 'dashstrike' id — see
+      // its own doc).
+      const row = settings.fusions[pairKeyOf(element)];
+      const b = fusionParents(element)[1]; // 子系 (generated half) — spec §4.7 挂印取子系
+      const fusionMult = 1 + settings.fusion.levelMult * (this.loadout.levelOf(element) - 1);
+      // 淬炼 spends once per fused cast action, keyed off the child (b) —
+      // same "one spend, not one per parent" rule the old per-parent loop
+      // already followed (I3). A demo never spends it: consumeQuench(b) is
+      // skipped outright rather than called and discarded.
       const quenched = !demo && this.runMode ? this.modifiers.consumeQuench(b) : false;
-      for (const part of [a, b]) {
-        // M6 T4: an aura half never re-casts through its fusion either — it
-        // keeps doing its permanent thing continuously; the fusion's own
-        // cast is really just the other half's, plus the combined identity/
-        // cooldown/name below.
-        if (settings.combat[part]?.kind === 'aura') continue;
-        // M6 T12 fix round: same shared-scale rule as _cast/the plain
-        // branch below — a fused dashstrike part's cast distance and its
-        // displacement must agree. Moot in practice today (fusing deletes
-        // the parent's own `_levels` entry, so `levelOf('dashstrike')`
-        // reads 0 here and the scale is always identity) but kept correct
-        // rather than silently relying on that staying true.
-        const partDist =
-          part === 'dashstrike'
-            ? scaledDashRange(this.loadout ? this.loadout.levelOf('dashstrike') : 1)
-            : this._quickCastDistance(part, rawDist);
-        const ability = this.abilities.cast(origin, direction, partDist, part);
-        if (ability) {
-          ability.autocast = autocast;
-          ability.fusionMult = fusionMult;
-          ability.quenched = quenched;
-        }
-        // M6 T6: dashstrike isn't a real FEEDS pair with anything in the
-        // launch set (T6 brief), but a fused part still goes through this
-        // exact `abilities.cast` call generically — wiring the same hook
-        // here as _cast/the plain branch below costs one line and keeps a
-        // future fusion pair from silently forgetting to move the player.
-        if (part === 'dashstrike' && !demo) this._dashDisplace(direction, partDist);
+      // Mirrors _quickCastDistance's own ZONE-shaped clamp (follow the
+      // target point up to the ability's own range) — a fused seat has no
+      // ELEMENT_META cast shape of its own for castShapeOf() to read, so
+      // that helper can't resolve it directly; every fusion mechanic (burst/
+      // aura/self-resolved alike) is cast toward a point the same way a zone
+      // ability is, so this is the one shape that fits all five.
+      const dist = Math.max(0.4, Math.min(rawDist, row.range));
+      const ability = this.abilities.cast(origin, direction, dist, element);
+      if (ability) {
+        ability.autocast = autocast;
+        ability.fusionMult = fusionMult;
+        ability.quenched = quenched;
       }
       if (!demo) {
-        this.cooldowns.set(
-          element,
-          Math.max(0, Math.max(settings[a].cooldown, settings[b].cooldown) * this.modifiers.cooldownMult())
-        );
+        this.cooldowns.set(element, Math.max(0, row.cooldown * this.modifiers.cooldownMult()));
       }
-      castAnim = settings[a].castAnim;
+      castAnim = row.castAnim;
     } else {
       const c = settings[element];
       // M6 T12 fix round: same shared-scale rule as _cast above — dashstrike's
@@ -1421,10 +1412,14 @@ export class App {
    * spawns fresh.
    *
    * A seat that fuses away stops being "seated" under its own id the instant
-   * `fuse()` runs (the seat now holds the fusion id instead) — an aura
-   * parent's permanent instance is retired right along with it; see the
-   * fusion loop's own skip in `_quickCastToward` for the other half of that
-   * choice (implementer's choice — the plan doesn't specify aura+fusion).
+   * `fuse()` runs (the seat now holds the fusion id instead) — `seated`
+   * above is built off `equippedList()`'s raw seat values, which never
+   * expands a fusion id back into its parents, so a fused-away aura parent
+   * simply isn't in that Set any more and its permanent instance retires
+   * right here on the very next call (M7 T1: verified this needs no fusion-
+   * aware code of its own — a bespoke fused cast only ever spawns the
+   * fusion id itself, never a parent element, so there is no longer a
+   * companion loop anywhere that could re-seat one).
    *
    * Call after anything that changes seats: `startRun()` (covers both a
    * fresh start and `_restart()`'s replay) and `_onUpgradeChoice()`'s
@@ -1460,8 +1455,9 @@ export class App {
    * the preallocated `_slotCd` array in place rather than building six
    * fresh objects every frame. A fused seat's cooldown lives under the
    * fusion id itself in `this.cooldowns` (the same key `_quickCastToward`
-   * writes), with `total` the slower of its two parents — same numbers the
-   * old sandbox-card fusion loop in `frame()` used to compute.
+   * writes), with `total` read off its own bespoke row (M7:
+   * `settings.fusions[pairKey].cooldown` — no longer derived from either
+   * parent, so the wheel's fill fraction matches what actually got spent).
    *
    * `lowMana` (M6 T3) reads off the exact same `canAffordCast` gate a real
    * cast would hit right now (no demo/echo — this is a readout, not a cast
@@ -1482,12 +1478,7 @@ export class App {
         return;
       }
       slot.active = true;
-      if (isFusionId(element)) {
-        const [a, b] = fusionParents(element);
-        slot.total = Math.max(settings[a].cooldown, settings[b].cooldown);
-      } else {
-        slot.total = settings[element].cooldown;
-      }
+      slot.total = isFusionId(element) ? settings.fusions[pairKeyOf(element)].cooldown : settings[element].cooldown;
       slot.remaining = this.cooldowns.get(element) ?? 0;
       slot.lowMana = !canAffordCast(element, this.playerState).ok;
     });

@@ -344,10 +344,13 @@ export const settings = {
     cycleReaction: 1.5 // 周天: reaction damage × (live as of M6 T7 — earth skills seat now)
   },
 
-  /** Sheng-pair fusion (spec §4.7; composite-cast placeholder until M6). */
+  /** Sheng-pair fusion (spec §4.7). M7 retired the v1 "both parents cast
+   * together, damage × budget" placeholder — each pair is now a bespoke
+   * skill (`settings.fusions` / `settings.combat.fusions`, keyed by wuxing
+   * pair) whose own Lv1 numbers already bake in what `budget` used to scale
+   * at cast time, so only the level-up curve and the level cap live here. */
   fusion: {
     minLevel: 4, // both parents at Lv4+ unlock the gold card
-    budget: 1.2, // each parent's damage × this when cast fused
     levelMult: 0.25, // + per fusion level past 1
     maxLevel: 3
   },
@@ -475,6 +478,38 @@ export const settings = {
     boulder: { kind: 'burst', damage: 165, radius: 2.4, stunTime: 1.6 }, // 50×1.1小圈×3.0 = 165
     quake: { kind: 'burst', self: true, damage: 320, radius: 5.0, knockback: 9 }, // 50×0.8大圈×8 = 320
     stoneskin: { kind: 'shield', amount: 55, duration: 7, reflectShare: 0.3 }, // exempt — shield, no damage/dps
+
+    /**
+     * M7 T1 skeleton: the five sheng-pair fusions' combat rows (spec §4.7
+     * table), keyed by pair-key (`fusions.js#pairKeyOf`) rather than a skill
+     * id — many different specific parent pairs share one wuxing pair, and
+     * every one of them casts the exact same bespoke spell. `CombatSystem#
+     * rowFor` resolves a fusion element through here instead of the flat
+     * per-skill rows above. Numbers copied from the plan's 数值表; fields a
+     * later task's own CombatSystem change still has to learn to read
+     * (waves/vulnAmt/vulnTime/the 'marsh' kind itself) already sit here
+     * inert — `tick()`'s switch `default`s to a no-op for a kind it doesn't
+     * know yet, so an unimplemented row never throws, just does nothing.
+     */
+    fusions: {
+      '1+3': {}, // 业火燎原 (T2, self-resolved — mirrors fireball/dashstrike/chainbolt's kind:'self')
+      '3+4': {
+        // 地心火山: one bomb's own stats; T3 repeats this 3× via `waves`
+        // (extraWave's data-table generalisation) at the given delays.
+        kind: 'burst',
+        damage: 95, radius: 2.0,
+        waves: [
+          { delay: 0.6, damageMult: 1, radiusMult: 1 },
+          { delay: 1.5, damageMult: 1, radiusMult: 1 },
+          { delay: 2.4, damageMult: 1, radiusMult: 1 }
+        ],
+        stunTime: 0.8,
+        burnDps: 30, burnTime: 4 // 熔岩池 — rides the existing burst-kind burn channel
+      },
+      '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3 }, // 锋岩星阵 (T4); band===radius degenerates damageRing to a solid disc already
+      '0+2': {}, // 霜刃洪流 (T5, self-resolved — fireball precedent)
+      '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, healInside: 6 } // 回春雷泽 (T6) — 'marsh' isn't a case in tick()'s switch yet, so this row no-ops safely until then
+    },
 
     // 相克 lookup into TideSchedule's BEATS: which wuxing index each skill casts as.
     wuxingOf: {
@@ -2393,6 +2428,28 @@ export const settings = {
     color: '#a68968', colorGlow: '#e3d3bd',
     // M6 T5: see iceshield's own copy of this comment.
     lightColor: '#e3d3bd', lightIntensity: 7, lightRadius: 6
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Fusion spells — the five sheng-pair bespoke skills (M7, spec §4.7)   */
+  /* ------------------------------------------------------------------ */
+  /**
+   * Five more "ability blocks", one per pair-key (`fusions.js#pairKeyOf`) —
+   * cast-side numbers only (cooldown/range/castAnim/colour); the mechanics
+   * live in `settings.combat.fusions` above, same split every plain element
+   * already keeps between its own top-level block and its `combat` row.
+   * `App#_quickCastToward`'s fusion branch reads `cooldown`/`range`/
+   * `castAnim` straight off here — no `manaCost` (fusion cost is
+   * max(parents), `manaGate.js` never looks here) and no `minRange` (a
+   * fusion cast always resolves zone-style, floored at a flat 0.4m — see
+   * that branch's own comment).
+   */
+  fusions: {
+    '1+3': { cooldown: 6, range: 10, castAnim: 'cast1', color: '#74d7a8', colorGlow: '#e86f4f' }, // 业火燎原
+    '3+4': { cooldown: 8, range: 9, castAnim: 'cast1', color: '#b58f5e', colorGlow: '#e86f4f' }, // 地心火山
+    '4+0': { cooldown: 7, range: 9, castAnim: 'cast1', color: '#d8b46a', colorGlow: '#f5e6c8' }, // 锋岩星阵
+    '0+2': { cooldown: 5, range: 11, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#d8b46a' }, // 霜刃洪流
+    '2+1': { cooldown: 7, range: 10, castAnim: 'cast1', color: '#6fb8e8', colorGlow: '#7ee08a' } // 回春雷泽
   },
 
   /* ------------------------------------------------------------------ */
