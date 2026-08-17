@@ -479,6 +479,40 @@ export const settings = {
     quake: { kind: 'burst', self: true, damage: 320, radius: 5.0, knockback: 9 }, // 50×0.8大圈×8 = 320
     stoneskin: { kind: 'shield', amount: 55, duration: 7, reflectShare: 0.3 }, // exempt — shield, no damage/dps
 
+    /* M8 T1: the ten second-wave rows (数值表, anchor2-checked in
+     * check-game's own M8 block). Rows whose kind/fields land in a later
+     * task sit inert until then — an unknown kind no-ops in tick()'s
+     * switch (M7 T1 precedent), an unknown field is never read. */
+    cyclonecut: { kind: 'aura', radius: 3.0, band: 0.8, dps: 80, kbMult: -1.2 }, // 磁暴: 环切 + 拽向圆心 (负拉力, T4 kbScale 语义)
+    piercelance: { kind: 'self', executeBelow: 90 }, // 破军贯穿: 类内线伤 320 + 处决线 (T4 task)
+    stormfield: { kind: 'self' }, // 雷暴领域: 类内落雷 (T4 task)
+    thornroad: { kind: 'lineTick', dps: 55, width: 1.2, slowFactor: 0.3, slowTime: 1 }, // 荆棘之路 (slow 字段 T2 生效)
+    tidalsurge: { kind: 'sweep', damage: 190, width: 2.6, knockback: 7 }, // 潮汐涌浪 (sweep kb 字段 T2 生效)
+    hailstorm: {
+      kind: 'burst', damage: 53.4, radius: 3.8, slowFactor: 0.25, slowTime: 1,
+      waves: [
+        { delay: 0, damageMult: 1, radiusMult: 0.6 },
+        { delay: 0.35, damageMult: 1, radiusMult: 0.7 },
+        { delay: 0.7, damageMult: 1, radiusMult: 0.8 },
+        { delay: 1.05, damageMult: 1, radiusMult: 0.9 },
+        { delay: 1.4, damageMult: 1, radiusMult: 1 },
+        { delay: 1.75, damageMult: 1, radiusMult: 1 }
+      ]
+    }, // 冰雹风暴: 六波弹幕 (M7 T3 waves 机器, 纯数据)
+    flamebreath: { kind: 'coneTick', dps: 200, halfAngle: 0.55, range: 5.5 }, // 烈焰喷吐 (coneTick kind T5 落地前 inert)
+    mortarrain: {
+      kind: 'burst', damage: 80, radius: 1.6,
+      waves: [
+        { delay: 0.5, damageMult: 1, radiusMult: 1 },
+        { delay: 1.0, damageMult: 1, radiusMult: 1 },
+        { delay: 1.5, damageMult: 1, radiusMult: 1 },
+        { delay: 2.0, damageMult: 1, radiusMult: 1 },
+        { delay: 2.5, damageMult: 1, radiusMult: 1 }
+      ]
+    }, // 流火雨: 五弹散布 (类挪 position, 地心火山机器, T6 task)
+    sandfield: { kind: 'aura', radius: 4.2, band: 4.2, dps: 55, kbMult: 0, slowFactor: 0.3, slowTime: 0.8 }, // 沙暴领域: 实心研磨 + 迟钝 (aura slow 字段 T3 生效)
+    stonepillar: { kind: 'burst', damage: 300, radius: 2.6, knockback: 12, stunTime: 0.5 }, // 石柱擎天: 抛飞 + 晕
+
     /**
      * M7 T1 skeleton: the five sheng-pair fusions' combat rows (spec §4.7
      * table), keyed by pair-key (`fusions.js#pairKeyOf`) rather than a skill
@@ -534,7 +568,7 @@ export const settings = {
       // exactly as shipped (bladeorbit's blade-wall feel).
       '4+0': { kind: 'aura', radius: 3.5, band: 3.5, dps: 85, vulnAmt: 0.25, vulnTime: 3, kbMult: 0 },
       '0+2': { kind: 'self' }, // 霜刃洪流 (T5, self-resolved — fireball precedent)
-      '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, healInside: 6 } // 回春雷泽 (T6): tick() refreshes the slow + banks the stand-inside heal; the bolts are ThunderMarshSkill's own
+      '2+1': { kind: 'marsh', radius: 3.5, slowFactor: 0.45, slowHold: 0.5, healInside: 6 } // 回春雷泽 (T6): tick() refreshes the slow + banks the stand-inside heal; the bolts are ThunderMarshSkill's own. slowHold (M8 T1): the refresh window, collected from T6's code literal
     },
 
     // 相克 lookup into TideSchedule's BEATS: which wuxing index each skill casts as.
@@ -545,7 +579,13 @@ export const settings = {
       chainbolt: 1, lifebloom: 1,
       frostnova: 2, iceshield: 2,
       firering: 3, sunwheel: 3,
-      rockspikes: 4, boulder: 4, quake: 4, stoneskin: 4
+      rockspikes: 4, boulder: 4, quake: 4, stoneskin: 4,
+      // M8 T1: 金金木木水水火火土土
+      cyclonecut: 0, piercelance: 0,
+      stormfield: 1, thornroad: 1,
+      tidalsurge: 2, hailstorm: 2,
+      flamebreath: 3, mortarrain: 3,
+      sandfield: 4, stonepillar: 4
     },
     matchup: { advantage: 1.25, disadvantage: 0.8 }, // spec §1 克制/被克
     debuffs: {
@@ -2457,6 +2497,74 @@ export const settings = {
   },
 
   /* ------------------------------------------------------------------ */
+  /* M8 second wave — cast-side blocks (数值表). Each block carries the   */
+  /* cast fields App/aim read plus the light trio Ability#_updateLight    */
+  /* reads unconditionally (NaN-poison guard); the task that lands each   */
+  /* class adds that template's own VFX params, the fusion precedent.     */
+  /* `life` on the timed rows is both the class's impactDuration and the  */
+  /* anchor2 resolver's dps×life fold.                                    */
+  /* ------------------------------------------------------------------ */
+  cyclonecut: {
+    range: 9, minRange: 0, cooldown: 6, manaCost: 30, castAnim: 'cast1',
+    life: 2.5, zoneRadius: 3.0,
+    color: '#d8b46a', colorGlow: '#f0e2b8',
+    lightColor: '#f0e2b8', lightIntensity: 6, lightRadius: 6
+  },
+  piercelance: {
+    range: 14, minRange: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
+    damage: 320, width: 0.8,
+    color: '#e8d089', colorGlow: '#fff4cf',
+    lightColor: '#fff4cf', lightIntensity: 7, lightRadius: 7
+  },
+  stormfield: {
+    range: 10, minRange: 0, cooldown: 9, manaCost: 30, castAnim: 'cast1',
+    life: 6, zoneRadius: 4.5, boltEvery: 0.75, boltDamage: 52,
+    color: '#7ee08a', colorGlow: '#c9f7d0',
+    lightColor: '#c9f7d0', lightIntensity: 6, lightRadius: 7
+  },
+  thornroad: {
+    range: 11, minRange: 0, cooldown: 7, manaCost: 0, castAnim: 'cast1',
+    life: 4,
+    color: '#5fd98f', colorGlow: '#9ef0b6',
+    lightColor: '#9ef0b6', lightIntensity: 5, lightRadius: 6
+  },
+  tidalsurge: {
+    range: 11, minRange: 0, speed: 16, cooldown: 5, manaCost: 0, castAnim: 'cast1',
+    color: '#6fb8e8', colorGlow: '#bfe6ff',
+    lightColor: '#bfe6ff', lightIntensity: 6, lightRadius: 6
+  },
+  hailstorm: {
+    range: 12, minRange: 0, speed: 20, cooldown: 8, manaCost: 30, castAnim: 'cast1',
+    zoneRadius: 3.8, burstLife: 2.1,
+    color: '#8ee8ff', colorGlow: '#e8fbff',
+    lightColor: '#e8fbff', lightIntensity: 7, lightRadius: 8
+  },
+  flamebreath: {
+    range: 5.5, minRange: 0, cooldown: 6, manaCost: 0, castAnim: 'cast1',
+    life: 1.2,
+    color: '#ff8a3c', colorGlow: '#ffd9a8',
+    lightColor: '#ffd9a8', lightIntensity: 7, lightRadius: 6
+  },
+  mortarrain: {
+    range: 12, minRange: 0, cooldown: 7, manaCost: 30, castAnim: 'cast1',
+    zoneRadius: 3.5, scatterRadius: 3.5,
+    color: '#ffa23c', colorGlow: '#ffe3b8',
+    lightColor: '#ffe3b8', lightIntensity: 7, lightRadius: 7
+  },
+  sandfield: {
+    range: 9, minRange: 0, cooldown: 9, manaCost: 0, castAnim: 'cast1',
+    life: 4, zoneRadius: 4.2,
+    color: '#c9a06a', colorGlow: '#e8d4ad',
+    lightColor: '#e8d4ad', lightIntensity: 5, lightRadius: 7
+  },
+  stonepillar: {
+    range: 10, minRange: 0, speed: 20, cooldown: 7, manaCost: 30, castAnim: 'cast1',
+    zoneRadius: 2.6, burstLife: 0.8,
+    color: '#b8875a', colorGlow: '#e3cfa8',
+    lightColor: '#e3cfa8', lightIntensity: 7, lightRadius: 7
+  },
+
+  /* ------------------------------------------------------------------ */
   /* Fusion spells — the five sheng-pair bespoke skills (M7, spec §4.7)   */
   /* ------------------------------------------------------------------ */
   /**
@@ -2718,7 +2826,12 @@ export const ELEMENTS = [
   // so every id below stays inert until its class lands in T4-6.
   'swordrain', 'bladeorbit', 'dashstrike', 'chainbolt', 'lifebloom',
   'frostnova', 'iceshield', 'firering', 'sunwheel',
-  'rockspikes', 'boulder', 'quake', 'stoneskin'
+  'rockspikes', 'boulder', 'quake', 'stoneskin',
+  // M8 T1: the ten second-wave skills (spec §12 v2 batch one, §4.3 matrix),
+  // 金金木木水水火火土土. Same rule as the M6 batch: data only — a skill
+  // stays inert until its class registers in AbilityManager (T2-T6).
+  'cyclonecut', 'piercelance', 'stormfield', 'thornroad', 'tidalsurge',
+  'hailstorm', 'flamebreath', 'mortarrain', 'sandfield', 'stonepillar'
 ];
 
 /**
@@ -2768,7 +2881,19 @@ export const ELEMENT_META = {
   rockspikes: { label: 'Stone Spikes', accent: '#b8875a', hint: 'Stone Spikes' },
   boulder: { label: 'Boulder Fall', accent: '#9c6b42', hint: 'Boulder Fall', cast: CastShape.ZONE },
   quake: { label: 'Quake', accent: '#8a7355', hint: 'Quake', cast: CastShape.SELF },
-  stoneskin: { label: 'Stone Skin', accent: '#a68968', hint: 'Stone Skin', cast: CastShape.SELF }
+  stoneskin: { label: 'Stone Skin', accent: '#a68968', hint: 'Stone Skin', cast: CastShape.SELF },
+
+  // --- M8 T1: the second wave (labels are the roster's EN convention) ---
+  cyclonecut: { label: 'Magnet Storm', accent: '#d8b46a', hint: 'Magnet Storm', cast: CastShape.ZONE },
+  piercelance: { label: 'Army-Breaker Lance', accent: '#e8d089', hint: 'Army-Breaker Lance' },
+  stormfield: { label: 'Storm Field', accent: '#7ee08a', hint: 'Storm Field', cast: CastShape.ZONE },
+  thornroad: { label: 'Thorn Road', accent: '#5fd98f', hint: 'Thorn Road' },
+  tidalsurge: { label: 'Tidal Surge', accent: '#6fb8e8', hint: 'Tidal Surge' },
+  hailstorm: { label: 'Hailstorm', accent: '#8ee8ff', hint: 'Hailstorm', cast: CastShape.ZONE },
+  flamebreath: { label: 'Flame Breath', accent: '#ff8a3c', hint: 'Flame Breath' },
+  mortarrain: { label: 'Falling Fire', accent: '#ffa23c', hint: 'Falling Fire', cast: CastShape.ZONE },
+  sandfield: { label: 'Sandstorm Field', accent: '#c9a06a', hint: 'Sandstorm Field', cast: CastShape.ZONE },
+  stonepillar: { label: 'Pillar of Heaven', accent: '#b8875a', hint: 'Pillar of Heaven', cast: CastShape.ZONE }
 };
 
 /** How the given ability is aimed. Line unless its metadata says otherwise. */

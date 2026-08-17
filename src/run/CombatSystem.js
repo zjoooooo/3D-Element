@@ -439,7 +439,9 @@ export class CombatSystem {
           if (ability.phase !== 'travel' && ability.phase !== 'impact') break;
           const radius = c.radius * bpScale(ability.element, 'radius', level);
           const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
-          if (slowFactor) this.targets.slow(ability.position, radius, slowFactor, 0.5);
+          // M8 T1: the refresh hold reads the row (`slowHold`) — T6 shipped
+          // it as a code literal, collected into the tuning ledger now.
+          if (slowFactor) this.targets.slow(ability.position, radius, slowFactor, c.slowHold ?? 0.5);
           if (playerPos && c.healInside) {
             const dx = playerPos.x - ability.position.x;
             const dz = playerPos.z - ability.position.z;

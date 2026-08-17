@@ -243,9 +243,13 @@ export class ThunderMarshSkill extends Ability {
     }
     if (candidates === 0) return; // 无敌可击则该道空过
 
-    // Deterministic seed: the running bolt counter cycles the candidates
-    // (class doc — ctx.rng still unwired, forkPlacement's own situation).
-    let pick = this._boltSeq++ % candidates;
+    // Seed pick (M8 T1): the run's seeded rng when App wires it
+    // (`ctx.rng` — sandbox never does), else the deterministic cycle the
+    // M7 tests pinned. The fallback still advances `_boltSeq` so a
+    // rng-less cast keeps its exact M7 behaviour.
+    let pick = this.ctx.rng
+      ? Math.floor(this.ctx.rng() * candidates)
+      : this._boltSeq++ % candidates;
     let from = -1;
     for (let i = 0; i < en.count; i++) {
       const reach = row.radius + settings.enemies[BEHAVIORS[en.behavior[i]]].radius;

@@ -105,7 +105,10 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     'rockspikes', 'boulder', 'quake', 'stoneskin'
   ];
 
-  assert.equal(ELEMENTS.length, 20, 'ELEMENTS: seven original + the thirteen M6 T2 launch skills');
+  // M8 T1 revision: the exact roster count moved to the M8 block (single
+  // source — it grows once per wave); this block keeps owning "the
+  // thirteen are all present with full data", which its loop below does.
+  assert.ok(ELEMENTS.length >= 20, 'ELEMENTS: at least the seven originals + thirteen M6 skills');
   for (const element of NEW_ELEMENTS) {
     assert.ok(ELEMENTS.includes(element), `ELEMENTS: missing ${element}`);
     assert.ok(ELEMENT_META[element]?.label, `ELEMENT_META: ${element} needs a label`);
@@ -144,8 +147,11 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     'bladeorbit', 'firering', 'sunwheel', // aura — no cooldown, budgeted directly (BASE_DPS×0.7)
     'iceshield', 'stoneskin' // shield — absorption, not damage/dps
   ]);
-  const CHECKED = ELEMENTS.filter((e) => !EXEMPT.has(e));
-  assert.equal(CHECKED.length, 6, 'anchor2: expected six formula-checkable new skills');
+  // M8 T1 revision: scope this band to the M6 thirteen — each wave owns its
+  // own band block with its own shape table (the M8 block below covers the
+  // second wave), so this derivation can't silently swallow future ids.
+  const CHECKED = NEW_ELEMENTS.filter((e) => !EXEMPT.has(e));
+  assert.equal(CHECKED.length, 6, 'anchor2: expected six formula-checkable M6 skills');
 
   // spec's shape coefficients (窄线1.3/宽线1.0/小圈1.1/大圈0.8/自身光环0.7/弹道1.2).
   // A lookup, not a numeric threshold classifier — shape is a design category a
@@ -194,6 +200,124 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   );
 
   console.log('ok  M6 T2: thirteen launch skills (elements/mana/anchor2)');
+}
+
+/* ---- M8 T1: ten second-wave skills — roster data, anchor2 band, debts ---- */
+{
+  const WAVE2 = [
+    'cyclonecut', 'piercelance', // 金 磁暴 / 破军贯穿
+    'stormfield', 'thornroad', // 木 雷暴领域 / 荆棘之路
+    'tidalsurge', 'hailstorm', // 水 潮汐涌浪 / 冰雹风暴
+    'flamebreath', 'mortarrain', // 火 烈焰喷吐 / 流火雨
+    'sandfield', 'stonepillar' // 土 沙暴领域 / 石柱擎天
+  ];
+  assert.equal(ELEMENTS.length, 30, 'ELEMENTS: twenty v1 + the ten M8 second-wave skills');
+  const WANT_WUX = { cyclonecut: 0, piercelance: 0, stormfield: 1, thornroad: 1, tidalsurge: 2, hailstorm: 2, flamebreath: 3, mortarrain: 3, sandfield: 4, stonepillar: 4 };
+  for (const el of WAVE2) {
+    assert.ok(ELEMENTS.includes(el), `ELEMENTS: missing ${el}`);
+    assert.ok(ELEMENT_META[el]?.label, `ELEMENT_META: ${el} needs a label`);
+    assert.ok(settings[el], `settings: no block for ${el}`);
+    assert.ok(settings.combat[el], `combat: no row for ${el}`);
+    assert.equal(settings.combat.wuxingOf[el], WANT_WUX[el], `wuxingOf: ${el}`);
+    for (const key of ['lightColor', 'lightIntensity', 'lightRadius']) {
+      assert.ok(settings[el][key] !== undefined, `settings.${el}: ${key} (NaN-poison guard)`);
+    }
+  }
+
+  // Mana tiers, table-driven for THIS batch (the M6 block's own five-only
+  // assert is scoped to its thirteen and stays untouched).
+  const MANA30 = new Set(['cyclonecut', 'piercelance', 'stormfield', 'hailstorm', 'mortarrain', 'stonepillar']);
+  for (const el of WAVE2) {
+    assert.equal(settings[el].manaCost, MANA30.has(el) ? 30 : 0, `manaCost tier: ${el}`);
+  }
+
+  // 锚2 band for the batch — resolver extended two ways the M6 copy never
+  // needed: a `waves` row detonates its damage once per wave (sum the
+  // damageMults), and a TIMED dps row (settings[el].life present) spreads
+  // dps×life over its cooldown instead of channelling forever.
+  const SHAPE2 = {
+    cyclonecut: 1.1, // 小圈 (环带 3.0)
+    thornroad: 1.0, // 持续线, width 1.2 — 宽线档 (裁: 窄线1.3 属 0.8m 级贯穿线)
+    tidalsurge: 1.0, // 宽线 2.6
+    hailstorm: 0.8, // 大圈 3.8
+    flamebreath: 1.1, // 扇形 — 本里程碑新裁的系数 (小圈级, 待复核)
+    mortarrain: 1.2, // 弹道弹幕
+    sandfield: 0.8, // 大圈 4.2
+    stonepillar: 1.1 // 小圈 2.6
+  };
+  // piercelance / stormfield are kind:'self' (resolve their own hits —
+  // chainbolt precedent, EXEMPT by name here); their budgets are pinned by
+  // their own lifecycle tests in T4 (320/8≈40 vs 1.3-band, 52×8/9≈46 vs 0.8-band).
+  const BASE = settings.combat.ice.damage / settings.ice.cooldown;
+  function dps2(el) {
+    const row = settings.combat[el];
+    if (row.dps !== undefined) {
+      const life = settings[el].life;
+      return life ? (row.dps * life) / settings[el].cooldown : row.dps;
+    }
+    const waveSum = (row.waves ?? [{ damageMult: 1 }]).reduce((s, w) => s + w.damageMult, 0);
+    return (row.damage * waveSum) / settings[el].cooldown;
+  }
+  for (const [el, coef] of Object.entries(SHAPE2)) {
+    const actual = dps2(el);
+    const lo = BASE * coef * 0.6, hi = BASE * coef * 1.4;
+    assert.ok(actual >= lo && actual <= hi, `anchor2 M8: ${el} dps ${actual.toFixed(1)} outside [${lo.toFixed(1)}, ${hi.toFixed(1)}]`);
+  }
+
+  // 清账: the marsh slow-refresh hold moves from a code literal into the row.
+  assert.equal(settings.combat.fusions['2+1'].slowHold, 0.5, "marsh: the 0.5s refresh hold lives in the row now (M7 T6's literal, collected)");
+  {
+    const slows = [];
+    const combat = new CombatSystem({ damage: () => 0, damageOnce: () => 0, damageRing: () => 0, slow: (p, r, f, d) => slows.push(d) });
+    const marsh = {
+      element: fusionId('iceshield', 'thunder'), phase: 'impact', impactTime: 0.5, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 9, u: 1,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [marsh]);
+    assert.equal(slows[0], 0.5, 'marsh: slow hold reads the row value');
+    const saved = settings.combat.fusions['2+1'].slowHold;
+    settings.combat.fusions['2+1'].slowHold = 0.7;
+    combat.tick(1 / 60, [marsh]);
+    assert.equal(slows[1], 0.7, 'marsh: dragging the row value retunes the hold live');
+    settings.combat.fusions['2+1'].slowHold = saved;
+  }
+
+  // 清账: ThunderMarsh's bolt seed takes ctx.rng when present (App wires the
+  // run's seeded rng in T1), keeps the deterministic cycle as fallback.
+  {
+    const mk = (rng) => {
+      const en = new EnemySystem(createRng(61));
+      en.spawnAt(8.4, 0, 0, 1);
+      en.spawnAt(9.6, 0.4, 0, 1);
+      en.spawnAt(10.4, -0.6, 0, 1);
+      for (let i = 0; i < en.count; i++) en.hp[i] = 5000;
+      const calls = [];
+      const ability = new ThunderMarshSkill({
+        targets: { damage: (p, r, amt) => (calls.push({ x: p.x, amt }), 0) },
+        enemies: en,
+        stats: { book: () => {} },
+        lights: { acquire: () => null, release: () => {}, set: () => {} },
+        particles: { get: () => ({ uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } }, setGradient() {}, emit() {} }) },
+        mods: null,
+        rng
+      }, fusionId('iceshield', 'thunder'));
+      ability.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 9);
+      ability.autocast = false;
+      ability.fusionMult = 1;
+      ability.quenched = false;
+      for (let i = 0; i < 150; i++) ability.update(1 / 60); // two bolts
+      ability.destroy();
+      // first strike of each bolt = every boltHits-th call
+      return [calls[0]?.x, calls[settings.fusions['2+1'].boltHits]?.x];
+    };
+    const constant = mk(() => 0); // rng pinned to 0 → always the first in-pool candidate
+    assert.ok(Math.abs(constant[0] - constant[1]) < 1e-6, 'marsh rng: a constant rng seeds every bolt on the same body');
+    const cycling = mk(undefined); // no rng → the deterministic _boltSeq cycle
+    assert.ok(Math.abs(cycling[0] - cycling[1]) > 1e-6, 'marsh rng: the no-rng fallback still cycles candidates (M7 behaviour intact)');
+  }
+
+  console.log('ok  M8 T1: second-wave roster (data/mana tiers/anchor2/slowHold/rng seed)');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

@@ -324,6 +324,11 @@ export class App {
       // that class's own doc) — sandbox-absent there is likewise correct
       // (nothing was ever opened to release).
       this.abilities.ctx.enemies = this.enemySystem;
+      // M8 T1 (清账): the run's seeded rng, for classes that roll placement
+      // or targeting (forkPlacement's rng branch, the marsh's bolt seed).
+      // Sandbox ctx never carries it — those classes keep their documented
+      // deterministic fallbacks there.
+      this.abilities.ctx.rng = this.runRng;
       this.targets.register(this.enemySystem);
       // One schedule per page load, seeded off the same run rng — but
       // RunManager.start() reshuffles it every call, so a restart still deals
