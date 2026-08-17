@@ -1,0 +1,27 @@
+# 四件套 CI:游戏逻辑断言 / 角色剪辑装载 / 难度模拟(报数用,不设带闸)/ 发布构建。
+# 全部纯 node 无头——浏览器验证仍属各任务的人工/会话职责(CLAUDE.md 流程)。
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 游戏逻辑断言
+        run: npm run check:game
+      - name: 角色与剪辑装载
+        run: npm run check
+      - name: 难度模拟(带数报告)
+        run: npm run sim
+      - name: 发布构建
+        run: npm run build
