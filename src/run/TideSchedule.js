@@ -36,13 +36,20 @@ export class TideSchedule {
   /** Which tide `elapsed` seconds sits in. Returns a reused scratch object. */
   tideAt(elapsed) {
     const len = settings.tides.length;
-    const index = Math.min(this.order.length - 1, (elapsed / len) | 0);
+    // M9 T3: past the last scheduled front the order WRAPS rather than
+    // clamping. Inside a scheduled run this changes nothing — the five
+    // fronts exactly cover `run.duration`, so the index never reaches the
+    // end — but an endless run would otherwise sit on one element forever,
+    // with `timeLeft` pinned at zero and the banner frozen.
+    const raw = (elapsed / len) | 0;
+    const cycles = Math.floor(raw / this.order.length);
+    const index = raw - cycles * this.order.length;
     const out = this._out;
     out.index = index;
     out.element = this.order[index];
-    out.progress = Math.min(1, (elapsed - index * len) / len);
-    out.timeLeft = Math.max(0, (index + 1) * len - elapsed);
-    out.nextElement = this.order[Math.min(index + 1, this.order.length - 1)];
+    out.progress = Math.min(1, (elapsed - raw * len) / len);
+    out.timeLeft = Math.max(0, (raw + 1) * len - elapsed);
+    out.nextElement = this.order[(index + 1) % this.order.length];
     return out;
   }
 

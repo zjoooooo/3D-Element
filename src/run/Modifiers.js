@@ -24,6 +24,11 @@ export class Modifiers {
 
   reset() {
     this._damage = Object.create(null); // element -> added multiplier
+    /** 满级异化 (M9 T2): element -> Set of mutation ids taken on it. Every
+     * query below folds these on top of the global passives rather than
+     * replacing them, so a build's broad choices and its per-skill ones
+     * compose the way a player would expect. */
+    this._mutations = new Map();
     this._passives = Object.create(null); // id -> level
     this._resonance = [0, 0, 0, 0, 0]; // wuxing index -> active count
     this._quench = false; // armed until the next metal cast spends it
@@ -45,7 +50,45 @@ export class Modifiers {
   }
 
   damageMult(element) {
-    return 1 + (this._damage[element] ?? 0);
+    return (1 + (this._damage[element] ?? 0)) * this._mutationMult(element, 'damage');
+  }
+
+  /* --- 满级异化 (M9 T2) --- */
+
+  /** The product of every taken mutation's `key` multiplier, or 1. */
+  _mutationMult(element, key) {
+    const taken = this._mutations.get(element);
+    if (!taken) return 1;
+    let mult = 1;
+    for (const id of taken) {
+      const value = settings.upgrades.mutations[id]?.[key];
+      if (value !== undefined) mult *= value;
+    }
+    return mult;
+  }
+
+  hasMutation(element, id) {
+    return this._mutations.get(element)?.has(id) ?? false;
+  }
+
+  /** Which mutations this skill carries — array so callers can count/list. */
+  mutationsOn(element) {
+    return [...(this._mutations.get(element) ?? [])];
+  }
+
+  /** Room for another? The cap is per skill, not per build. */
+  canMutate(element) {
+    return this.mutationsOn(element).length < settings.upgrades.mutationMax;
+  }
+
+  /** Take one. Idempotent, and silently refuses past the cap — the draft
+   * already gates on `canMutate`, so this is the belt to that's braces. */
+  takeMutation(element, id) {
+    let taken = this._mutations.get(element);
+    if (!taken) { taken = new Set(); this._mutations.set(element, taken); }
+    if (taken.has(id)) return;
+    if (taken.size >= settings.upgrades.mutationMax) return;
+    taken.add(id);
   }
 
   moveSpeedMult() {
@@ -60,15 +103,27 @@ export class Modifiers {
     return 1 + settings.upgrades.scavengerPerLevel * this.passiveLevel('scavenger');
   }
 
-  cooldownMult() {
-    return Math.max(
+  /** @param {string} [element] M9 T2: a skill's own cooldown, once
+   * mutations exist. Called with nothing it is the build-wide passive alone,
+   * which is what every pre-M9 call site meant and still gets. */
+  cooldownMult(element = null) {
+    const global = Math.max(
       settings.upgrades.cooldownFloor,
       Math.pow(settings.upgrades.focusPerLevel, this.passiveLevel('focus'))
     );
+    return element ? global * this._mutationMult(element, 'cooldown') : global;
   }
 
-  echoChance() {
-    return settings.upgrades.echoPerLevel * this.passiveLevel('echo');
+  /** @param {string} [element] M9 T2: same shape as cooldownMult above —
+   * the 回响 mutation ADDS its chance to the global passive's. */
+  echoChance(element = null) {
+    const global = settings.upgrades.echoPerLevel * this.passiveLevel('echo');
+    if (!element) return global;
+    const taken = this._mutations.get(element);
+    if (!taken) return global;
+    let extra = 0;
+    for (const id of taken) extra += settings.upgrades.mutations[id]?.echo ?? 0;
+    return global + extra;
   }
 
   /** Recount actives per wuxing (spec §4.8). App calls after start/acquire/fuse;

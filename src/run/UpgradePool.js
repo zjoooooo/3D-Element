@@ -28,7 +28,26 @@ export class UpgradePool {
     const candidates = [];
 
     for (const element of this.loadout.equippedList()) {
-      if (this.loadout.isMaxed(element)) continue;
+      // 满级异化 (M9 T2): a maxed skill has no level left to offer, so its
+      // seat offers mutations instead — until it has taken its fill, at
+      // which point the seat genuinely goes quiet.
+      if (this.loadout.isMaxed(element)) {
+        if (!this.modifiers.canMutate?.(element)) continue;
+        for (const [id, m] of Object.entries(settings.upgrades.mutations)) {
+          if (this.modifiers.hasMutation(element, id)) continue;
+          candidates.push({
+            weight: w.mutation,
+            card: {
+              kind: 'mutation',
+              element,
+              mutation: id,
+              title: `异化 · ${m.name}`,
+              body: t(`mut.${id}`)
+            }
+          });
+        }
+        continue;
+      }
       const nextLevel = this.loadout.levelOf(element) + 1;
       // M6 T12: Lv3/Lv5 are 质变 breakpoints, not just another +25% — append
       // that tier's one-line description (strings `bp.<element>.lv3`/`.lv5`,
@@ -138,7 +157,7 @@ export class UpgradePool {
     // kill, in a new shape: something joins the pool and the draft's shape
     // changes with nobody editing a number. A kind belongs here or it does
     // not draw.
-    const WEIGHTS = { upgrade: w.upgrade, new: w.newActive, passive: w.passive };
+    const WEIGHTS = { upgrade: w.upgrade, new: w.newActive, passive: w.passive, mutation: w.mutation };
     const weightOf = (kind) => {
       const weight = WEIGHTS[kind];
       if (weight === undefined) {

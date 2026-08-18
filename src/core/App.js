@@ -1174,7 +1174,7 @@ export class App {
     // M6 T12: see _maybeCastTwice's own doc — sandbox-safe (this.loadout is
     // undefined there, reading as a constant Lv1/never armed).
     this._maybeCastTwice(element, ability, origin, direction, castDistance);
-    const cdMult = this.runMode ? this.modifiers.cooldownMult() : 1;
+    const cdMult = this.runMode ? this.modifiers.cooldownMult(element) : 1;
     this.cooldowns.set(element, Math.max(0, settings[element].cooldown * cdMult));
 
     if (this.runMode) {
@@ -1183,7 +1183,7 @@ export class App {
     }
 
     // 施法回响: a run-mode cast has a chance to fire itself once more.
-    if (this.runMode && !this._echoing && this.runRng() < this.modifiers.echoChance()) {
+    if (this.runMode && !this._echoing && this.runRng() < this.modifiers.echoChance(element)) {
       if (this._echoAt) {
         /* an echo is already queued — a second proc inside the snapback
            window would overwrite and eat the first; drop this one instead */
@@ -1320,7 +1320,7 @@ export class App {
         ability.quenched = quenched;
       }
       if (!demo) {
-        this.cooldowns.set(element, Math.max(0, row.cooldown * this.modifiers.cooldownMult()));
+        this.cooldowns.set(element, Math.max(0, row.cooldown * this.modifiers.cooldownMult(element)));
       }
       castAnim = row.castAnim;
     } else {
@@ -1347,7 +1347,7 @@ export class App {
       // always Lv1, so bpFlag never arms — left unconditional for the same
       // reason autocast/fusionMult/quenched above are always written).
       this._maybeCastTwice(element, ability, origin, direction, dist);
-      if (!demo) this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult()));
+      if (!demo) this.cooldowns.set(element, Math.max(0, c.cooldown * this.modifiers.cooldownMult(element)));
       castAnim = c.castAnim;
     }
 
@@ -1362,7 +1362,7 @@ export class App {
     // 施法回响 applies here exactly as it does to a manual cast (spec: any
     // cast can proc it); see `_cast`'s own copy of this same roll. A demo
     // cast must never arm a real echo — its echo proc roll is gated by !demo.
-    if (!demo && !this._echoing && this.runRng() < this.modifiers.echoChance() && !this._echoAt) {
+    if (!demo && !this._echoing && this.runRng() < this.modifiers.echoChance(element) && !this._echoAt) {
       this._echoAt = { element, t: 0.15 };
     }
 
@@ -1638,6 +1638,11 @@ export class App {
       this._refreshResonance();
       this._syncBadges();
       this._syncAuras(); // M6 T4: a fused-away aura parent stops being seated
+    } else if (card.kind === 'mutation') {
+      // 满级异化 (M9 T2): a maxed skill's own permanent twist. Nothing else
+      // to sync — every effect rides a multiplier the cast sites already
+      // read (damage/cooldown/echo), per skill.
+      this.modifiers.takeMutation(card.element, card.mutation);
     } else if (card.kind === 'passive') {
       this.modifiers.bumpPassive(card.passive);
       if (card.passive === 'vitality') {

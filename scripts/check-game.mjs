@@ -1352,8 +1352,8 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   // it is testing, so it can never fail on a weight edit (review catch).
   assert.deepEqual(
     settings.upgrades.passiveWeights,
-    { upgrade: 3, newActive: 2, passive: 1 },
-    'draft: the shipped category weights are 3 : 2 : 1'
+    { upgrade: 3, newActive: 2, passive: 1, mutation: 3 },
+    'draft: the shipped category weights, every card kind declared (M9 T2 added mutation at the upgrade tier — a maxed seat should feel like an upgrade seat)'
   );
 
   // The weights mean what they say, at the category level: 3 : 2 : 1.
@@ -1430,8 +1430,10 @@ import { DecalType } from '../src/effects/GroundDecals.js';
 
   // An unknown card kind must be refused outright, not handed a default
   // weight — a new kind joining the pool in silence is the very failure this
-  // task removes (review catch; T2 adds one, and this is what makes it
-  // declare itself).
+  // task removes (review catch). M9 T2 walked straight into this on its
+  // first run, which is exactly what it is for: 'mutation' had to declare a
+  // weight before it could deal a single card. The probe below uses an id
+  // that is still undeclared today.
   {
     const loadout = new Loadout();
     loadout.acquire('ice');
@@ -1440,7 +1442,7 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     assert.throws(
       () => {
         const spy = new UpgradePool(createRng(4), loadout, new Modifiers());
-        spy._takeByCategory([{ weight: 1, card: { kind: 'mutation', element: 'ice' } }]);
+        spy._takeByCategory([{ weight: 1, card: { kind: 'relic', element: 'ice' } }]);
       },
       /no category weight/,
       'draft: a card kind with no declared weight throws instead of borrowing one'
@@ -1469,6 +1471,224 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M9 T1: draft draws by category (roster-independent, weights honoured, renormalising)');
+}
+
+
+/* ---- M9 T2: 满级异化 — somewhere for a maxed skill to go ---- */
+{
+  const M = settings.upgrades.mutations;
+  assert.ok(M && Object.keys(M).length >= 3, 'fixture: a mutation table exists');
+  assert.equal(settings.upgrades.mutationMax, 2, 'fixture: two mutations per skill');
+  assert.equal(
+    typeof settings.upgrades.passiveWeights.mutation,
+    'number',
+    'draft: the mutation kind declares its own category weight (T1 throws otherwise)'
+  );
+  // Every entry must be expressible through the layers that already exist —
+  // damage, cooldown and the recast roll. A field naming anything else would
+  // be a card that silently does nothing for whichever skills never read it.
+  for (const [id, m] of Object.entries(M)) {
+    for (const key of Object.keys(m)) {
+      assert.ok(
+        ['name', 'damage', 'cooldown', 'echo'].includes(key),
+        `mutation ${id}: '${key}' is not one of the layers every skill already reads`
+      );
+    }
+  }
+
+  // --- Modifiers: the layer itself ---
+  {
+    const mods = new Modifiers();
+    assert.equal(mods.damageMult('ice'), 1, 'mutation: no mutation, no damage change');
+    assert.equal(mods.cooldownMult('ice'), mods.cooldownMult(), 'mutation: per-skill cooldown defaults to the global one');
+    assert.equal(mods.echoChance('ice'), mods.echoChance(), 'mutation: per-skill echo defaults to the global one');
+    assert.equal(mods.mutationsOn('ice').length, 0, 'mutation: a fresh build has none');
+
+    mods.takeMutation('ice', 'heavy');
+    assert.ok(mods.hasMutation('ice', 'heavy'), 'mutation: taking one records it');
+    assert.ok(
+      Math.abs(mods.damageMult('ice') - M.heavy.damage) < 1e-9,
+      `mutation: heavy multiplies that skill's damage (got ${mods.damageMult('ice')})`
+    );
+    assert.equal(mods.damageMult('meteor'), 1, 'mutation: …and only that skill');
+
+    mods.takeMutation('ice', 'quicken');
+    assert.ok(
+      Math.abs(mods.cooldownMult('ice') - M.quicken.cooldown) < 1e-9,
+      `mutation: quicken shortens that skill's cooldown (got ${mods.cooldownMult('ice')})`
+    );
+    assert.equal(mods.cooldownMult('meteor'), 1, 'mutation: …and only that skill');
+
+    // The cap, and no double-taking.
+    assert.equal(mods.mutationsOn('ice').length, 2, 'mutation: two taken');
+    assert.equal(mods.canMutate('ice'), false, 'mutation: the cap is reached');
+    assert.equal(mods.canMutate('meteor'), true, 'mutation: another skill still can');
+    mods.takeMutation('ice', 'heavy');
+    assert.equal(mods.mutationsOn('ice').length, 2, 'mutation: taking the same one twice changes nothing');
+
+    // The global passives still compose with the per-skill layer.
+    const both = new Modifiers();
+    both.bumpPassive('focus');
+    const globalCd = both.cooldownMult();
+    both.takeMutation('ice', 'quicken');
+    assert.ok(
+      Math.abs(both.cooldownMult('ice') - globalCd * M.quicken.cooldown) < 1e-9,
+      'mutation: a per-skill cooldown mutation multiplies onto the global passive, it does not replace it'
+    );
+    assert.ok(Math.abs(both.cooldownMult('meteor') - globalCd) < 1e-9, 'mutation: an unmutated skill keeps the global passive alone');
+  }
+
+  // --- the trade-off entry really trades ---
+  {
+    assert.ok(M.overload.damage > 1 && M.overload.cooldown > 1, 'fixture: overload buys damage with cooldown');
+    const mods = new Modifiers();
+    mods.takeMutation('ice', 'overload');
+    assert.ok(mods.damageMult('ice') > 1, 'mutation: overload raises damage');
+    assert.ok(mods.cooldownMult('ice') > 1, 'mutation: …and lengthens the cooldown');
+  }
+
+  // --- CombatSystem reads the per-skill damage layer (it already did) ---
+  {
+    const mods = new Modifiers();
+    mods.takeMutation('snare', 'heavy');
+    const hits = [];
+    const combat = new CombatSystem(
+      { damage: (p, r, amt) => (hits.push(amt), 1), damageOnce: () => 1, damageRing: () => 1, slow: () => {}, damageCone: () => 0 },
+      mods
+    );
+    const snare = {
+      element: 'snare', phase: 'impact', impactTime: 0.2, fadeTime: 0,
+      position: { x: 3, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 }, length: 9, u: 1,
+      autocast: false, quenched: false, fusionMult: 1
+    };
+    combat.tick(1 / 60, [snare]);
+    const plain = new CombatSystem(
+      { damage: (p, r, amt) => (hits.push(amt), 1), damageOnce: () => 1, damageRing: () => 1, slow: () => {}, damageCone: () => 0 },
+      new Modifiers()
+    );
+    plain.tick(1 / 60, [snare]);
+    assert.ok(
+      Math.abs(hits[0] / hits[1] - M.heavy.damage) < 1e-6,
+      `mutation: a mutated skill really hits harder through CombatSystem (ratio ${(hits[0] / hits[1]).toFixed(3)})`
+    );
+  }
+
+  // --- the draft offers it only for a maxed skill, and respects the cap ---
+  {
+    const loadout = new Loadout();
+    const mods = new Modifiers();
+    loadout.acquire('ice');
+    const pool = new UpgradePool(createRng(11), loadout, mods);
+
+    let sawMutation = false;
+    for (let t = 0; t < 60; t++) {
+      const p = new UpgradePool(createRng(t + 1), loadout, mods);
+      if ((p.draw(6, 6) ?? []).some((c) => c.kind === 'mutation')) sawMutation = true;
+    }
+    assert.ok(!sawMutation, 'draft: an un-maxed skill is never offered a mutation');
+
+    while (!loadout.isMaxed('ice')) loadout.upgrade('ice');
+    let mutations = 0, upgrades = 0;
+    for (let t = 0; t < 200; t++) {
+      const p = new UpgradePool(createRng(t + 400), loadout, mods);
+      for (const c of p.draw(6, 6) ?? []) {
+        if (c.kind === 'mutation') { mutations++; assert.equal(c.element, 'ice', 'draft: the mutation card names its skill'); }
+        if (c.kind === 'upgrade' && c.element === 'ice') upgrades++;
+      }
+    }
+    assert.ok(mutations > 0, 'draft: a maxed skill is offered mutations instead');
+    assert.equal(upgrades, 0, 'draft: …and no longer offered a level it cannot take');
+    assert.ok(pool, 'fixture');
+
+    // Cap reached → the seat goes quiet again.
+    for (const id of Object.keys(M).slice(0, settings.upgrades.mutationMax)) mods.takeMutation('ice', id);
+    let afterCap = 0;
+    for (let t = 0; t < 120; t++) {
+      const p = new UpgradePool(createRng(t + 900), loadout, mods);
+      for (const c of p.draw(6, 6) ?? []) if (c.kind === 'mutation') afterCap++;
+    }
+    assert.equal(afterCap, 0, 'draft: a fully mutated skill stops offering more');
+  }
+
+  // --- bilingual strings for every entry ---
+  for (const id of Object.keys(M)) {
+    for (const lang of ['zh', 'en']) {
+      assert.ok(STRINGS[lang][`mut.${id}`], `strings: mut.${id} exists in ${lang}`);
+    }
+    assert.notEqual(STRINGS.zh[`mut.${id}`], STRINGS.en[`mut.${id}`], `strings: mut.${id} actually differs by language`);
+  }
+
+  console.log('ok  M9 T2: max-level mutations (layer, cap, draft gating, bilingual)');
+}
+
+
+/* ---- M9 T3: 无尽续玩 — a won run can keep going ---- */
+{
+  const D = settings.run.duration;
+  const L = settings.tides.length;
+
+  // The tide wraps past the schedule instead of freezing on its last front.
+  {
+    const tides = new TideSchedule(createRng(17));
+    const last = tides.tideAt(D - 1);
+    const wrapped = tides.tideAt(D + 1);
+    assert.ok(wrapped.element >= 0 && wrapped.element <= 4, 'endless: the tide past the end is still a real wuxing');
+    assert.equal(wrapped.index, 0, 'endless: …and the schedule has come round to its first front again');
+    assert.ok(wrapped.progress >= 0 && wrapped.progress <= 1, 'endless: progress stays a fraction');
+    assert.ok(wrapped.timeLeft > 0 && wrapped.timeLeft <= L, 'endless: and the countdown restarts rather than sitting at zero');
+    // Two full cycles on still lands somewhere legal.
+    const far = tides.tideAt(D * 2 + L * 1.5);
+    assert.ok(far.element >= 0 && far.element <= 4, 'endless: still legal two cycles later');
+    // Inside the scheduled run nothing moved.
+    assert.equal(tides.tideAt(D - 1).element, last.element, 'endless: the scheduled run is untouched');
+    assert.equal(tides.tideAt(0).index, 0, 'endless: …including its very first front');
+  }
+
+  // The verdict: won at the line, and 'playing' forever after once endless.
+  {
+    const mk = (seed) => {
+      const run = new RunManager({
+        enemies: new EnemySystem(createRng(seed)),
+        pickups: new PickupSystem(createRng(seed + 1)),
+        player: new PlayerState(),
+        rng: createRng(seed + 2),
+        tides: new TideSchedule(createRng(seed + 3)),
+        projectiles: new EnemyProjectiles(),
+        combat: { tick: () => 0, release: () => -1, resetStats: () => {}, book: () => {} },
+        targets: { register: () => {} },
+        abilities: { active: [] }
+      });
+      run.start();
+      return run;
+    };
+    const normal = mk(23);
+    normal.elapsed = D - 0.01;
+    assert.equal(normal.tick(1 / 60, { x: 0, z: 0 }), 'playing', 'endless: a hair short of the line is still playing');
+    normal.elapsed = D;
+    assert.equal(normal.tick(1 / 60, { x: 0, z: 0 }), 'won', 'endless: crossing the line still wins');
+
+    const forever = mk(31);
+    forever.elapsed = D + 60;
+    forever.endless = true;
+    assert.equal(forever.tick(1 / 60, { x: 0, z: 0 }), 'playing', 'endless: past the line, an endless run keeps playing');
+    assert.ok(forever.elapsed > D + 60, 'endless: …and its clock keeps running');
+    for (let i = 0; i < 200; i++) forever.tick(1 / 60, { x: 0, z: 0 });
+    assert.equal(forever.tick(1 / 60, { x: 0, z: 0 }), 'playing', 'endless: it never re-wins');
+
+    // Death still ends it.
+    forever.s.player.alive = false;
+    assert.equal(forever.tick(1 / 60, { x: 0, z: 0 }), 'dead', 'endless: dying in the endless half still ends the run');
+  }
+
+  // Difficulty keeps climbing rather than flattening or going non-finite.
+  {
+
+    const hpAt = (minute) => settings.enemies.hpBase * (1 + settings.enemies.hpPerMinute * minute);
+    assert.ok(hpAt(D / 60 + 15) > hpAt(D / 60), 'endless: enemy hp keeps growing past the finish line');
+    assert.ok(Number.isFinite(hpAt(120)), 'endless: still a finite number two hours in');
+  }
+
+  console.log('ok  M9 T3: endless (tide wrap, verdict, difficulty keeps climbing)');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
@@ -2611,7 +2831,30 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     while (x.mods.bumpPassive(id)) { /* to max */ }
   }
   const exhausted = x.pool.draw(20);
-  assert.equal(exhausted.length, 1, 'pool: a full build offers only its ripe fusion');
+  // M9 T2 (intentional change, was `=== 1`): a maxed skill is no longer a
+  // dead seat — it offers mutations until it has taken its fill, so this
+  // build hands out its ripe fusion PLUS mutation cards. The dead end this
+  // block was written for now needs every skill maxed AND fully mutated,
+  // which the follow-up below drives to.
+  assert.ok(exhausted.length >= 1, 'pool: a full build still offers its ripe fusion');
+  assert.ok(
+    exhausted.some((c) => c.kind === 'fusion'),
+    'pool: …and the guaranteed gold card is among them'
+  );
+  assert.ok(
+    exhausted.every((c) => c.kind === 'fusion' || c.kind === 'mutation'),
+    'pool: …with nothing left but mutations beside it'
+  );
+  {
+    // Drive every maxed skill to its mutation cap: only then is the pool
+    // genuinely dry apart from the fusion.
+    for (const element of x.loadout.equippedList()) {
+      for (const id of Object.keys(settings.upgrades.mutations)) x.mods.takeMutation(element, id);
+    }
+    const dry = x.pool.draw(20);
+    assert.equal(dry.length, 1, 'pool: maxed AND fully mutated, only the ripe fusion is left');
+    assert.equal(dry[0].kind, 'fusion', 'pool: …and it is the gold card');
+  }
   assert.equal(exhausted[0].kind, 'fusion', 'pool: and nothing but the fusion card');
   settings.run.draftLoadout = saved;
   console.log('ok  upgrade pool');

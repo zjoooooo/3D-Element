@@ -147,10 +147,18 @@ export class RunManager {
     return this.s.tides.tideAt(this.elapsed);
   }
 
+  /** M9 T3: set by whoever offers the player "keep going" after a win.
+   * Off by default, so every pre-M9 caller behaves exactly as before. */
+  get endless() { return this._endless ?? false; }
+  set endless(on) { this._endless = !!on; }
+
   tick(step, playerPos) {
     if (!this.active) return 'playing';
     if (!this.s.player.alive) return 'dead';
-    if (this.elapsed >= settings.run.duration) return 'won';
+    // M9 T3: an endless run has already been won once and chose to carry
+    // on — it never wins again, and everything downstream (spawn budget,
+    // hp curve, tides) simply keeps reading a clock that keeps running.
+    if (!this.endless && this.elapsed >= settings.run.duration) return 'won';
 
     this.elapsed += step;
     const minute = this.elapsed / 60;

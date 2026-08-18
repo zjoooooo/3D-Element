@@ -417,7 +417,28 @@ export const settings = {
     // cards it happened to hold, so registering skills rewrote the draft
     // without anyone editing a number — M8's ten took new-skill cards from
     // 68% of a hand to 77%.
-    passiveWeights: { upgrade: 3, newActive: 2, passive: 1 },
+    passiveWeights: { upgrade: 3, newActive: 2, passive: 1, mutation: 3 },
+
+    /**
+     * 满级异化 (M9 T2): once a skill can take no more levels, its seat offers
+     * these instead — so a finished skill still has somewhere to go and a
+     * full build still has a horizontal choice.
+     *
+     * Every entry is expressed through a layer EVERY skill already reads —
+     * damage, cooldown, the recast roll — on purpose. A "bigger radius"
+     * entry was designed and dropped: shape numbers are read in a dozen
+     * self-resolving classes as well as CombatSystem, so it would have done
+     * nothing for half the roster while the card claimed otherwise.
+     * Multipliers, not additions: they compose with the global passives
+     * rather than replacing them.
+     */
+    mutations: {
+      quicken: { name: '疾发', cooldown: 0.7 },
+      heavy: { name: '沉重', damage: 1.3 },
+      encore: { name: '回响', echo: 0.2 },
+      overload: { name: '超载', damage: 1.6, cooldown: 1.5 }
+    },
+    mutationMax: 2, // per skill
     milestones: [5, 10, 15] // levels that guarantee a new-active card
   },
 

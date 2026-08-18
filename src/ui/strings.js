@@ -23,7 +23,11 @@ export const STRINGS = {
   zh: {
     // RunHud's live fields (spec §9 HUD). HP has no text field any more —
     // Task 5's glass bottle is its only readout (数字不常驻).
-    'run.kills': '击杀',
+    'mut.quicken': '冷却 −30%',
+  'mut.heavy': '伤害 +30%',
+  'mut.encore': '20% 概率立即再放一次',
+  'mut.overload': '伤害 +60%，冷却 +50%',
+  'run.kills': '击杀',
     'run.level': 'Lv',
     'run.tide': '潮',
     'run.nextTide': '下潮',
@@ -129,7 +133,11 @@ export const STRINGS = {
     'bp.stoneskin.lv5': '石肤反噬'
   },
   en: {
-    'run.kills': 'Kills',
+    'mut.quicken': 'Cooldown −30%',
+  'mut.heavy': 'Damage +30%',
+  'mut.encore': '20% chance to cast again at once',
+  'mut.overload': 'Damage +60%, cooldown +50%',
+  'run.kills': 'Kills',
     'run.level': 'Lv',
     'run.tide': 'Tide',
     'run.nextTide': 'Next',
