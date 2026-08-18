@@ -287,7 +287,14 @@ export class CombatSystem {
               const wave = cursor < waves.length ? waves[cursor] : EXTRA_WAVE;
               if (age < wave.delay) break;
               const waveRadius = radius * wave.radiusMult;
-              const amt = c.damage * this._amp(ability) * wave.damageMult;
+              // M10 T1: the burst case never scaled its damage through the
+              // breakpoint layer, while the sweep case always did — so a
+              // `damage` tier on any burst skill was a card that promised
+              // what it could not deliver. Applied per wave, after the
+              // wave's own multiplier, so a wave table keeps its shape.
+              const amt =
+                c.damage * this._amp(ability) * wave.damageMult *
+                bpScale(ability.element, 'damage', level);
               this._book(ability.element, amt, this.targets.damage(ability.position, waveRadius, amt, wux, wuxB));
               // M6 T12: slowFactor REPLACEs, same rule as the sweep case above.
               const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
@@ -494,7 +501,10 @@ export class CombatSystem {
           // that forgets the field (an assertion pins that none do), not a
           // second unit convention: this milestone's own rule is that a
           // per-tick channel declares rate-or-impulse once, at the channel.
-          const kbScale = (c.kbMult ?? 60) * step;
+          // M10 T1: the pull/shove rate is a breakpoint key too — 磁暴's Lv5
+          // tightens its grip. Scaled before the ×step, so the tier reads as
+          // "a stronger pull" rather than "a longer tick".
+          const kbScale = (c.kbMult ?? 60) * bpScale(ability.element, 'kbMult', level) * step;
           this._book(
             ability.element,
             amt,

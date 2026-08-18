@@ -1854,6 +1854,266 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   console.log('ok  M9 T4: damage() takes a shove scale (fields push at a rate, hits still hit)');
 }
 
+
+/* ---- M10 T1: the second wave's first six learn to change ---- */
+{
+  const SIX = {
+    cyclonecut: { lv3: { radius: 1.3 }, lv5: { kbMult: 1.6 } },
+    piercelance: { lv3: { width: 1.5 }, lv5: { executeBelow: 2.0 } },
+    stormfield: { lv3: { radius: 1.25 }, lv5: { boltEvery: 0.7 } },
+    thornroad: { lv3: { width: 1.4 }, lv5: { slowFactor: 0.5 } },
+    tidalsurge: { lv3: { width: 1.3 }, lv5: { knockback: 1.8 } },
+    hailstorm: { lv3: { radius: 1.25 }, lv5: { damage: 1.35 } }
+  };
+
+  for (const [el, tiers] of Object.entries(SIX)) {
+    const table = settings[el].breakpoints;
+    assert.ok(table, `${el}: has a breakpoint table at all`);
+    assert.deepEqual(table.lv3, tiers.lv3, `${el}: Lv3 tier matches the plan`);
+    assert.deepEqual(table.lv5, tiers.lv5, `${el}: Lv5 tier matches the plan`);
+    for (const lv of ['lv3', 'lv5']) {
+      for (const lang of ['zh', 'en']) {
+        assert.ok(STRINGS[lang][`bp.${el}.${lv}`], `strings: bp.${el}.${lv} exists in ${lang}`);
+      }
+      assert.notEqual(STRINGS.zh[`bp.${el}.${lv}`], STRINGS.en[`bp.${el}.${lv}`], `strings: bp.${el}.${lv} differs by language`);
+    }
+  }
+
+  // Every key is CONSUMED — measured through a real tick, not read back out
+  // of the table it was written into. A tier nobody reads is a card that
+  // promises what it cannot deliver (M9 cut two mutations for exactly that).
+  const levelOf = (want) => (el) => (SIX[el] ? want : 1);
+
+  /** Run one ability through CombatSystem at Lv1 and at `level`, and hand
+   * back what the targets facade actually received. */
+  function observed(element, level, ability, key) {
+    const seen = [];
+    const spy = {
+      damage: (p, r, amt, w, wB, kb) => (seen.push({ r, amt, kb }), 1),
+      damageOnce: (id, p, r, amt) => (seen.push({ r, amt }), 1),
+      damageRing: (p, i, o, amt, w, wB, kb) => (seen.push({ inner: i, outer: o, amt, kb }), 1),
+      damageCone: (p, dx, dz, half, range, amt) => (seen.push({ half, range, amt }), 1),
+      slow: (p, r, f, d) => seen.push({ slowR: r, f, d }),
+      knockback: (p, r, impulse) => seen.push({ kbR: r, impulse }),
+      applyVuln: () => {}
+    };
+    new CombatSystem(spy, null, levelOf(level)).tick(1 / 60, [ability]);
+    return seen;
+  }
+
+  const mk = (element, extra = {}) => ({
+    element, phase: 'impact', impactTime: 0.2, fadeTime: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+    length: 9, u: 0.5, autocast: false, quenched: false, fusionMult: 1, ...extra
+  });
+
+  // cyclonecut: radius at Lv3, pull rate at Lv5.
+  {
+    const a = mk('cyclonecut');
+    const base = observed('cyclonecut', 1, a, 'radius')[0];
+    const lv3 = observed('cyclonecut', 3, a, 'radius')[0];
+    assert.ok(Math.abs(lv3.outer / base.outer - 1.3) < 1e-6, `cyclonecut Lv3: the ring really widens (${(lv3.outer / base.outer).toFixed(3)})`);
+    const lv5 = observed('cyclonecut', 5, a, 'kbMult')[0];
+    assert.ok(Math.abs(lv5.kb / base.kb - 1.6) < 1e-6, `cyclonecut Lv5: the pull really tightens (${(lv5.kb / base.kb).toFixed(3)})`);
+  }
+
+  // thornroad: width at Lv3, slow REPLACED at Lv5.
+  {
+    const a = mk('thornroad');
+    const base = observed('thornroad', 1, a)[0];
+    const lv3 = observed('thornroad', 3, a)[0];
+    assert.ok(Math.abs(lv3.r / base.r - 1.4) < 1e-6, `thornroad Lv3: the road really widens (${(lv3.r / base.r).toFixed(3)})`);
+    const lv5 = observed('thornroad', 5, a).find((x) => x.f !== undefined);
+    assert.ok(Math.abs(lv5.f - 0.5) < 1e-9, `thornroad Lv5: the tangle is replaced outright, not scaled (${lv5.f})`);
+  }
+
+  // tidalsurge: width at Lv3, shove at Lv5.
+  {
+    const a = mk('tidalsurge', { phase: 'travel', u: 0.5 });
+    const base = observed('tidalsurge', 1, a).find((x) => x.impulse !== undefined);
+    const lv5 = observed('tidalsurge', 5, a).find((x) => x.impulse !== undefined);
+    assert.ok(Math.abs(lv5.impulse / base.impulse - 1.8) < 1e-6, `tidalsurge Lv5: the wall really shoves harder (${(lv5.impulse / base.impulse).toFixed(3)})`);
+    // A sweep reports its width through damageOnce's radius, and the shove
+    // through knockback's own record — take the first entry that carries one.
+    const w1 = observed('tidalsurge', 1, a).find((x) => x.r !== undefined).r;
+    const w3 = observed('tidalsurge', 3, a).find((x) => x.r !== undefined).r;
+    assert.ok(Math.abs(w3 / w1 - 1.3) < 1e-6, `tidalsurge Lv3: the wall really widens (${(w3 / w1).toFixed(3)})`);
+  }
+
+  // hailstorm: radius at Lv3, damage at Lv5.
+  {
+    const a = mk('hailstorm', { impactTime: 1.0 });
+    const base = observed('hailstorm', 1, a)[0];
+    const lv3 = observed('hailstorm', 3, a)[0];
+    const lv5 = observed('hailstorm', 5, a)[0];
+    assert.ok(Math.abs(lv3.r / base.r - 1.25) < 1e-6, `hailstorm Lv3: wider (${(lv3.r / base.r).toFixed(3)})`);
+    assert.ok(Math.abs(lv5.amt / base.amt - 1.35) < 1e-6, `hailstorm Lv5: heavier (${(lv5.amt / base.amt).toFixed(3)})`);
+  }
+
+  // piercelance and stormfield resolve their own hits — driven through their
+  // own classes, at Lv1 and at the tier, with the horde ticking (M8's rule).
+  {
+    const ctx = (enemies, level) => ({
+      targets: enemies, enemies, stats: { book: () => {} },
+      levelOf: () => level,
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      decals: { spawn: () => null }, bursts: { spawn: () => {} },
+      particles: { get: () => ({ uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } }, setGradient() {}, emit() {} }) },
+      mods: null
+    });
+
+    // piercelance Lv5: the execute floor doubles, so a body that survives at
+    // Lv1 dies at Lv5 — the sharpest possible proof the key is consumed.
+    const floor = settings.combat.piercelance.executeBelow;
+    for (const [level, shouldDie] of [[1, false], [5, true]]) {
+      const enemies = new EnemySystem(createRng(71));
+      const victim = enemies.spawnAt(5, 0, 0, 3); // 火 body: the lance is beaten by it, so no bonus damage
+      // The hit lands FIRST and the floor sweeps after it, so the body has to
+      // clear the Lv1 floor even once wounded, while still falling under the
+      // doubled Lv5 one: line damage (320 × 0.8 disadvantage) + a hair over
+      // one floor, which leaves it between the two.
+      const lineHit = settings.piercelance.damage * settings.combat.matchup.disadvantage;
+      enemies.hp[victim] = lineHit + floor * 1.5;
+      const id = enemies.id[victim];
+      const lance = new PierceLanceSkill(ctx(enemies, level), 'piercelance');
+      lance.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 14);
+      lance.autocast = false; lance.fusionMult = 1; lance.quenched = false;
+      for (let t = 0; t < 20; t++) { lance.update(1 / 60); enemies.tick(1 / 60, { x: 0, z: 0 }, 0); }
+      const alive = Array.from({ length: enemies.count }, (_, i) => enemies.id[i]).includes(id);
+      assert.equal(!alive, shouldDie, `piercelance Lv${level}: a body at 1.5x the base floor ${shouldDie ? 'is executed' : 'survives'}`);
+      lance.destroy();
+    }
+
+    // stormfield Lv5: bolts come faster, so more of them land in one window.
+    const bolts = (level) => {
+      const enemies = new EnemySystem(createRng(73));
+      const i = enemies.spawnAt(0.5, 0, 0, 3);
+      enemies.hp[i] = 500000;
+      const storm = new StormFieldSkill(ctx(enemies, level), 'stormfield');
+      storm.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 0.5);
+      storm.autocast = false; storm.fusionMult = 1; storm.quenched = false;
+      const before = enemies.hp[i];
+      while (!storm.isFinished) { storm.update(1 / 60); enemies.tick(1 / 60, { x: 0, z: 0 }, 0); }
+      storm.destroy();
+      return (before - enemies.hp[i]) / (settings.stormfield.boltDamage * settings.combat.matchup.disadvantage);
+    };
+    const n1 = bolts(1);
+    const n5 = bolts(5);
+    assert.ok(n1 > 3, `fixture: the base field lands its bolts (${n1.toFixed(1)})`);
+    assert.ok(
+      n5 / n1 > 1.25,
+      `stormfield Lv5: bolts really come faster (${n1.toFixed(1)} → ${n5.toFixed(1)} bolts' worth)`
+    );
+  }
+
+  console.log('ok  M10 T1: six second-wave skills gain consumed breakpoints');
+}
+
+
+/* ---- M10 T2: the last four of the wave get their turning points ---- */
+{
+  const FOUR = {
+    flamebreath: { lv3: { halfAngle: 1.35 }, lv5: { dps: 1.3 } },
+    mortarrain: { lv3: { radius: 1.3 }, lv5: { damage: 1.3 } },
+    sandfield: { lv3: { radius: 1.2 }, lv5: { slowFactor: 0.45 } },
+    stonepillar: { lv3: { radius: 1.3 }, lv5: { stunTime: 1.6 } }
+  };
+
+  for (const [el, tiers] of Object.entries(FOUR)) {
+    assert.ok(settings[el].breakpoints, `${el}: has a breakpoint table`);
+    assert.deepEqual(settings[el].breakpoints.lv3, tiers.lv3, `${el}: Lv3 tier matches the plan`);
+    assert.deepEqual(settings[el].breakpoints.lv5, tiers.lv5, `${el}: Lv5 tier matches the plan`);
+    for (const lv of ['lv3', 'lv5']) {
+      for (const lang of ['zh', 'en']) assert.ok(STRINGS[lang][`bp.${el}.${lv}`], `strings: bp.${el}.${lv} in ${lang}`);
+      assert.notEqual(STRINGS.zh[`bp.${el}.${lv}`], STRINGS.en[`bp.${el}.${lv}`], `strings: bp.${el}.${lv} differs by language`);
+    }
+  }
+
+  const spyOn = (element, level, ability) => {
+    const seen = [];
+    const spy = {
+      damage: (p, r, amt) => (seen.push({ r, amt }), 1),
+      damageOnce: (id, p, r, amt) => (seen.push({ r, amt }), 1),
+      damageRing: (p, i, o, amt) => (seen.push({ inner: i, outer: o, amt }), 1),
+      damageCone: (p, dx, dz, half, range, amt) => (seen.push({ half, range, amt }), 1),
+      slow: (p, r, f, d) => seen.push({ f, d }),
+      knockback: () => {}, applyVuln: () => {}
+    };
+    new CombatSystem(spy, null, () => level).tick(1 / 60, [ability]);
+    return seen;
+  };
+  const mk = (element, extra = {}) => ({
+    element, phase: 'impact', impactTime: 0.2, fadeTime: 0,
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+    length: 9, u: 1, autocast: false, quenched: false, fusionMult: 1, ...extra
+  });
+
+  // flamebreath: the wedge opens at Lv3, burns harder at Lv5.
+  {
+    const a = mk('flamebreath');
+    const base = spyOn('flamebreath', 1, a)[0];
+    const lv3 = spyOn('flamebreath', 3, a)[0];
+    const lv5 = spyOn('flamebreath', 5, a)[0];
+    assert.ok(Math.abs(lv3.half / base.half - 1.35) < 1e-6, `flamebreath Lv3: the wedge really opens (${(lv3.half / base.half).toFixed(3)})`);
+    assert.ok(Math.abs(lv5.amt / base.amt - 1.3) < 1e-6, `flamebreath Lv5: it really burns harder (${(lv5.amt / base.amt).toFixed(3)})`);
+
+    // WYSIWYG survives the tier: the drawn plume's outer envelope is SOLVED
+    // from the half-angle (M8 T5), not a constant, so a wider judged wedge
+    // has to come with a wider drawn one. Same solver, same input.
+    const spreadFor = (h) => { const t = Math.tan(h); return t / (1 + t); };
+    const envelope = (spread) => Math.atan(spread / (1 - spread));
+    for (const [level, half] of [[1, base.half], [3, lv3.half]]) {
+      assert.ok(
+        Math.abs(envelope(spreadFor(half)) - half) < 1e-9,
+        `flamebreath Lv${level}: what is drawn still lands on what is judged (${envelope(spreadFor(half)).toFixed(4)} vs ${half.toFixed(4)})`
+      );
+    }
+  }
+
+  // mortarrain: wider craters at Lv3, heavier shells at Lv5 — through the
+  // burst case's own read site, which M10 T1 had to add in the first place.
+  {
+    const a = mk('mortarrain', { impactTime: 0.6 });
+    const base = spyOn('mortarrain', 1, a)[0];
+    const lv3 = spyOn('mortarrain', 3, a)[0];
+    const lv5 = spyOn('mortarrain', 5, a)[0];
+    assert.ok(Math.abs(lv3.r / base.r - 1.3) < 1e-6, `mortarrain Lv3: wider craters (${(lv3.r / base.r).toFixed(3)})`);
+    assert.ok(Math.abs(lv5.amt / base.amt - 1.3) < 1e-6, `mortarrain Lv5: heavier shells (${(lv5.amt / base.amt).toFixed(3)})`);
+  }
+
+  // sandfield: a wider disc at Lv3, a deeper blind at Lv5 (REPLACE, not scale).
+  {
+    const a = mk('sandfield');
+    const base = spyOn('sandfield', 1, a)[0];
+    const lv3 = spyOn('sandfield', 3, a)[0];
+    assert.ok(Math.abs(lv3.outer / base.outer - 1.2) < 1e-6, `sandfield Lv3: a wider field (${(lv3.outer / base.outer).toFixed(3)})`);
+    const lv5 = spyOn('sandfield', 5, a).find((x) => x.f !== undefined);
+    assert.ok(Math.abs(lv5.f - 0.45) < 1e-9, `sandfield Lv5: the blind is replaced outright (${lv5.f})`);
+  }
+
+  // stonepillar: a wider slab at Lv3, a longer stun at Lv5.
+  {
+    const a = mk('stonepillar');
+    const base = spyOn('stonepillar', 1, a);
+    const lv3 = spyOn('stonepillar', 3, a);
+    const lv5 = spyOn('stonepillar', 5, a);
+    assert.ok(Math.abs(lv3[0].r / base[0].r - 1.3) < 1e-6, `stonepillar Lv3: a wider slab (${(lv3[0].r / base[0].r).toFixed(3)})`);
+    const stun = (rows) => rows.filter((x) => x.f === 1).pop();
+    assert.ok(
+      Math.abs(stun(lv5).d / stun(base).d - 1.6) < 1e-6,
+      `stonepillar Lv5: a longer stun (${(stun(lv5).d / stun(base).d).toFixed(3)})`
+    );
+  }
+
+  // The wave is finished: nothing castable is left without turning points.
+  for (const element of ELEMENTS) {
+    if (!ABILITY_TYPES[element]) continue;
+    assert.ok(settings[element].breakpoints, `breakpoints: ${element} still has none — the roster is meant to be complete now`);
+  }
+
+  console.log('ok  M10 T2: the wave is complete — every castable skill has turning points');
+}
+
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
 {
   const count = { a: 0, b: 0 };
@@ -6302,12 +6562,27 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     stoneskin: { lv3: { amount: 1.4 }, lv5: { reflectShare: 1.6 } }
   };
   assert.equal(Object.keys(BP_EXPECTED).length, 20, 'T12 table: twenty skills expected');
-  for (const element of ELEMENTS) {
+  // Scoped to the twenty this milestone shipped (M10 T1 added tables for the
+  // second wave, whose own block pins them) — iterating all of ELEMENTS
+  // would make every later roster addition red here for no reason. The count
+  // above still refuses a silent deletion from THIS table.
+  for (const element of Object.keys(BP_EXPECTED)) {
     assert.deepEqual(
       settings[element].breakpoints,
       BP_EXPECTED[element],
       `T12 table: ${element}'s breakpoints block doesn't match the brief's table`
     );
+  }
+  // …and nothing outside it may quietly go missing either: every castable id
+  // either appears above, or in the second wave's own table (M10 T1), or on
+  // this explicitly named list of what M10 T2 still owes. The list is the
+  // point — an unlisted skill with no turning points fails loudly, and the
+  // list itself has to shrink to nothing by the end of the milestone.
+  // M10 T2 emptied the owed list: every castable skill has turning points,
+  // and this refuses any future addition that arrives without them.
+  for (const element of ELEMENTS) {
+    if (BP_EXPECTED[element] || !ABILITY_TYPES[element]) continue;
+    assert.ok(settings[element].breakpoints, `breakpoints: ${element} is castable but has no turning points at all`);
   }
   console.log('ok  M6 T12: forty-entry breakpoint table pinned verbatim');
 }

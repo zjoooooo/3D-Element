@@ -119,7 +119,7 @@ export class StormFieldSkill extends Ability {
     // Parked before the first update, like every timed field (M7 T4's
     // frame-order lesson) — nothing else ever writes `position`.
     this.pointAt(1, this.position);
-    this._nextBolt = this.config.boltEvery;
+    this._nextBolt = this._boltEvery();
     this._seq = 0;
     this._boltAge = 1;
     this._drizzle.reset();
@@ -150,7 +150,7 @@ export class StormFieldSkill extends Ability {
     const age = this.impactTime + (t >= 1 ? this.fadeTime : 0);
     while (this._nextBolt <= c.life + 1e-9 && age >= this._nextBolt) {
       this._strike();
-      this._nextBolt += c.boltEvery;
+      this._nextBolt += this._boltEvery();
     }
     this._boltAge += dt;
     this.ribbonMaterial.opacity = 0.9 * Math.max(0, 1 - this._boltAge / BOLT_FLASH);
@@ -169,6 +169,13 @@ export class StormFieldSkill extends Ability {
 
   _radius() {
     return this.config.zoneRadius * bpScale(this.element, 'radius', this.bpLevel);
+  }
+
+  /** Seconds between bolts. Read through the breakpoint layer (M10 T1) —
+   * a Lv5 tier scales it BELOW one to strike more often, so this is the one
+   * key in the table where a multiplier under 1 is the upgrade. */
+  _boltEvery() {
+    return this.config.boltEvery * bpScale(this.element, 'boltEvery', this.bpLevel);
   }
 
   _strike() {

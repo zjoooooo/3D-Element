@@ -2537,18 +2537,21 @@ export const settings = {
   /* anchor2 resolver's dps×life fold.                                    */
   /* ------------------------------------------------------------------ */
   cyclonecut: {
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { kbMult: 1.6 } },
     range: 9, minRange: 0, cooldown: 6, manaCost: 30, castAnim: 'cast1',
     life: 2.5, zoneRadius: 3.0, shardCount: 8,
     color: '#d8b46a', colorGlow: '#f0e2b8',
     lightColor: '#f0e2b8', lightIntensity: 6, lightRadius: 6
   },
   piercelance: {
+    breakpoints: { lv3: { width: 1.5 }, lv5: { executeBelow: 2.0 } },
     range: 14, minRange: 0, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     damage: 320, width: 0.8,
     color: '#e8d089', colorGlow: '#fff4cf',
     lightColor: '#fff4cf', lightIntensity: 7, lightRadius: 7
   },
   stormfield: {
+    breakpoints: { lv3: { radius: 1.25 }, lv5: { boltEvery: 0.7 } },
     range: 10, minRange: 0, cooldown: 9, manaCost: 30, castAnim: 'cast1',
     life: 6, zoneRadius: 4.5, boltEvery: 0.75, boltDamage: 52,
     color: '#7ee08a', colorGlow: '#c9f7d0',
@@ -2558,6 +2561,7 @@ export const settings = {
   // own field name, NOT the fusion family's `life` — one name, no drift) is
   // both how long the road stands and what the anchor2 timed-dps fold reads.
   thornroad: {
+    breakpoints: { lv3: { width: 1.4 }, lv5: { slowFactor: 0.5 } },
     range: 11, minRange: 0, speed: 18, cooldown: 7, manaCost: 0, castAnim: 'cast1',
     spikeCount: 20, riseTime: 0.12,
     height: 1.1, heightJitter: 0.45, radius: 0.14,
@@ -2571,6 +2575,7 @@ export const settings = {
   // unconditionally per frame, so a missing field NaN-poisons a transform.
   // A wave is a wide, low, blunt "spike" that leans hard into the sweep.
   tidalsurge: {
+    breakpoints: { lv3: { width: 1.3 }, lv5: { knockback: 1.8 } },
     range: 11, minRange: 0, speed: 16, cooldown: 5, manaCost: 0, castAnim: 'cast1',
     spikeCount: 14, riseTime: 0.1,
     height: 1.3, heightJitter: 0.25, radius: 0.55,
@@ -2585,30 +2590,35 @@ export const settings = {
   // per wave; `burstLife` covers the last wave's own delay so the shell is
   // still up when it lands.
   hailstorm: {
+    breakpoints: { lv3: { radius: 1.25 }, lv5: { damage: 1.35 } },
     range: 12, minRange: 0, speed: 20, cooldown: 8, manaCost: 30, castAnim: 'cast1',
     zoneRadius: 3.8, burstLife: 2.1,
     color: '#8ee8ff', colorGlow: '#e8fbff',
     lightColor: '#e8fbff', lightIntensity: 7, lightRadius: 8
   },
   flamebreath: {
+    breakpoints: { lv3: { halfAngle: 1.35 }, lv5: { dps: 1.3 } },
     range: 5.5, minRange: 0, cooldown: 6, manaCost: 0, castAnim: 'cast1',
     life: 1.2,
     color: '#ff8a3c', colorGlow: '#ffd9a8',
     lightColor: '#ffd9a8', lightIntensity: 7, lightRadius: 6
   },
   mortarrain: {
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { damage: 1.3 } },
     range: 12, minRange: 0, cooldown: 7, manaCost: 30, castAnim: 'cast1',
     zoneRadius: 3.5, scatterRadius: 3.5,
     color: '#ffa23c', colorGlow: '#ffe3b8',
     lightColor: '#ffe3b8', lightIntensity: 7, lightRadius: 7
   },
   sandfield: {
+    breakpoints: { lv3: { radius: 1.2 }, lv5: { slowFactor: 0.45 } },
     range: 9, minRange: 0, cooldown: 9, manaCost: 0, castAnim: 'cast1',
     life: 4, zoneRadius: 4.2, shardCount: 10,
     color: '#c9a06a', colorGlow: '#e8d4ad',
     lightColor: '#e8d4ad', lightIntensity: 5, lightRadius: 7
   },
   stonepillar: {
+    breakpoints: { lv3: { radius: 1.3 }, lv5: { stunTime: 1.6 } },
     range: 10, minRange: 0, speed: 20, cooldown: 7, manaCost: 30, castAnim: 'cast1',
     zoneRadius: 2.6, burstLife: 0.8,
     color: '#b8875a', colorGlow: '#e3cfa8',
