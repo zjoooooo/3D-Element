@@ -344,7 +344,7 @@ export class CombatSystem {
             const resonance = wux === 3 ? this.mods?.dotMult?.() ?? 1 : 1;
             if (this._dot(castId, step, c.burnDps * this._amp(ability) * resonance)) {
               const amt = this._take(castId);
-              this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
+              this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB, step));
             }
           }
           break;
@@ -390,7 +390,7 @@ export class CombatSystem {
             const t = (s / LINE_SAMPLES) * ability.u;
             this._p.x = ability.origin.x + ability.direction.x * ability.length * t;
             this._p.z = ability.origin.z + ability.direction.z * ability.length * t;
-            this._book(ability.element, amt, this.targets.damage(this._p, width, amt, wux, wuxB));
+            this._book(ability.element, amt, this.targets.damage(this._p, width, amt, wux, wuxB, step));
             if (lineSlow) this.targets.slow(this._p, width, lineSlow, lineSlowTime);
           }
           break;
@@ -400,7 +400,9 @@ export class CombatSystem {
           if (ability.phase === 'idle' || ability.phase === 'done') break;
           const radius = (settings[ability.element].zoneRadius ?? 2) * bpScale(ability.element, 'radius', level);
           const amt = c.dps * this._amp(ability) * step;
-          this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB));
+          // A field's shove is a rate (M9 T4) — the burst case below keeps
+          // the full impulse, because a detonation really is one shove.
+          this._book(ability.element, amt, this.targets.damage(ability.position, radius, amt, wux, wuxB, step));
           const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
           if (slowFactor) {
             const slowTime = c.slowTime * bpScale(ability.element, 'slowTime', level);

@@ -1688,7 +1688,155 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     assert.ok(Number.isFinite(hpAt(120)), 'endless: still a finite number two hours in');
   }
 
-  console.log('ok  M9 T3: endless (tide wrap, verdict, difficulty keeps climbing)');
+  // The offer is spent once taken: a fresh win offers it, a run already in
+  // its endless half does not, and its death card says it cleared.
+  {
+    const shown = [];
+    const panel = {
+      show: (opts) => shown.push(opts),
+      hide: () => {},
+      isOpen: false
+    };
+    // Mirrors App's own two flags at the verdict site rather than importing
+    // App (it pulls in the renderer) — the same discipline the resonance
+    // test in this file already uses.
+    const offer = (won, endless) => ({ canContinue: won && !endless, cleared: endless });
+    panel.show(offer(true, false));
+    panel.show(offer(true, true));
+    panel.show(offer(false, true));
+    assert.equal(shown[0].canContinue, true, 'endless: a fresh win offers the continuation');
+    assert.equal(shown[1].canContinue, false, 'endless: a run already carrying on does not offer it again');
+    assert.equal(shown[2].cleared, true, 'endless: dying in the endless half reads as a cleared run');
+    assert.equal(shown[0].cleared, false, 'endless: a first win is not yet "cleared" in that sense');
+  }
+
+  for (const key of ['verdict.endless', 'verdict.cleared']) {
+    for (const lang of ['zh', 'en']) assert.ok(STRINGS[lang][key], `strings: ${key} exists in ${lang}`);
+    assert.notEqual(STRINGS.zh[key], STRINGS.en[key], `strings: ${key} actually differs by language`);
+  }
+
+  console.log('ok  M9 T3: endless (tide wrap, verdict, offer-once, difficulty keeps climbing)');
+}
+
+
+/* ---- M9 T4: the last channel learns push from shove ---- */
+{
+  // `damage()` is the one entry point that still applied a full impulse
+  // unconditionally, and the per-tick kinds call it sixty times a second:
+  // measured 29.4 m/s peak on a snare zone before this task. It takes a
+  // kbScale now, exactly like damageRing and damageCone already did.
+  const mkAbility = (element, extra = {}) => ({
+    element, phase: 'impact', impactTime: 0.2, fadeTime: 0,
+    // The field sits on the player, because that is where seekers end up —
+    // a field parked out in the arena empties itself within a second and
+    // measures the walk-out instead of the shove (M8's own lesson).
+    position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+    length: 9, u: 1, autocast: false, quenched: false, fusionMult: 1, ...extra
+  });
+
+  /** Peak shove on a body parked in the field, with the horde ticking. */
+  function peakShove(element, ticks = 120) {
+    const enemies = new EnemySystem(createRng(61));
+    const i = enemies.spawnAt(1, 0, 0, 1);
+    // Not 1e9: hp is a Float32Array, whose ulp up there is about 64, so a
+    // sub-unit DoT tick rounds away entirely and the field looks inert.
+    enemies.hp[i] = 50000;
+    const combat = new CombatSystem(enemies);
+    const ability = mkAbility(element);
+    let peak = 0, dealt = 0;
+    const before = enemies.hp[i];
+    for (let t = 0; t < ticks; t++) {
+      combat.tick(1 / 60, [ability]);
+      peak = Math.max(peak, Math.hypot(enemies.kbX[i], enemies.kbZ[i]));
+      // The horde has to move for a shove to mean anything (M8's rule).
+      enemies.tick(1 / 60, { x: 0, z: 0 }, 0);
+    }
+    dealt = before - enemies.hp[i];
+    return { peak, dealt };
+  }
+
+  {
+    const snare = peakShove('snare');
+    assert.ok(snare.dealt > 0, 'zoneTick: the field still bites');
+    assert.ok(
+      snare.peak < 1.5,
+      `zoneTick: a field pushes at a rate, not one impulse per tick (peak ${snare.peak.toFixed(1)} m/s — was 29.4)`
+    );
+  }
+
+  // A burst detonation is still ONE impulse and must not shrink.
+  {
+    const enemies = new EnemySystem(createRng(62));
+    const i = enemies.spawnAt(1.2, 0, 0, 1);
+    enemies.hp[i] = 50000;
+    const before = enemies.kbX[i];
+    enemies.damage({ x: 0, z: 0 }, settings.combat.boulder.radius, 10, -1);
+    const oneShot = enemies.kbX[i] - before;
+    assert.ok(oneShot > 1, `impulse: a single hit still shoves properly (got ${oneShot.toFixed(2)})`);
+
+    // …and that is exactly what the default argument means.
+    const enemies2 = new EnemySystem(createRng(62));
+    const j = enemies2.spawnAt(1.2, 0, 0, 1);
+    enemies2.hp[j] = 50000;
+    enemies2.damage({ x: 0, z: 0 }, settings.combat.boulder.radius, 10, -1, -1, 1);
+    assert.ok(
+      Math.abs(enemies2.kbX[j] - enemies.kbX[i]) < 1e-9,
+      'impulse: passing the default explicitly is byte-identical to omitting it'
+    );
+  }
+
+  // kbScale 0 means a field that burns without pushing (沙暴's precedent).
+  {
+    const enemies = new EnemySystem(createRng(63));
+    const i = enemies.spawnAt(1, 0, 0, 1);
+    enemies.hp[i] = 50000;
+    const hpBefore = enemies.hp[i];
+    enemies.damage({ x: 0, z: 0 }, 3, 10, -1, -1, 0);
+    assert.equal(enemies.kbX[i], 0, 'impulse: kbScale 0 shoves nothing');
+    assert.equal(enemies.kbZ[i], 0, 'impulse: …in either axis');
+    assert.ok(enemies.hp[i] < hpBefore, 'impulse: …but still deals its damage');
+  }
+
+  // Targets threads it through.
+  {
+    const got = [];
+    const targets = new Targets();
+    targets.register({ hits: () => false, damage: (...a) => (got.push(a), 1) });
+    targets.damage({ x: 0, z: 0 }, 2, 5, 1, 2, 0.5);
+    assert.equal(got[0].length, 6, 'Targets.damage: passes the shove scale on');
+    assert.equal(got[0][5], 0.5, 'Targets.damage: …unchanged');
+    got.length = 0;
+    targets.damage({ x: 0, z: 0 }, 2, 5, 1);
+    assert.equal(got[0][5], 1, 'Targets.damage: and defaults it to one full impulse');
+  }
+
+  // The standing-field classes burn without shoving, like the sandstorm.
+  {
+    const enemies = new EnemySystem(createRng(64));
+    const i = enemies.spawnAt(0.5, 0, 0, 1);
+    enemies.hp[i] = 50000;
+    const ctx = {
+      targets: enemies, enemies, stats: { book: () => {} },
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      decals: { spawn: () => ({ mesh: { scale: { setScalar: () => {} } }, material: { uniforms: { uColorA: { value: { lerpColors: () => {} } } } } }) },
+      bursts: { spawn: () => {} },
+      particles: { get: () => ({ uniforms: { uDrag: { value: 0 }, uEndSize: { value: 0 }, uSizeIn: { value: 0 }, uFadeOut: { value: 0 } }, setGradient() {}, emit() {} }) },
+      mods: null
+    };
+    const blaze = new VineBlazeSkill(ctx, fusionId('thunder', 'fireball'));
+    blaze.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 0.5);
+    blaze.autocast = false; blaze.fusionMult = 1; blaze.quenched = false;
+    const hpBefore = enemies.hp[i];
+    for (let t = 0; t < 120; t++) { blaze.update(1 / 60); enemies.tick(1 / 60, { x: 0, z: 0 }, 0); }
+    assert.ok(enemies.hp[i] < hpBefore, 'burning ground: the zone still burns');
+    assert.ok(
+      Math.hypot(enemies.kbX[i], enemies.kbZ[i]) < 0.5,
+      `burning ground: …without shoving anyone out of it (${Math.hypot(enemies.kbX[i], enemies.kbZ[i]).toFixed(2)} m/s)`
+    );
+    blaze.destroy();
+  }
+
+  console.log('ok  M9 T4: damage() takes a shove scale (fields push at a rate, hits still hit)');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

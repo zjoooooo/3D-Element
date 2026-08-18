@@ -817,6 +817,17 @@ export class App {
         }
         break;
       }
+      case 'endless':
+        // M9 T3: only from a won verdict, and only once — the offer is
+        // gone the moment it is taken (`run.endless` gates the panel above).
+        if (this.runMode && !this.run.active && this._verdict.value === 'won' && !this.run.endless) {
+          this.run.endless = true;
+          this.run.active = true;
+          this._verdict.value = 'playing';
+          this.verdictPanel.hide();
+          this.hud.showToast(t('verdict.endless'));
+        }
+        break;
       case 'restart':
         // Enter only restarts at the verdict screen — deliberately narrower
         // than the pause menu's 重开 button (see _restart()'s own callers),
@@ -1941,6 +1952,10 @@ export class App {
           // onto the death screen (T2-T6 erratas' shared observation).
           .map(([el, amt]) => [isFusionId(el) ? fusionName(el) : ELEMENT_META[el]?.label ?? el, amt]);
         this.verdictPanel.show({
+          // M9 T3: a fresh win can carry on; a run already in its endless
+          // half has spent that offer, and its death screen says so instead.
+          canContinue: won && !this.run.endless,
+          cleared: this.run.endless,
           won,
           elapsed: this.run.elapsed,
           kills: this.run.kills,

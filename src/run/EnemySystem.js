@@ -262,7 +262,16 @@ export class EnemySystem {
     return false;
   }
 
-  damage(point, radius, amount, wuxing = -1, wuxingB = -1) {
+  /**
+   * @param {number} [kbScale] M9 T4: how much of the baseline shove this hit
+   *   carries — the same tail damageRing and damageCone already take. 1 (the
+   *   default, and every one-shot hit in the codebase) is one full impulse.
+   *   A channel that calls this every tick passes `step` instead, because
+   *   sixty impulses a second is not a push, it is a catapult: a snare field
+   *   measured 30 m/s and threw its own targets clear of itself. 0 is a
+   *   field that burns without shoving at all (沙暴's own precedent).
+   */
+  damage(point, radius, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
     let hits = 0;
     for (let i = this.count - 1; i >= 0; i--) {
       const kind = settings.enemies[BEHAVIORS[this.behavior[i]]];
@@ -272,9 +281,11 @@ export class EnemySystem {
       hits++;
       this.flash[i] = 1;
       const d = Math.hypot(dx, dz) || 1;
-      const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult;
-      this.kbX[i] += (dx / d) * kb;
-      this.kbZ[i] += (dz / d) * kb;
+      if (kbScale) {
+        const kb = (settings.enemies.knockback / kind.mass) * this.tuning.kbMult * kbScale;
+        this.kbX[i] += (dx / d) * kb;
+        this.kbZ[i] += (dz / d) * kb;
+      }
       this._applyWux(i, amount, wuxing, wuxingB);
     }
     this._flushReactions();

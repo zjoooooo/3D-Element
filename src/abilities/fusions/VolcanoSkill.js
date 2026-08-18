@@ -466,7 +466,7 @@ export class VolcanoSkill extends Ability {
    */
   _payoutPool(i, amount) {
     _poolPos.set(this._bombX[i], 1.0, this._bombZ[i]);
-    const hits = this.ctx.targets?.damage(_poolPos, this.config.lavaRadius, amount, this._wux, this._wuxB) ?? 0;
+    const hits = this.ctx.targets?.damage(_poolPos, this.config.lavaRadius, amount, this._wux, this._wuxB, 0) ?? 0;
     this.ctx.stats?.book?.(this.element, amount * hits);
   }
 

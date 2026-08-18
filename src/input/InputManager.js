@@ -133,6 +133,12 @@ export class InputManager extends EventEmitter {
       case 'Enter':
         this.emit('action', 'restart');
         break;
+      case 'KeyN':
+        // M9 T3: carry a won run on into the endless half. Its own key
+        // rather than Enter's, so the muscle memory that restarts a run
+        // can never accidentally decline (or accept) the offer.
+        this.emit('action', 'endless');
+        break;
       case 'KeyH':
         this.emit('action', 'toggleHelp');
         break;

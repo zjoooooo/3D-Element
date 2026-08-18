@@ -22,9 +22,9 @@ export class Targets {
     return false;
   }
 
-  damage(point, radius, amount, wuxing = -1, wuxingB = -1) {
+  damage(point, radius, amount, wuxing = -1, wuxingB = -1, kbScale = 1) {
     let total = 0;
-    for (const p of this._populations) total += p.damage(point, radius, amount, wuxing, wuxingB);
+    for (const p of this._populations) total += p.damage(point, radius, amount, wuxing, wuxingB, kbScale);
     return total;
   }
 

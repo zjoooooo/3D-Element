@@ -513,7 +513,7 @@ export class VineBlazeSkill extends Ability {
    * the same nominal-amt×hits booking every other self-resolved class uses. */
   _payoutZone(slot, amount) {
     _pos.set(this.zx[slot], 1.0, this.zz[slot]);
-    const hits = this.ctx.targets?.damage(_pos, this.config.radius, amount, this._wux, this._wuxB) ?? 0;
+    const hits = this.ctx.targets?.damage(_pos, this.config.radius, amount, this._wux, this._wuxB, 0) ?? 0;
     this.ctx.stats?.book?.(this.element, amount * hits);
   }
 
