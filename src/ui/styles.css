@@ -1287,3 +1287,41 @@ body {
   font-size: 13px;
   color: var(--ui-text-dim);
 }
+
+/* 首领战血条 (M11 T3) — one wide bar under the tide row, only while one is up. */
+.run-hud__boss {
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 62vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.run-hud__boss[hidden] { display: none; }
+.run-hud__boss > span {
+  font-size: 13px;
+  letter-spacing: 0.34em;
+  opacity: 0.85;
+  text-shadow: 0 0 12px rgba(255, 90, 70, 0.55);
+}
+.run-hud__boss > i {
+  display: block;
+  width: 100%;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 130, 110, 0.35);
+  overflow: hidden;
+}
+.run-hud__boss > i::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: calc(var(--ratio, 1) * 100%);
+  background: linear-gradient(90deg, rgba(255, 74, 58, 0.95), rgba(255, 168, 92, 0.95));
+  box-shadow: 0 0 14px rgba(255, 96, 64, 0.7);
+  transition: width 120ms linear;
+}

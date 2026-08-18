@@ -35,6 +35,7 @@ import { UpgradeUi } from '../run/UpgradeUi.js';
 import { VerdictPanel } from '../run/VerdictPanel.js';
 import { Ultimate } from '../run/Ultimate.js';
 import { RunManager, tickHitstop, addHitstop } from '../run/RunManager.js';
+import { BossSystem } from '../run/BossSystem.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
 import { ThreatArrows } from '../run/ThreatArrows.js';
@@ -353,6 +354,11 @@ export class App {
       // RunManager.start() reshuffles it every call, so a restart still deals
       // a fresh tide order each run, drawn from the same continuing stream.
       this.tideSchedule = new TideSchedule(rng);
+      // 首领战 (M11 T3). The BODY lives in the enemy system as one more
+      // behaviour, so every hit test already reaches it; this owns only the
+      // encounter — when it turns up, and how hurt it is. Built after the
+      // tide schedule because its entrance is counted in tides.
+      this.bossSystem = new BossSystem(this.enemySystem, this.tideSchedule);
       this.enemyProjectiles = new EnemyProjectiles();
       this.scene.add(this.enemyProjectiles.points);
       // 禁咒 (spec §4.9): one full-field ultimate per wuxing, charged by kills
@@ -370,6 +376,7 @@ export class App {
         targets: this.targets,
         abilities: this.abilities,
         tides: this.tideSchedule,
+        boss: this.bossSystem,
         projectiles: this.enemyProjectiles,
         ultimate: this.ultimate,
         rng
@@ -2077,7 +2084,8 @@ export class App {
           this.run.tide(),
           this._resonanceText(),
           this.ultimate,
-          this._seatCooldowns()
+          this._seatCooldowns(),
+          this.bossSystem
         );
       }
     }

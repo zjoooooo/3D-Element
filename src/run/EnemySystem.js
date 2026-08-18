@@ -3,7 +3,15 @@ import { settings } from '../config/settings.js';
 import { BEATS, FEEDS } from './TideSchedule.js';
 
 /** Behaviour template ids — indexes both `this.behavior[i]` and `settings.enemies`. */
-export const BEHAVIORS = ['swarm', 'ranged', 'tank'];
+// M11 T3: 'boss' is the fourth entry rather than a system of its own. Every
+// per-enemy read in this file and in the ability classes is already
+// `settings.enemies[BEHAVIORS[behavior]]`, so one more row in that table gives
+// the boss the whole judging layer — hit tests, marks, debuffs, reactions —
+// without a single new branch to forget.
+export const BEHAVIORS = ['swarm', 'ranged', 'tank', 'boss'];
+
+/** BEHAVIORS index of the boss — one name instead of a bare 3 at every site. */
+export const BOSS_BEHAVIOR = BEHAVIORS.indexOf('boss');
 
 /**
  * The horde, as flat arrays (spec §5).
@@ -43,7 +51,7 @@ export class EnemySystem {
     this.kbX = new Float32Array(cap);
     this.kbZ = new Float32Array(cap);
     this.element = new Uint8Array(cap);
-    this.behavior = new Uint8Array(cap); // BEHAVIORS index: 0 swarm / 1 ranged / 2 tank
+    this.behavior = new Uint8Array(cap); // BEHAVIORS index: 0 swarm / 1 ranged / 2 tank / 3 boss
     this.elite = new Uint8Array(cap); // 0 normal / 1 elite — scales hp/damage, marks the corpse
     this.fireT = new Float32Array(cap); // ranged fire cooldown
     // Marks and their three 相克 debuff channels (spec §4.6) — one clinging
@@ -120,6 +128,55 @@ export class EnemySystem {
     this.slowAmpT[i] = 0;
     this.id[i] = this._nextId++;
     return i;
+  }
+
+  /**
+   * Put the boss on the field (M11 T3).
+   *
+   * Nothing here is special beyond the behaviour index — it goes through
+   * `spawnAt`, so it lands in the same arrays, the same grid and the same
+   * hit tests as anything else. `settings.enemies.boss.hpMult` is what makes
+   * it a boss.
+   */
+  spawnBoss(x, z, minute) {
+    // By minute nine the horde is normally pinned at `run.enemyCap`, and
+    // `spawnAt` answers a full field with -1 — so the boss simply never turned
+    // up, which is what the RunManager assertion caught. Make room: the body
+    // FURTHEST from where the boss is arriving is the one nobody is fighting.
+    // Removed silently rather than through `_kill`, because a gem shower for
+    // a body the player never touched would be a gift out of nowhere.
+    if (this.count >= this.x.length) {
+      let worst = -1;
+      let worstD = -1;
+      for (let i = 0; i < this.count; i++) {
+        if (this.behavior[i] === BOSS_BEHAVIOR) continue;
+        const d = (this.x[i] - x) ** 2 + (this.z[i] - z) ** 2;
+        if (d > worstD) { worstD = d; worst = i; }
+      }
+      if (worst === -1) return -1; // nothing but bosses out there; leave it alone
+      this._remove(worst);
+    }
+    return this.spawnAt(x, z, minute, 0, BOSS_BEHAVIOR, 0);
+  }
+
+  /** Take a body off the field with no death, no gem, no onDeath. The compaction
+   *  is `_kill`'s — one swap-with-last — minus the event. */
+  _remove(i) {
+    const last = --this.count;
+    if (i === last) return;
+    for (const a of SWAP_ARRAYS(this)) a[i] = a[last];
+  }
+
+  /** Index of the body carrying `id`, or -1. O(count), called once a tick.
+   *
+   * `_kill` compacts by swapping the last body into the hole, so an index
+   * captured at spawn points at a different enemy the moment anything dies.
+   * Anything that has to follow one specific body across time has to follow
+   * its id — this is the lookup that makes that cheap enough to just do.
+   */
+  indexOfId(id) {
+    for (let i = 0; i < this.count; i++) if (this.id[i] === id) return i;
+    return -1;
   }
 
   /**
@@ -551,9 +608,13 @@ export class EnemySystem {
       if (dist >= reach) continue;
       if (innerRadius > 0 && dist < innerRadius - pad) continue;
       // 淤塞: a standing slowAmp doubles this slow's own factor before it merges.
-      const f = this.slowAmpT[i] > 0
+      let f = this.slowAmpT[i] > 0
         ? Math.min(settings.combat.debuffs.slowAmp.cap, factor * settings.combat.debuffs.slowAmp.mult)
         : factor;
+      // M11 T3: a boss shrugs most of a slow off. Resisted, never immune —
+      // zero for every other behaviour, so this line is identity for them.
+      const resist = settings.enemies[BEHAVIORS[this.behavior[i]]].slowResist ?? 0;
+      if (resist) f *= 1 - resist;
       this.slowed[i] = Math.max(this.slowed[i], f);
       this.slowT[i] = Math.max(this.slowT[i], dur);
     }
@@ -651,13 +712,7 @@ export class EnemySystem {
     this.onDeath?.(this.x[i], this.z[i], this.element[i], this.elite[i]);
     const last = --this.count;
     if (i === last) return;
-    for (const a of [
-      this.x, this.z, this.prevX, this.prevZ, this.hp, this.slowed, this.slowT,
-      this.flash, this.kbX, this.kbZ, this.element, this.behavior, this.elite, this.fireT, this.id,
-      this.mark, this.markT, this.vulnT, this.vulnAmt, this.weakT, this.slowAmpT
-    ]) {
-      a[i] = a[last];
-    }
+    for (const a of SWAP_ARRAYS(this)) a[i] = a[last];
   }
 
   clear() {
@@ -666,5 +721,19 @@ export class EnemySystem {
     this._reactionCount = 0;
   }
 }
+
+/**
+ * Every per-enemy array, in one place.
+ *
+ * Compaction swaps the last body into the hole, so this list has to name ALL
+ * of them — a forgotten array leaves one body wearing another's mark or timer.
+ * It used to live inline inside `_kill`; `_remove` (M11 T3) is a second caller
+ * and a second copy would be exactly the drift this list exists to prevent.
+ */
+const SWAP_ARRAYS = (e) => [
+  e.x, e.z, e.prevX, e.prevZ, e.hp, e.slowed, e.slowT,
+  e.flash, e.kbX, e.kbZ, e.element, e.behavior, e.elite, e.fireT, e.id,
+  e.mark, e.markT, e.vulnT, e.vulnAmt, e.weakT, e.slowAmpT
+];
 
 const _push = [0, 0];

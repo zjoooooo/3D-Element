@@ -124,6 +124,7 @@ export class RunManager {
     this.s.tides.reshuffle(this.s.rng);
     this.active = true;
     this.elapsed = 0;
+    this.s.boss?.reset(); // one boss per run
     this.kills = 0;
     this.telegraphs.length = 0;
     this._spawnDebt = 0;
@@ -162,6 +163,11 @@ export class RunManager {
 
     this.elapsed += step;
     const minute = this.elapsed / 60;
+
+    // 首领战 (M11 T3): the encounter reads THIS clock rather than keeping one
+    // of its own, so a paused run, an endless run and a restart all need no
+    // second opinion about what time it is.
+    this.s.boss?.tick(step, this.elapsed, playerPos);
 
     // Accrue spawn debt from the budget curve, jittered ±20%.
     const perSecond = (settings.run.spawnBase + settings.run.spawnQuad * minute * minute) / 60;

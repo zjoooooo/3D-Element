@@ -19,7 +19,8 @@ import { UpgradePool } from '../src/run/UpgradePool.js';
 import { FUSIONS, fusionId, isFusionId, fusionParents, pairKeyOf } from '../src/run/fusions.js';
 import { GameClock } from '../src/run/GameClock.js';
 import { Targets } from '../src/run/Targets.js';
-import { EnemySystem } from '../src/run/EnemySystem.js';
+import { EnemySystem, BEHAVIORS } from '../src/run/EnemySystem.js';
+import { BossSystem } from '../src/run/BossSystem.js';
 import { EnemyProjectiles } from '../src/run/EnemyProjectiles.js';
 import { CombatSystem, rowFor } from '../src/run/CombatSystem.js';
 import { PickupSystem } from '../src/run/PickupSystem.js';
@@ -2638,6 +2639,219 @@ import { AimController } from '../src/input/AimController.js';
   );
 
   console.log('ok  M11 T2: the difficulty model describes this game, not the last one');
+}
+
+/* ---- M11 T3: something worth aiming all of it at ---- */
+{
+  // The boss is not a new kind of thing. It is a FOURTH BEHAVIOUR in the
+  // enemy system — one more entry in BEHAVIORS with its own settings block —
+  // so every hit test, every mark, every debuff channel and every one of the
+  // thirty skills reaches it through the code they already run. A separate
+  // body with its own hit test is how you ship a boss that six skills quietly
+  // cannot touch; this way "zero special cases in the judging layer" is true
+  // by construction, and the assertion below proves it rather than hoping.
+  assert.deepEqual(BEHAVIORS, ['swarm', 'ranged', 'tank', 'boss'], 'boss: is a behaviour, not a parallel system');
+  const B = settings.enemies.boss;
+  assert.ok(B && B.hpMult > 50, 'boss: has its own stat block with a real hp multiplier');
+  assert.ok(B.mass > settings.enemies.tank.mass * 5, 'boss: is heavy enough that knockback is a nudge, not a launch');
+  assert.ok(B.radius > settings.enemies.tank.radius, 'boss: is physically bigger than a tank');
+  assert.ok(B.slowResist > 0 && B.slowResist < 1, 'boss: resists slows without being immune to them');
+
+  const cfg = settings.run.boss;
+  assert.ok(cfg && cfg.afterTides >= 1, 'boss: its entrance is declared in tides, not a hardcoded minute');
+
+  const makeRun = () => {
+    const rng = createRng(4242);
+    const enemies = new EnemySystem(rng);
+    const tides = new TideSchedule(rng);
+    const boss = new BossSystem(enemies, tides);
+    return { enemies, tides, boss, rng };
+  };
+
+  // 1. It arrives on the tide, once, and the tide is where the number lives.
+  {
+    const { enemies, boss } = makeRun();
+    const due = settings.tides.length * settings.run.boss.afterTides;
+    const player = { x: 0, z: 0 };
+    let spawnedAt = null;
+    for (let t = 0; t < settings.run.duration; t += 1) {
+      boss.tick(1, t, player);
+      if (boss.active && spawnedAt === null) spawnedAt = t;
+    }
+    assert.ok(spawnedAt !== null, 'boss: it turns up at all');
+    assert.ok(Math.abs(spawnedAt - due) <= 1, `boss: it turns up at the tide mark (${spawnedAt}s, due ${due}s)`);
+    assert.equal(
+      [...Array(enemies.count).keys()].filter((i) => enemies.behavior[i] === 3).length,
+      1,
+      'boss: exactly one of it, however many ticks ran'
+    );
+  }
+
+  // 2. It is tracked by identity, not index. `_kill` compacts by swapping the
+  //    last body into the hole, so an index captured at spawn points at some
+  //    other enemy the moment anything dies — the classic way a boss health
+  //    bar starts reporting a rat's hp.
+  {
+    const { enemies, boss } = makeRun();
+    const player = { x: 0, z: 0 };
+    for (let t = 0; t <= settings.tides.length * settings.run.boss.afterTides + 2; t += 1) boss.tick(1, t, player);
+    assert.ok(boss.active, 'fixture: the boss is up');
+    const bossId = enemies.id[boss.index];
+    // Stand a crowd behind it and kill them off, forcing the swap-compaction.
+    for (let k = 0; k < 20; k++) enemies.spawnAt(30 + k, 0, 5, 0, 0, 0);
+    for (let k = 0; k < 20; k++) enemies.damage({ x: 30 + k, z: 0 }, 0.6, 1e6);
+    assert.ok(boss.active, 'boss: still alive after the crowd around it died');
+    assert.equal(enemies.id[boss.index], bossId, 'boss: still the same body — tracked by id, not by a stale index');
+  }
+
+  // 3a. Zero special cases, part one: every skill CombatSystem resolves damages
+  //     it. The eight that resolve in their own classes (self/aura/shield) are
+  //     covered by 3b — this fixture drives CombatSystem, and pretending it
+  //     drove FireballAbility too would be the fixture lying about its reach.
+  {
+    const RESOLVED_HERE = new Set(['sweep', 'burst', 'lineTick', 'zoneTick', 'aura', 'coneTick']);
+    const roster = ELEMENTS.filter(
+      (el) => ABILITY_TYPES[el] && settings.combat[el] && RESOLVED_HERE.has(settings.combat[el].kind)
+    );
+    assert.ok(roster.length >= 18, `fixture: ${roster.length} skills resolve in CombatSystem — the sweep is meant to be broad`);
+    const inert = [];
+    for (const el of roster) {
+      const rng = createRng(77);
+      const enemies = new EnemySystem(rng);
+      // Off the exact centre. An aura is an ANNULUS — 剑域 at Lv5 has an inner
+      // edge of 2.26 m and the boss's own radius is 2.20, so a boss parked
+      // precisely on the ring's centre sits 6 cm inside the hole and correctly
+      // takes nothing (WYSIWYG: you can stand inside the ring of blades). That
+      // is the fixture's placement, not the boss's reachability, and reading
+      // it as "剑域 cannot hurt the boss" would have been this block lying.
+      const i = enemies.spawnBoss(1.2, 0, 9);
+      enemies.hp[i] = 5e5;
+      const before = enemies.hp[i];
+      const combat = new CombatSystem(new Targets(), null, () => 5);
+      combat.targets.register(enemies);
+      const c = settings.combat[el];
+      const ability = {
+        element: el, phase: 'impact', impactTime: 0.3, fadeTime: 0,
+        position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+        length: 6, u: 1, autocast: false, quenched: false, fusionMult: 1, castId: 1
+      };
+      for (let t = 0; t < 240; t++) {
+        ability.phase = t < 120 ? 'travel' : 'impact';
+        ability.impactTime = t < 120 ? 0 : (t - 120) / 60;
+        combat.tick(1 / 60, [ability]);
+      }
+      if (!(before - enemies.hp[i] > 0)) inert.push(`${el}(${c.kind})`);
+    }
+    assert.deepEqual(inert, [], `boss: every CombatSystem-resolved skill damages it — inert: ${inert.join(', ')}`);
+  }
+
+  // 3b. …and part two, for the eight that resolve their own hits. They all
+  //     deliver through `Targets` → `EnemySystem`, so what could break for a
+  //     2.2 m body is not the damage but the PAD: every hit test widens its
+  //     reach by the target's own collision radius, and a test that assumed a
+  //     swarm-sized 0.45 would clip a boss standing at the rim. Driven at a
+  //     distance only the boss's own pad can bridge, one call per shape.
+  {
+    const rng = createRng(11);
+    const enemies = new EnemySystem(rng);
+    const bi = enemies.spawnBoss(0, 0, 9);
+    enemies.hp[bi] = 5e5;
+    const R = settings.enemies.boss.radius;
+    // Stand the hit test's edge between a swarm pad and the boss's own: only a
+    // correctly-padded test reaches. `at` is where the boss centre is; the
+    // radius given is small enough that a 0.45 pad would fall short.
+    const gap = R - 0.4;
+    const shapes = [
+      ['damage', () => enemies.damage({ x: gap, z: 0 }, 0.3, 100)],
+      ['damageOnce', () => enemies.damageOnce(9001, { x: gap, z: 0 }, 0.3, 100)],
+      ['damageRing', () => enemies.damageRing({ x: gap, z: 0 }, 0, 0.3, 100)],
+      ['damageCone', () => enemies.damageCone({ x: gap, z: 0 }, -1, 0, Math.PI, 0.3, 100)]
+    ];
+    for (const [name, fire] of shapes) {
+      const before = enemies.hp[bi];
+      const hits = fire();
+      assert.ok(hits > 0, `boss: ${name} pads by the boss's own radius, not a swarm's`);
+      assert.ok(enemies.hp[bi] < before, `boss: ${name} actually took hp off it`);
+    }
+    const beforeSlow = enemies.slowed[bi];
+    enemies.slow({ x: gap, z: 0 }, 0.3, 0.5, 2);
+    assert.ok(enemies.slowed[bi] > beforeSlow, "boss: slow pads by the boss's own radius too");
+  }
+
+  // 4. It is heavy and stubborn, but not a statue: knockback barely moves it
+  //    and a slow still bites, just less.
+  {
+    const rng = createRng(5);
+    const enemies = new EnemySystem(rng);
+    const bi = enemies.spawnBoss(0, 0, 9);
+    const swarm = enemies.spawnAt(0, 3, 9, 0, 0, 0);
+    enemies.knockback({ x: 0, z: 0 }, 6, 1);
+    enemies.knockback({ x: 0, z: 3 }, 6, 1);
+    assert.ok(
+      Math.abs(enemies.kbX[bi]) + Math.abs(enemies.kbZ[bi]) <
+        (Math.abs(enemies.kbX[swarm]) + Math.abs(enemies.kbZ[swarm])) * 0.2,
+      'boss: the same shove moves it a fraction of what it moves a swarm body'
+    );
+    enemies.slow({ x: 0, z: 0 }, 8, 0.5, 2);
+    assert.ok(enemies.slowed[bi] > 0, 'boss: a slow still lands on it');
+    assert.ok(enemies.slowed[bi] < enemies.slowed[swarm], 'boss: …but bites less than on a swarm body');
+    assert.ok(
+      Math.abs(enemies.slowed[bi] - 0.5 * (1 - settings.enemies.boss.slowResist)) < 1e-6,
+      'boss: and by exactly the resist the settings declare'
+    );
+  }
+
+  // 5. Its presence decides nothing about the run's verdict, and its death is
+  //    not a win. The run ends on the clock and on the player's hp, as before.
+  {
+    const { boss } = makeRun();
+    assert.equal(typeof boss.hp01, 'number', 'boss: reports a 0..1 health fraction for the bar');
+    assert.equal(boss.hp01, 0, 'boss: reads zero while it is not here');
+    assert.equal(boss.active, false, 'boss: is not here before its tide');
+  }
+
+  // 6. The REAL run drives it. Every check above builds a BossSystem by hand
+  //    and ticks it by hand — which is precisely the fixture-supplies-the-
+  //    wiring trap M10 T3 shipped once (the test injected a `levelOf` the App
+  //    never had). So: a real RunManager, started, ticked on its own clock,
+  //    and nobody tells the boss what time it is.
+  {
+    const enemies = new EnemySystem(createRng(31));
+    const boss = new BossSystem(enemies, new TideSchedule(createRng(32)));
+    const run = new RunManager({
+      enemies,
+      pickups: new PickupSystem(createRng(33)),
+      player: new PlayerState(),
+      rng: createRng(34),
+      tides: new TideSchedule(createRng(35)),
+      boss,
+      projectiles: new EnemyProjectiles(),
+      combat: { tick: () => 0, release: () => -1, resetStats: () => {}, book: () => {} },
+      targets: { register: () => {} },
+      abilities: { active: [] }
+    });
+    run.start();
+    assert.equal(boss.active, false, 'run: no boss at the start of a run');
+    const due = settings.tides.length * settings.run.boss.afterTides;
+    const player = { x: 0, z: 0 };
+    // Real ticks on the run's own clock, no hand-set elapsed. The player is
+    // kept upright on purpose: nine minutes of unanswered horde kills it, and
+    // `tick` returns 'dead' without advancing anything — the run would stop
+    // before the boss was ever due and this check would read "no boss" as a
+    // defect. Same stopped-clock trap M9 T3 fell into.
+    const alive = run.s.player;
+    for (let t = 0; t < due - 2; t += 1 / 6) { alive.hp = alive.maxHp; run.tick(1 / 6, player); }
+    assert.equal(boss.active, false, `run: still none two seconds before the ${due}s mark`);
+    for (let t = 0; t < 4; t += 1 / 6) { alive.hp = alive.maxHp; run.tick(1 / 6, player); }
+    assert.ok(boss.active, 'run: RunManager brings it on at the tide mark — nothing else had to');
+    assert.ok(boss.hp01 > 0.99, 'run: it arrives at full health');
+
+    // …and a restart puts it away again, so a second run gets its own.
+    run.start();
+    assert.equal(boss.active, false, 'run: a restart clears the boss');
+  }
+
+  console.log('ok  M11 T3: something worth aiming all of it at');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

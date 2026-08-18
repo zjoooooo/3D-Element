@@ -63,7 +63,12 @@ export class RunHud {
       '<div class="run-hud__ult-key">F</div>' +
       '</div>' +
       '</div>' +
-      '<div class="run-hud__xp" data-xp><i data-xp-fill></i></div>';
+      '<div class="run-hud__xp" data-xp><i data-xp-fill></i></div>' +
+      // 首领战 (M11 T3): hidden until there is one. The fill is driven off the
+      // boss's LIVE hp over the hp it spawned with — BossSystem#hp01 — never a
+      // number this class keeps its own copy of.
+      '<div class="run-hud__boss" data-boss hidden>' +
+      '<span data-k="bossName"></span><i data-boss-fill></i></div>';
     parent.appendChild(this.root);
 
     this._fields = Object.fromEntries(
@@ -75,6 +80,8 @@ export class RunHud {
     this._ultFill = this.root.querySelector('[data-ult-fill]');
     this._xp = this.root.querySelector('[data-xp]');
     this._xpFill = this.root.querySelector('[data-xp-fill]');
+    this._boss = this.root.querySelector('[data-boss]');
+    this._bossFill = this.root.querySelector('[data-boss-fill]');
 
     /** One entry per seat, index-matched — never rebuilt, only mutated. */
     this._slots = [...this.root.querySelectorAll('.hud-slot')].map((slotRoot) => ({
@@ -150,13 +157,23 @@ export class RunHud {
    * preallocated 6-entry `{active, remaining, total, lowMana}` array, or
    * omitted to leave the skill bar's cooldown/mana visuals as they were.
    */
-  update(player, run, pickups, tideInfo, resonanceText, ultimate, cooldowns) {
+  update(player, run, pickups, tideInfo, resonanceText, ultimate, cooldowns, boss = null) {
     const s = Math.floor(run.elapsed);
     this._set('time', `${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`);
     this._set('kills', `${t('run.kills')} ${run.kills}`);
     this._set('level', `${t('run.level')} ${pickups.level}`);
     this._set('resonance', resonanceText);
     this._updateTide(tideInfo);
+
+    // 首领战 (M11 T3). `hp01` is 0 whenever there is no boss, so "is one here"
+    // and "how hurt is it" are the same read — no second flag to fall out of
+    // step with the body.
+    const bossUp = !!boss?.active;
+    this._boss.hidden = !bossUp;
+    if (bossUp) {
+      this._bossFill.style.setProperty('--ratio', boss.hp01);
+      this._set('bossName', t('run.boss'));
+    }
 
     const dodgeRatio = Math.max(
       0,

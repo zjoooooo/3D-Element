@@ -214,7 +214,16 @@ export const settings = {
     enemyCap: 300, // hard on-screen ceiling; spawns beyond it are refused (recycling is a future decision)
     spawnBase: 20, // enemies per minute at minute 0
     spawnQuad: 2.2, // + quad * minute² — gentle start, fierce final tide
-    spawnRadius: 26, // metres from the player enemies appear at (outside view)
+    spawnRadius: 26,
+    /**
+     * 首领战 (M11 T3). The entrance is counted in TIDES, not minutes: the run's
+     * shape is five tides, so "after the third" survives any change to
+     * `tides.length` or `run.duration` that a bare minute number would silently
+     * mis-place. Three tides in is a little after minute nine, which lands just
+     * past T1's "four skills maxed by minute ten" — the player is finished
+     * assembling right when there is finally something to point it all at.
+     */
+    boss: { afterTides: 3, spawnDistance: 14 }, // metres from the player enemies appear at (outside view)
     arenaRadius: 40, // playable field; matches character.roamRadius in run mode
     // M11 T1 (升级提速): 22/1.13 put a baseline run at level 20 by minute ten
     // — nineteen level-ups, a median of two maxed skills, and not one run in
@@ -465,6 +474,22 @@ export const settings = {
     swarm: { speed: 3.2, radius: 0.45, contactDamage: 8, hpMult: 1, mass: 1 },
     ranged: { speed: 2.4, radius: 0.5, contactDamage: 6, hpMult: 2, mass: 0.8, holdRange: 8, fireEvery: 2.4 },
     tank: { speed: 1.4, radius: 0.7, contactDamage: 20, hpMult: 6, mass: 4 },
+    /**
+     * 首领 (M11 T3) — the fourth behaviour, not a parallel system.
+     *
+     * Every hit test in the game reads `settings.enemies[BEHAVIORS[behavior]]`,
+     * so declaring the boss here is what makes all thirty skills reach it with
+     * no new branch anywhere: its size pads the same way a tank's does, its
+     * mass divides the same knockback, its hp rides the same per-minute curve.
+     * A boss with its own body and its own hit test is how six skills end up
+     * quietly unable to touch it.
+     *
+     * `mass` is the knockback answer (the shove is `knockback / mass`, so 200
+     * makes it a nudge rather than a special case), and `slowResist` is the
+     * control answer — resisted, never immune, because a boss you cannot slow
+     * at all deletes水's whole identity from the fight.
+     */
+    boss: { speed: 1.15, radius: 2.2, contactDamage: 26, hpMult: 900, mass: 200, slowResist: 0.6 },
     /** Behaviour mix by minute: shares ramp in as the run ages (sim's 70/20/10). */
     mix: { rangedFrom: 1.5, rangedShare: 0.2, tankFrom: 3, tankShare: 0.1 },
     projectile: { speed: 7, radius: 0.3, damage: 12, life: 3 },
