@@ -489,7 +489,31 @@ export const settings = {
      * control answer — resisted, never immune, because a boss you cannot slow
      * at all deletes水's whole identity from the fight.
      */
-    boss: { speed: 1.15, radius: 2.2, contactDamage: 26, hpMult: 900, mass: 200, slowResist: 0.6 },
+    boss: {
+      speed: 1.15, radius: 2.2, contactDamage: 26, hpMult: 900, mass: 200, slowResist: 0.6,
+      /**
+       * 三幕 (M11 T4). Three acts, one move unlocked per act.
+       *
+       * **Every number below states its own unit, because that is the mistake
+       * this project has made four times** (M8: sweep, aura, coneTick, and the
+       * fusion grind all sized an impulse and applied it per tick, and each
+       * one threw its own targets clear and delivered a sixth of its budget):
+       *
+       *   `knockback` — a single IMPULSE, applied once per charge. NOT per second.
+       *   `stunTime`  — a DURATION in seconds. NOT a per-tick accrual.
+       *   `count`     — a COUNT per call. NOT a rate.
+       *   `every` / `telegraph` — seconds.
+       *
+       * `telegraph` is the warning, and it is the real footprint: the ring the
+       * player sees is the circle that will be judged (WYSIWYG, spec §3).
+       */
+      fight: {
+        phaseAt: [0.66, 0.33],
+        charge: { every: 7, telegraph: 1.1, damage: 34, radius: 3.2, knockback: 26, range: 13 },
+        quake: { every: 9, telegraph: 1.4, damage: 26, radius: 6.5, stunTime: 0.9 },
+        summon: { every: 11, telegraph: 1.0, count: 6, ringRadius: 7 }
+      }
+    },
     /** Behaviour mix by minute: shares ramp in as the run ages (sim's 70/20/10). */
     mix: { rangedFrom: 1.5, rangedShare: 0.2, tankFrom: 3, tankShare: 0.1 },
     projectile: { speed: 7, radius: 0.3, damage: 12, life: 3 },

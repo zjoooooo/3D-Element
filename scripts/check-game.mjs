@@ -2854,6 +2854,160 @@ import { AimController } from '../src/input/AimController.js';
   console.log('ok  M11 T3: something worth aiming all of it at');
 }
 
+/* ---- M11 T4: a fight with three acts ---- */
+{
+  // Three phases and one new move each. The whole risk surface here is M8's
+  // channel rule: every per-tick force/control/damage has to say, AT THE
+  // CHANNEL, whether its number is a per-second RATE or a single IMPULSE.
+  // That same mistake shipped four times in one milestone (sweep, aura,
+  // coneTick, and the fusion grind), each time as a field that threw its own
+  // targets clear and delivered a sixth of its budget. So each of the three
+  // moves gets its own semantic assertion, and they are the point of this
+  // block far more than "the phase changed".
+  const F = settings.enemies.boss.fight;
+  assert.ok(F, 'boss: the fight has its own block');
+  assert.deepEqual(
+    F.phaseAt.slice().sort((a, b) => b - a),
+    F.phaseAt.slice(),
+    'boss: phase thresholds descend'
+  );
+  assert.equal(F.phaseAt.length, 2, 'boss: three phases means two thresholds');
+  assert.ok(F.phaseAt[0] < 1 && F.phaseAt[1] > 0, 'boss: the thresholds are real fractions');
+
+  const stage = (hp01) => {
+    const rng = createRng(61);
+    const enemies = new EnemySystem(rng);
+    const boss = new BossSystem(enemies, new TideSchedule(rng));
+    boss.tick(1, boss.dueAt, { x: 0, z: 0 });
+    const i = boss.index;
+    enemies.hp[i] = boss._maxHp * hp01;
+    // The boss walks in `run.boss.spawnDistance` away from the player, so a
+    // dummy at the origin is fourteen metres from it — outside every move in
+    // the table. Put targets where the boss actually is.
+    const at = { x: enemies.x[i], z: enemies.z[i] };
+    const dummy = (dx = 0, dz = 0) => {
+      const j = enemies.spawnAt(at.x + dx, at.z + dz, 9, 0, 0, 0);
+      enemies.hp[j] = 5e4;
+      return j;
+    };
+    return { enemies, boss, i, at, dummy };
+  };
+
+  // 1. Phases step down at the thresholds, once each, and never step back up.
+  {
+    const { enemies, boss, i } = stage(1);
+    assert.equal(boss.phase, 0, 'boss: opens in phase 0');
+    const seen = [];
+    for (let k = 0; k <= 100; k++) {
+      enemies.hp[boss.index] = boss._maxHp * (1 - k / 100);
+      boss.tick(1 / 60, boss.dueAt + k, { x: 0, z: 0 });
+      seen.push(boss.phase);
+    }
+    for (let k = 1; k < seen.length; k++) {
+      assert.ok(seen[k] >= seen[k - 1], `boss: phase never goes backwards (${seen[k - 1]} → ${seen[k]} at step ${k})`);
+    }
+    assert.equal(seen[seen.length - 1], 2, 'boss: reaches the last phase on the way down');
+    assert.equal(new Set(seen).size, 3, 'boss: passes through all three, no skipping');
+    // Healing it back up must not re-open an act.
+    enemies.hp[boss.index] = boss._maxHp;
+    boss.tick(1 / 60, boss.dueAt + 200, { x: 0, z: 0 });
+    assert.equal(boss.phase, 2, 'boss: a heal does not rewind the fight');
+    assert.ok(i >= 0);
+  }
+
+  // 2. THE CHANNEL RULE, move by move.
+  //
+  // 2a. 碾压冲锋 — the shove is an IMPULSE. One charge, one launch. Landing it
+  //     twice in a row must therefore add twice, and the same charge applied
+  //     over a longer tick must NOT get bigger: a per-tick reading of an
+  //     impulse-sized number is exactly what threw 磁暴's targets at 45 m/s.
+  {
+    const a = stage(1);
+    // Placement is load-bearing here, and two obvious spots are both blind.
+    // The charge lands at range 8 with a 3.2 m blast: a body at -4 is outside
+    // it and feels no baseline shove at all, and a body at -8 is dead centre,
+    // where the push direction degenerates to zero. At -6 it is inside the
+    // blast and off-centre, so a forgotten kbScale reads as 22 against the
+    // bare impulse's 26 — which is the whole point of the check below.
+    const t1 = a.dummy(-6, 0);
+    a.boss.charge(a.at, { x: a.at.x - 8, z: a.at.z }, 1 / 60);
+    const oneTick = Math.hypot(a.enemies.kbX[t1], a.enemies.kbZ[t1]);
+    assert.ok(oneTick > 0, 'boss: the charge shoves at all');
+
+    const b = stage(1);
+    const t2 = b.dummy(-6, 0);
+    b.boss.charge(b.at, { x: b.at.x - 8, z: b.at.z }, 1 / 6);
+    const longTick = Math.hypot(b.enemies.kbX[t2], b.enemies.kbZ[t2]);
+    assert.ok(
+      Math.abs(longTick - oneTick) < oneTick * 0.01,
+      `boss: the charge is an IMPULSE — a ten-times-longer tick must not shove ten times as hard (${oneTick.toFixed(3)} vs ${longTick.toFixed(3)})`
+    );
+
+    // …and it is ONE launch, not two. `damage()` applies a baseline shove of
+    // its own unless told otherwise, so a charge that forgets to pass kbScale 0
+    // lands its impulse AND that baseline — a double launch that the tick-length
+    // check above cannot see, because both ticks would be equally wrong.
+    // Measured against the bare impulse, which is the only shove that should
+    // have happened.
+    {
+      const c = stage(1);
+      const t3 = c.dummy(-6, 0);
+      const row = settings.enemies.boss.fight.charge;
+      const reach = Math.min(row.range, 8);
+      c.enemies.knockback({ x: c.at.x, z: c.at.z }, reach + row.radius, row.knockback);
+      const impulseOnly = Math.hypot(c.enemies.kbX[t3], c.enemies.kbZ[t3]);
+      assert.ok(
+        Math.abs(oneTick - impulseOnly) < impulseOnly * 0.02,
+        `boss: the charge launches ONCE — ${oneTick.toFixed(3)} against the bare impulse's ${impulseOnly.toFixed(3)}`
+      );
+    }
+  }
+
+  // 2b. 震地 — the control is a DURATION, not a rate. Its slow timer must read
+  //     the seconds the settings declare regardless of the tick it landed on.
+  {
+    for (const step of [1 / 60, 1 / 6]) {
+      const a = stage(0.5);
+      const t = a.dummy(3, 0);
+      a.boss.quake(a.at, step);
+      assert.ok(
+        Math.abs(a.enemies.slowT[t] - F.quake.stunTime) < 1e-6,
+        `boss: 震地's stun is a DURATION — ${F.quake.stunTime}s whatever the tick (step ${step.toFixed(3)} gave ${a.enemies.slowT[t].toFixed(3)})`
+      );
+      assert.ok(a.enemies.slowed[t] >= 0.99, 'boss: …and it is a full stun while it lasts');
+    }
+  }
+
+  // 2c. 召唤 — a COUNT, not a rate. One call summons the number in the table,
+  //     not that number per second.
+  {
+    for (const step of [1 / 60, 1 / 6]) {
+      const a = stage(0.3);
+      const before = a.enemies.count;
+      a.boss.summon(9, step);
+      assert.equal(
+        a.enemies.count - before,
+        F.summon.count,
+        `boss: 召唤 is a COUNT — ${F.summon.count} bodies per call, not per second (step ${step.toFixed(3)})`
+      );
+    }
+  }
+
+  // 3. Every move telegraphs, and the warning is the real footprint (WYSIWYG).
+  {
+    const { boss } = stage(0.3);
+    for (const move of ['charge', 'quake', 'summon']) {
+      const row = F[move];
+      assert.ok(row.every > 0, `boss: ${move} has a real cooldown`);
+      assert.ok(row.telegraph > 0, `boss: ${move} warns before it lands`);
+      assert.ok(row.telegraph < row.every, `boss: ${move}'s warning fits inside its cooldown`);
+    }
+    assert.ok(typeof boss.windup === 'object', 'boss: exposes what it is winding up, for the renderer to draw');
+  }
+
+  console.log('ok  M11 T4: a fight with three acts');
+}
+
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
 {
   const count = { a: 0, b: 0 };
