@@ -164,3 +164,19 @@ export class Modifiers {
     return true;
   }
 }
+
+/**
+ * 角色本命被动 (M12 T3): one free level of the character's innate passive.
+ *
+ * A function over Modifiers rather than a method on it, because Modifiers
+ * deliberately knows nothing about characters — it is the run's number layer,
+ * and which body is on stage is App state. The grant rides `bumpPassive`, so
+ * a natal level and a drafted level are indistinguishable to every read site,
+ * caps included. An unknown character grants nothing: the sandbox has no
+ * character notion at all, and null-safety is the sandbox contract.
+ */
+export function grantNatal(mods, characterId) {
+  const passive = settings.character.natal?.[characterId];
+  if (!passive || !(passive in PASSIVES)) return;
+  mods.bumpPassive(passive);
+}

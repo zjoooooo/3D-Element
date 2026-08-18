@@ -212,6 +212,9 @@ function measureFacing(root) {
  */
 export class CharacterController {
   constructor(environment) {
+    /** CHARACTERS key of the body on stage — settings.character.model until
+     * the first setCharacter call resolves something else. */
+    this.id = CHARACTERS[settings.character.model] ? settings.character.model : Object.keys(CHARACTERS)[0];
     this.environment = environment;
     this.root = new Group();
     this.root.name = 'Character';
@@ -284,6 +287,11 @@ export class CharacterController {
    */
   async setCharacter(id, assets) {
     const character = CHARACTERS[id] ?? Object.values(CHARACTERS)[0];
+    // M12 T3: record the RESOLVED id — the fallback body, not the requested
+    // string. `grantNatal` keys the innate passive off this, and an id that
+    // was never written here made the grant silently nothing (caught before
+    // ship: `this.character.id` simply did not exist).
+    this.id = CHARACTERS[id] ? id : Object.keys(CHARACTERS)[0];
     let bundle = this._bundles.get(character);
     if (!bundle) {
       bundle = await this._buildBundle(character, assets);

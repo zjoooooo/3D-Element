@@ -753,6 +753,15 @@ export const settings = {
   /* Character                                                           */
   /* ------------------------------------------------------------------ */
   character: {
+    /**
+     * 角色本命被动 (M12 T3, spec §12 v2): what each body knows before the
+     * first card is drawn — one free level of one existing passive, granted
+     * at startRun. The sorcerer (the roll character) moves; the classic
+     * endures. Keys are CHARACTERS ids, values are PASSIVES ids — the suite
+     * refuses a typo here, because a misspelled passive would be silently
+     * nothing.
+     */
+    natal: { classic: 'vitality', sorcerer: 'swift' },
     // Which rig is on stage — a key of CHARACTERS in CharacterController.
     model: 'sorcerer',
 

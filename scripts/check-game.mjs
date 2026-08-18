@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { createRng } from '../src/run/rng.js';
 import { settings, ELEMENTS, ELEMENT_META, permanentAuraElements, CastShape, castShapeOf } from '../src/config/settings.js';
 import { TideSchedule, WUXING, WUXING_LABEL, BEATS, FEEDS } from '../src/run/TideSchedule.js';
-import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
+import { Modifiers, PASSIVES, grantNatal } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
 import { UpgradePool } from '../src/run/UpgradePool.js';
 import { FUSIONS, fusionId, isFusionId, fusionParents, pairKeyOf } from '../src/run/fusions.js';
@@ -3293,6 +3293,66 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   console.log('ok  M12 T2: the steles were already glowing, now they mean it');
+}
+
+/* ---- M12 T3: each body arrives knowing one thing ---- */
+{
+  // 角色本命被动 (spec §12 v2): each playable character opens the run with one
+  // level of one passive, free — the sorcerer moves (swift), the classic
+  // endures (vitality). Table-driven off the PASSIVES the draft already
+  // deals, so there is no new channel anywhere: a natal level and a drafted
+  // level are the same thing to every read site.
+  const NATAL = settings.character.natal;
+  assert.ok(NATAL && Object.keys(NATAL).length >= 2, 'natal: every character has an innate');
+  for (const [who, passive] of Object.entries(NATAL)) {
+    assert.ok(passive in PASSIVES, `natal: ${who}'s innate '${passive}' is a real passive — a typo here would be silently nothing`);
+  }
+  assert.notEqual(NATAL.classic, NATAL.sorcerer, 'natal: the two characters differ — an identity, not a stat stick');
+
+  // The grant itself, through the real Modifiers.
+  {
+    const mods = new Modifiers(createRng(96));
+    grantNatal(mods, 'sorcerer');
+    assert.equal(mods.passiveLevel(NATAL.sorcerer), 1, 'natal: the sorcerer opens with its innate at level one');
+    assert.equal(mods.passiveLevel(NATAL.classic), 0, 'natal: …and not with the other body\'s');
+    // reset() wipes everything per run — the grant must land AFTER it, every
+    // run, which is why the order lives in startRun and is pinned below.
+    mods.reset();
+    assert.equal(mods.passiveLevel(NATAL.sorcerer), 0, 'fixture: reset really wipes it');
+    grantNatal(mods, 'sorcerer');
+    assert.equal(mods.passiveLevel(NATAL.sorcerer), 1, 'natal: a restart grants it again');
+  }
+
+  // The cap holds: natal + a full draft of the same passive never exceeds max.
+  {
+    const mods = new Modifiers(createRng(97));
+    grantNatal(mods, 'sorcerer');
+    const id = NATAL.sorcerer;
+    for (let k = 0; k < PASSIVES[id].max + 5; k++) mods.bumpPassive(id);
+    assert.ok(mods.passiveLevel(id) <= PASSIVES[id].max, `natal: the innate level still respects ${id}'s max`);
+  }
+
+  // An unknown character falls back loudly-but-safely: no grant, no throw —
+  // the sandbox constructs Modifiers with no character at all.
+  {
+    const mods = new Modifiers(createRng(98));
+    assert.doesNotThrow(() => grantNatal(mods, 'nobody'), 'natal: an unknown body grants nothing rather than crashing');
+    for (const passive of Object.values(NATAL)) assert.equal(mods.passiveLevel(passive), 0);
+  }
+
+  // And the wiring: startRun is where the grant must live (after
+  // modifiers.reset(), keyed off the character on stage). Source-pinned
+  // because no headless fixture builds an App (M10's rule), with the
+  // behaviour left to the browser pass.
+  {
+    const appSrc = readFileSync(new URL('../src/core/App.js', import.meta.url), 'utf8');
+    const resetAt = appSrc.indexOf('this.modifiers.reset();');
+    const grantAt = appSrc.indexOf('grantNatal(');
+    assert.ok(resetAt !== -1 && grantAt !== -1, 'wiring: startRun grants the natal passive');
+    assert.ok(grantAt > resetAt, 'wiring: …AFTER the reset that would wipe it');
+  }
+
+  console.log('ok  M12 T3: each body arrives knowing one thing');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

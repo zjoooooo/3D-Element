@@ -28,7 +28,7 @@ import { CombatSystem } from '../run/CombatSystem.js';
 import { bpFlag } from '../run/breakpoints.js';
 import { PickupSystem } from '../run/PickupSystem.js';
 import { PlayerState } from '../run/PlayerState.js';
-import { Modifiers } from '../run/Modifiers.js';
+import { Modifiers, PASSIVES, grantNatal } from '../run/Modifiers.js';
 import { Loadout } from '../run/Loadout.js';
 import { UpgradePool } from '../run/UpgradePool.js';
 import { UpgradeUi } from '../run/UpgradeUi.js';
@@ -673,6 +673,9 @@ export class App {
     // seated at slot 0.
     this.ultimate.wuxing = fusionWux(this.loadout.elementAt(0));
     this.modifiers.reset();
+    // 角色本命被动 (M12 T3): after the reset that would wipe it, before the
+    // run reads anything — the body on stage opens knowing one thing.
+    grantNatal(this.modifiers, this.character.id);
     this.run.start();
     this._refreshResonance();
     this._syncBadges();
@@ -1620,7 +1623,20 @@ export class App {
         }
         return `${key} ${ELEMENT_META[element]?.label ?? element} Lv${level}`;
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      // 角色本命被动 (M12 T3): the one line here that is not a seat — the body
+      // opened with it, the summary should say so. Reads the live passive
+      // level rather than assuming 1, so a drafted second level shows too.
+      .concat(this._natalLine() ?? []);
+  }
+
+  /** `本命 · 疾行 Lv1`, or null when the stage body has no innate (sandbox). */
+  _natalLine() {
+    const passive = settings.character.natal?.[this.character?.id];
+    if (!passive) return null;
+    const level = this.modifiers?.passiveLevel(passive) ?? 0;
+    if (!level) return null;
+    return `${t('run.natal')} · ${PASSIVES[passive]?.name ?? passive} Lv${level}`;
   }
 
   /** Decline-all-three's reward: heal a fraction of max hp (shared by the level-up hand's skip and an empty shard hand). */
