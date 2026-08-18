@@ -52,6 +52,8 @@ export const STRINGS = {
     'verdict.lost': '倒下了',
     'verdict.survived': '存活',
     'verdict.topSkills': '输出前三：',
+    // M11 T1 (每级两选): which of this level-up's picks you are on.
+    'run.pickOf': '第 {n}/{m} 张',
     'bp.cyclonecut.lv3': '环带扩张',
     'bp.cyclonecut.lv5': '牵引更紧',
     'bp.piercelance.lv3': '枪身加宽',
@@ -178,6 +180,7 @@ export const STRINGS = {
     'verdict.lost': 'You Fell',
     'verdict.survived': 'Survived',
     'verdict.topSkills': 'Top damage: ',
+    'run.pickOf': 'Pick {n} of {m}',
     'bp.cyclonecut.lv3': 'Wider ring',
     'bp.cyclonecut.lv5': 'Tighter pull',
     'bp.piercelance.lv3': 'Broader lance',

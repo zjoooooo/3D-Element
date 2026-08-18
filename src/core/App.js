@@ -523,6 +523,7 @@ export class App {
           this._skipHeal();
           this.hud.showToast(t('run.shardFizzle'));
         } else {
+          this._picksLeft = 1; // a shard is one card, not a level (see the level-up site)
           this.upgradeUi.open(hand, { rerolls: 0, summary: this._buildSummaryLines().join('　') });
         }
       };
@@ -1620,15 +1621,20 @@ export class App {
     if (result.action === 'reroll') {
       this._rerollsLeft = (this._rerollsLeft ?? this.modifiers.passiveLevel('reroll')) - 1;
       const hand = this.upgradePool.draw(this.pickups.level);
+      // A reroll replaces the hand, it does not spend one of the level's picks.
+      const picks = Math.max(1, Math.round(settings.upgrades.picksPerLevel ?? 1));
       this.upgradeUi.open(hand, {
         rerolls: hand.length ? Math.max(0, this._rerollsLeft) : 0,
-        summary: this._buildSummaryLines().join('　')
+        summary: this._buildSummaryLines().join('　'),
+        pick: picks - Math.max(0, (this._picksLeft ?? 1) - 1),
+        picks: this._picksLeft > 1 || picks === 1 ? picks : 1
       });
       return;
     }
     this._rerollsLeft = null;
     if (result.action === 'skip') {
       this._skipHeal();
+      this._picksLeft = 0; // waiving ends the whole level-up, not just this card
       return;
     }
     const card = result.card;
@@ -1679,6 +1685,31 @@ export class App {
         this.playerState.maxHp = grown;
       }
     }
+
+    // M11 T1 (每级两选): the card above is applied, so the next hand is drawn
+    // against the build it just changed. Deal it here rather than in the
+    // level-up branch of frame(), because UpgradeUi has already closed itself
+    // by the time this runs (its own close() note) and `pendingLevels` was
+    // decremented when the level was granted — reopening from the handler is
+    // the same shape the reroll branch above already uses.
+    const picks = Math.max(1, Math.round(settings.upgrades.picksPerLevel ?? 1));
+    if (this._picksLeft > 1) {
+      this._picksLeft--;
+      const next = this.upgradePool.draw(this.pickups.level);
+      if (next.length) {
+        this.upgradeUi.open(next, {
+          rerolls: next.length ? this.modifiers.passiveLevel('reroll') : 0,
+          summary: this._buildSummaryLines().join('　'),
+          pick: picks - this._picksLeft + 1,
+          picks
+        });
+        return;
+      }
+      // Nothing left to offer (a fully maxed build): heal instead of dealing
+      // an empty hand, same as the shard path does when the pool runs dry.
+      this._skipHeal();
+    }
+    this._picksLeft = 0;
   }
 
   /**
@@ -1926,9 +1957,17 @@ export class App {
           sinceLevel === this.pickups.level ? this.pickups.level : sinceLevel
         );
         this.audio.play('levelup');
+        // M11 T1 (每级两选): a level-up grants `picksPerLevel` cards, redrawn
+        // between them so the second hand sees what the first one did — the
+        // Lv3 card can only appear behind the Lv2 card you just took. The
+        // shard hand below is deliberately NOT part of this: it is a pickup
+        // reward, not a level, and stays one card.
+        this._picksLeft = Math.max(1, Math.round(settings.upgrades.picksPerLevel ?? 1));
         this.upgradeUi.open(hand, {
           rerolls: hand.length ? this.modifiers.passiveLevel('reroll') : 0,
-          summary: this._buildSummaryLines().join('　')
+          summary: this._buildSummaryLines().join('　'),
+          pick: 1,
+          picks: this._picksLeft
         });
       }
       if (this._verdict.value !== 'playing' && this.run.active) {

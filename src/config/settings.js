@@ -216,8 +216,14 @@ export const settings = {
     spawnQuad: 2.2, // + quad * minute² — gentle start, fierce final tide
     spawnRadius: 26, // metres from the player enemies appear at (outside view)
     arenaRadius: 40, // playable field; matches character.roamRadius in run mode
-    xpBase: 22, // xp to reach level 1...
-    xpGrowth: 1.13, // ...times this per level
+    // M11 T1 (升级提速): 22/1.13 put a baseline run at level 20 by minute ten
+    // — nineteen level-ups, a median of two maxed skills, and not one run in
+    // four hundred reaching the four the owner asked for. Lowering the base
+    // alone saturates fast (22→15 bought three levels), because the growth
+    // term dominates; 18/1.10 puts minute ten at level 26. Measured against
+    // sim-run's baseline bot, 400 runs per point — see the M11 plan's table.
+    xpBase: 18, // xp to reach level 1...
+    xpGrowth: 1.1, // ...times this per level
     gemBase: 1, // green gem value at minute 0
     gemPerMinute: 0.12, // green gems appreciate as the run ages
     magnetRadius: 2, // metres gems fly to the player from
@@ -417,7 +423,17 @@ export const settings = {
     // cards it happened to hold, so registering skills rewrote the draft
     // without anyone editing a number — M8's ten took new-skill cards from
     // 68% of a hand to 77%.
-    passiveWeights: { upgrade: 3, newActive: 2, passive: 1, mutation: 3 },
+    passiveWeights: { upgrade: 6, newActive: 2, passive: 1, mutation: 3 }, // M11 T1: upgrade 3→6
+    /**
+     * How many cards a single level-up lets you take (M11 T1, 每级两选).
+     *
+     * The lever that actually moves 满级 count. Weight alone does not — the
+     * hand only offers upgrades for what is seated, so raising the weight
+     * just reshuffles the same one pick. A second pick is a second decision,
+     * and each one is redrawn AFTER the first is applied, so the Lv3 card can
+     * appear behind the Lv2 card you just took.
+     */
+    picksPerLevel: 2,
 
     /**
      * 满级异化 (M9 T2): once a skill can take no more levels, its seat offers

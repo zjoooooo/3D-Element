@@ -1360,23 +1360,34 @@ import { AimController } from '../src/input/AimController.js';
   // it is testing, so it can never fail on a weight edit (review catch).
   assert.deepEqual(
     settings.upgrades.passiveWeights,
-    { upgrade: 3, newActive: 2, passive: 1, mutation: 3 },
-    'draft: the shipped category weights, every card kind declared (M9 T2 added mutation at the upgrade tier — a maxed seat should feel like an upgrade seat)'
+    { upgrade: 6, newActive: 2, passive: 1, mutation: 3 },
+    'draft: the shipped category weights, every card kind declared (M9 T2 added mutation at the upgrade tier; M11 T1 raised upgrade 3→6 so a level-up more often deepens what you already hold)'
   );
 
-  // The weights mean what they say, at the category level: 3 : 2 : 1.
+  // The weights mean what they say, at the category level.
+  //
+  // The tolerance is RELATIVE, not the absolute ±0.5 it used to be. That
+  // constant was sized for a 3:1 ratio and silently became a 8%-of-target
+  // band when M11 T1 raised the upgrade weight to 6 — a check that gets
+  // stricter as the number it measures grows is a check that will fail for
+  // the wrong reason. The observed drift is structural rather than noise: a
+  // hand whose passive pool is exhausted renormalises over the remaining
+  // kinds, which lifts the upgrade share above the nominal ratio. ±25% is
+  // wide enough for that and still nowhere near blind — weights ignored
+  // entirely reads as ~1.0 against a target of 6.
   {
     const w = settings.upgrades.passiveWeights;
     const s = shares(4);
-    const ratio = (a, b) => s[a] / s[b];
-    assert.ok(
-      Math.abs(ratio('upgrade', 'passive') - w.upgrade / w.passive) < 0.5,
-      `draft: upgrade:passive tracks the weights (got ${ratio('upgrade', 'passive').toFixed(2)}, want ${(w.upgrade / w.passive).toFixed(2)})`
-    );
-    assert.ok(
-      Math.abs(ratio('new', 'passive') - w.newActive / w.passive) < 0.5,
-      `draft: new:passive tracks the weights (got ${ratio('new', 'passive').toFixed(2)}, want ${(w.newActive / w.passive).toFixed(2)})`
-    );
+    const tracks = (a, b, wa, wb, label) => {
+      const got = s[a] / s[b];
+      const want = wa / wb;
+      assert.ok(
+        Math.abs(got / want - 1) < 0.25,
+        `draft: ${label} tracks the weights (got ${got.toFixed(2)}, want ${want.toFixed(2)}, ${((got / want - 1) * 100).toFixed(0)}% off)`
+      );
+    };
+    tracks('upgrade', 'passive', w.upgrade, w.passive, 'upgrade:passive');
+    tracks('new', 'passive', w.newActive, w.passive, 'new:passive');
   }
 
   // An empty category renormalises rather than shrinking the hand: a full
@@ -2409,6 +2420,135 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   console.log('ok  M11 T0: a count tier reaches the damage, not just the mesh');
+}
+
+/* ---- M11 T1: four skills maxed by minute ten ---- */
+{
+  // The owner's acceptance line, and it was a long way off: at minute ten a
+  // baseline run is nineteen level-ups deep and holds a median of TWO maxed
+  // skills, with zero runs reaching four. Measured, not guessed — and the
+  // measuring is what saved the milestone, because the obvious lever is the
+  // wrong one. Tripling xp alone only moves the median from two to three:
+  // the extra level-ups scatter across new skills, passives and mutations,
+  // and the hand only ever offers upgrades for what is already seated.
+  //
+  // Three levers together do it. This block owns two of them — the draft
+  // weight and the picks per level — and asserts the outcome they buy at a
+  // FIXED level-up budget. The third lever (the xp curve that delivers that
+  // budget by minute ten) is pinned in T2, against the difficulty model, so
+  // neither half can drift into being the other half's excuse.
+  const BUDGET = 25; // level-ups by minute ten — T2 pins that the curve delivers it
+
+  const playToBudget = (rng0, { picks = settings.upgrades.picksPerLevel } = {}) => {
+    const rng = createRng(rng0);
+    const loadout = new Loadout();
+    const mods = new Modifiers(rng);
+    const pool = new UpgradePool(rng, loadout, mods);
+    for (let level = 0; level < BUDGET; level++) {
+      for (let p = 0; p < picks; p++) {
+        // Redrawn per pick on purpose: the second card has to see the first
+        // one's effect, or a level-up can hand you the same Lv2 card twice
+        // and the Lv3 tier behind it never appears.
+        const hand = pool.draw(4, 4) ?? [];
+        if (!hand.length) continue;
+        const ups = hand.filter((c) => c.kind === 'upgrade')
+          .sort((a, b) => loadout.levelOf(b.element) - loadout.levelOf(a.element));
+        const pick = ups[0] ?? hand.find((c) => c.kind === 'new') ?? hand[0];
+        if (pick.kind === 'upgrade') { loadout.upgrade(pick.element); mods.bumpDamage(pick.element); }
+        else if (pick.kind === 'new') loadout.acquire(pick.element);
+        else if (pick.kind === 'passive') mods.bumpPassive(pick.passive);
+        else if (pick.kind === 'mutation') mods.takeMutation(pick.element, pick.mutation);
+        else if (pick.kind === 'fusion') loadout.fuse(pick.a, pick.b);
+      }
+    }
+    return loadout.equippedList().filter((e) => loadout.isMaxed(e)).length;
+  };
+
+  const maxedOver = (runs, opts) => {
+    const out = [];
+    for (let r = 0; r < runs; r++) out.push(playToBudget(9000 + r, opts));
+    return out.sort((a, b) => a - b);
+  };
+
+  // The acceptance line itself.
+  {
+    const out = maxedOver(400);
+    const median = out[Math.floor(out.length / 2)];
+    const hit = out.filter((x) => x >= 4).length / out.length;
+    assert.ok(median >= 4, `growth: median maxed skills at minute ten is ${median}, the line is 4`);
+    assert.ok(hit >= 0.75, `growth: only ${(hit * 100).toFixed(0)}% of runs reach four maxed — "保证" wants most of them`);
+  }
+
+  // Each lever has to be load-bearing. Take one away and the line fails —
+  // otherwise it is a number in a config file, not a mechanism (M10's rule).
+  assert.equal(settings.upgrades.picksPerLevel, 2, 'growth: a level-up grants two picks');
+  {
+    const out = maxedOver(400, { picks: 1 });
+    const median = out[Math.floor(out.length / 2)];
+    assert.ok(median < 4, `growth: one pick per level must NOT reach the line (got ${median}) — else the second pick is decoration`);
+  }
+  {
+    const w = settings.upgrades.passiveWeights;
+    assert.ok(w.upgrade >= 6, `growth: the upgrade card's weight is ${w.upgrade}, the plan raised it to 6`);
+    // The weight lever buys RELIABILITY, not the median — measured, and worth
+    // being precise about rather than claiming all three levers do the same
+    // job. Two picks at the new budget already median four; the old weight
+    // gets there in about two runs in three, the new one in about nine in
+    // ten. "保证" is the word the owner used, so the hit rate is the thing
+    // this lever is here for.
+    const saved = w.upgrade;
+    try {
+      w.upgrade = 3; // the pre-M11 weight
+      const out = maxedOver(400);
+      const hit = out.filter((x) => x >= 4).length / out.length;
+      assert.ok(hit < 0.75, `growth: the old weight must NOT clear the reliability bar on its own (got ${(hit * 100).toFixed(0)}%)`);
+    } finally { w.upgrade = saved; }
+    assert.equal(settings.upgrades.passiveWeights.upgrade, saved, 'growth: the probe put the weight back');
+  }
+
+  // Zero regression on M9 T1's loud path: an unknown card kind still throws
+  // rather than quietly inheriting the passive weight.
+  {
+    const w = settings.upgrades.passiveWeights;
+    assert.deepEqual(
+      Object.keys(w).sort(),
+      ['mutation', 'newActive', 'passive', 'upgrade'],
+      'growth: the weight table still names every kind the pool can deal'
+    );
+  }
+
+  // The third lever, pinned as a shipped value rather than a behaviour. The
+  // curve is what turns a wall-clock minute into the BUDGET above, and the
+  // only model of that is sim-run — so the behavioural pin ("a baseline run
+  // is 25 level-ups deep by minute ten") belongs with the difficulty model in
+  // T2, and lives there. This one exists so the numbers cannot drift back
+  // without somebody deciding to, which is the same job the weight table's
+  // deepEqual does above.
+  assert.equal(settings.run.xpBase, 18, 'growth: the shipped xp base (M11 T1: 22→18)');
+  assert.equal(settings.run.xpGrowth, 1.1, 'growth: the shipped xp growth (M11 T1: 1.13→1.10)');
+
+  // The App is what actually asks twice, and no headless fixture here can
+  // build one (M10's injection rule: what a test supplies, a test cannot
+  // check). Pin the wiring; the behaviour is a browser check.
+  //
+  // The shape, not just the word: `picksPerLevel` alone still appears in the
+  // reroll branch when the loop itself is gutted, and so does a bare
+  // `_picksLeft > 1` — both read a one-card level-up as wired, and both were
+  // caught by sabotaging this in turn. It matches the guard verbatim now.
+  //
+  // Be honest about what that is worth: a source match proves the line is
+  // present, never that it runs. The real check is the browser pass ("point
+  // the first card, the panel says 2/2 and stays open"), which is what M10's
+  // injection rule asks for. This one exists to make an accidental deletion
+  // loud without waiting for a browser.
+  {
+    const appSrc = readFileSync(new URL('../src/core/App.js', import.meta.url), 'utf8');
+    assert.match(appSrc, /settings\.upgrades\.picksPerLevel/, 'wiring: App reads picksPerLevel');
+    assert.match(appSrc, /if \(this\._picksLeft > 1\) \{/, 'wiring: App deals another hand while the level has picks left');
+    assert.match(appSrc, /this\._picksLeft--/, 'wiring: …and spends one when it does');
+  }
+
+  console.log('ok  M11 T1: four skills maxed by minute ten');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

@@ -988,6 +988,14 @@ body {
   font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 .upgrade-ui__head { font-size: 18px; letter-spacing: 0.2em; }
+/* 每级两选 (M11): the pick counter rides the heading, dimmer than it — it is
+   state, not a title. */
+.upgrade-ui__pick {
+  margin-left: 0.8em;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  opacity: 0.62;
+}
 .upgrade-ui__hand { display: flex; gap: 14px; }
 .upgrade-ui__card {
   width: 168px;

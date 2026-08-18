@@ -1,4 +1,5 @@
 import { ELEMENT_META } from '../config/settings.js';
+import { t } from '../ui/strings.js';
 
 /**
  * The level-up hand (spec §6): world frozen behind a dim, three cards, keys
@@ -25,7 +26,12 @@ export class UpgradeUi {
     return this._open;
   }
 
-  open(cards, { rerolls = 0, summary = '' } = {}) {
+  /**
+   * @param {number} [pick]  which of this level-up's picks this hand is (M11 T1)
+   * @param {number} [picks] how many it grants in total — 1 hides the counter
+   *   entirely, so a shard hand and every pre-M11 caller look exactly as before
+   */
+  open(cards, { rerolls = 0, summary = '', pick = 1, picks = 1 } = {}) {
     this._cards = cards;
     this._open = true;
     const body = cards
@@ -40,7 +46,13 @@ export class UpgradeUi {
       .join('');
     this.root.innerHTML =
       `<div class="upgrade-ui__dim"></div><div class="upgrade-ui__panel">` +
-      `<p class="upgrade-ui__head">${cards.length ? '升级！选择其一' : '无可选项'}</p>` +
+      `<p class="upgrade-ui__head">${cards.length ? '升级！选择其一' : '无可选项'}` +
+      // 每级两选 (M11 T1): say which pick you are on, or the second hand looks
+      // like the first one failed to close.
+      (picks > 1 && cards.length
+        ? `<span class="upgrade-ui__pick">${t('run.pickOf').replace('{n}', pick).replace('{m}', picks)}</span>`
+        : '') +
+      `</p>` +
       `<div class="upgrade-ui__hand">${body}</div>` +
       `<div class="upgrade-ui__row">` +
       `<button class="upgrade-ui__minor" data-act="skip">弃权 · 回复生命 (4)</button>` +
