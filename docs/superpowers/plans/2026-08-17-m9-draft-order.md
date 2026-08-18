@@ -118,6 +118,8 @@
 - **`tideAt` 会钳在最后一个潮汐**——局内看不出来(五个潮汐正好覆盖 15 分钟,索引够不到边界),无尽下潮汐会永远冻住、`timeLeft` 钉死在 0。已改为**回绕**,并断言钉住局内行为不变。
 - `run.endless` 标志:置位后 tick 恒不再判 'won',死亡仍判 'dead';`stop()` 只翻标志不清状态,所以恢复是安全的。
 - 入口用 **N 键**(Space 已被翻滚占用、Enter 是重开);结算面板按 `canContinue = won && !endless` 给出入口,续玩后死亡的结算标注「已通关」。offer 只给一次。
+- **浏览器抓出一个真 bug(无头测试结构性看不见)**:续玩的门原本写成 `this._verdict.value === 'won'`,而 App **每帧把 `_verdict.value` 重置为 `'playing'`**——那段代码自己的注释就写着「是否在结算画面只能由 `!run.active` 如实回答」,我没读到就用了它。结果:面板给出入口、按 N 毫无反应,`active=false endless=false`。修法:在结算那一刻把结果记进 `this._wonThisRun`(那是唯一为真的时刻),门改读它。
+  **为什么无头测试抓不到**:T3 的无头断言用 `offer(won, endless)` 手工镜像了 App 的两个标志,而没有驱动 App 本身——镜像出来的是我以为的逻辑,不是实际跑的逻辑。**教训:凡"某标志在事件后还读得到"这类假设,必须由真实帧序验证,镜像式断言对它天然无效。** 已补一条无头钉,钉住"事后可读的是 `run.active`/`run.endless` 而非 verdict 值"。
 
 ### T4 通道清账(ab5ecfb)
 - `EnemySystem.damage()` 补 `kbScale = 1` 尾参(镜像 damageRing/damageCone 已有形状),Targets 透传。**三处按 tick 的调用传 `step`**(lineTick / zoneTick / burst 的燃烧 dot);**detonation 保持整发冲量**(缺省值,所有一次性调用逐字节不变);**燃烧地面传 0**(业火燎原燃区、地心火山熔岩池——一摊火不推人,沿用沙暴"研磨不推"的裁定)。

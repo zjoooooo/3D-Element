@@ -820,7 +820,7 @@ export class App {
       case 'endless':
         // M9 T3: only from a won verdict, and only once — the offer is
         // gone the moment it is taken (`run.endless` gates the panel above).
-        if (this.runMode && !this.run.active && this._verdict.value === 'won' && !this.run.endless) {
+        if (this.runMode && !this.run.active && this._wonThisRun && !this.run.endless) {
           this.run.endless = true;
           this.run.active = true;
           this._verdict.value = 'playing';
@@ -1951,6 +1951,13 @@ export class App {
           // (fusionName), instead of leaking the raw 'fusion:a+b' string
           // onto the death screen (T2-T6 erratas' shared observation).
           .map(([el, amt]) => [isFusionId(el) ? fusionName(el) : ELEMENT_META[el]?.label ?? el, amt]);
+        // M9 T3: `_verdict.value` is deliberately non-sticky (it is reset to
+        // 'playing' at the top of every frame — see its own comment there),
+        // so "did this run end in a win" has to be remembered here, at the
+        // one moment it is true. Gating the endless offer on the live value
+        // meant the key never fired: by the time a player pressed it, the
+        // field already read 'playing' again.
+        this._wonThisRun = won;
         this.verdictPanel.show({
           // M9 T3: a fresh win can carry on; a run already in its endless
           // half has spent that offer, and its death screen says so instead.

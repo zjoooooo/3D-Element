@@ -1678,6 +1678,21 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     // Death still ends it.
     forever.s.player.alive = false;
     assert.equal(forever.tick(1 / 60, { x: 0, z: 0 }), 'dead', 'endless: dying in the endless half still ends the run');
+
+    // The trap the browser caught: App resets `_verdict.value` to 'playing'
+    // at the top of every frame, so a gate that asks it later never opens —
+    // the endless key silently did nothing. Whatever remembers "this run was
+    // won" has to be written at the verdict itself. What IS readable
+    // afterwards is the run's own state, pinned here.
+    const stopped = mk(37);
+    stopped.elapsed = D;
+    assert.equal(stopped.tick(1 / 60, { x: 0, z: 0 }), 'won', 'endless: the win is reported once…');
+    stopped.stop();
+    assert.equal(stopped.active, false, 'endless: …and `active` is what stays false afterwards');
+    assert.equal(stopped.endless, false, 'endless: a stopped run has not silently entered the endless half');
+    stopped.endless = true;
+    stopped.active = true;
+    assert.equal(stopped.tick(1 / 60, { x: 0, z: 0 }), 'playing', 'endless: resuming really resumes');
   }
 
   // Difficulty keeps climbing rather than flattening or going non-finite.
