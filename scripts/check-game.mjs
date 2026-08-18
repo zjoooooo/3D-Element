@@ -1305,18 +1305,24 @@ import { DecalType } from '../src/effects/GroundDecals.js';
 
   /** Deal `trials` hands at `seats` filled and report the share of each kind. */
   function shares(seats, hide = []) {
+    // The registry is a module singleton — restore it even if a draw throws,
+    // or every later block in this file runs against a roster short by ten
+    // (review catch).
     const stash = {};
     for (const el of hide) { stash[el] = ABILITY_TYPES[el]; delete ABILITY_TYPES[el]; }
-    const seen = { upgrade: 0, new: 0, passive: 0, fusion: 0, mutation: 0 };
+    const seen = { upgrade: 0, new: 0, passive: 0, fusion: 0 };
     let cards = 0;
-    const seatable = ELEMENTS.filter((e) => ABILITY_TYPES[e] && !WAVE2.includes(e));
-    for (let t = 0; t < 400; t++) {
-      const loadout = new Loadout();
-      for (let s = 0; s < seats; s++) loadout.acquire(seatable[(t * 7 + s * 3) % seatable.length]);
-      const pool = new UpgradePool(createRng(t + 1), loadout, new Modifiers());
-      for (const card of pool.draw(6, 6) ?? []) { seen[card.kind]++; cards++; }
+    try {
+      const seatable = ELEMENTS.filter((e) => ABILITY_TYPES[e] && !WAVE2.includes(e));
+      for (let t = 0; t < 400; t++) {
+        const loadout = new Loadout();
+        for (let s = 0; s < seats; s++) loadout.acquire(seatable[(t * 7 + s * 3) % seatable.length]);
+        const pool = new UpgradePool(createRng(t + 1), loadout, new Modifiers());
+        for (const card of pool.draw(6, 6) ?? []) { seen[card.kind]++; cards++; }
+      }
+    } finally {
+      for (const el of hide) ABILITY_TYPES[el] = stash[el];
     }
-    for (const el of hide) ABILITY_TYPES[el] = stash[el];
     const out = {};
     for (const k of Object.keys(seen)) out[k] = seen[k] / cards;
     out._cards = cards;
@@ -1330,12 +1336,25 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     const trimmed = shares(seats, WAVE2);
     for (const kind of ['new', 'upgrade', 'passive']) {
       const drift = Math.abs(full[kind] - trimmed[kind]);
+      // Exactly zero by construction — the category roll only sees which
+      // categories are present, never how many cards they hold — so the
+      // tolerance is for float noise, not for slack (review catch: 0.03 was
+      // a hundred times looser than the real value).
       assert.ok(
-        drift < 0.03,
-        `draft: ${kind} share is roster-independent at ${seats} seats (drifted ${(drift * 100).toFixed(1)} points)`
+        drift < 0.005,
+        `draft: ${kind} share is roster-independent at ${seats} seats (drifted ${(drift * 100).toFixed(2)} points)`
       );
     }
   }
+
+  // The shipped contract itself, pinned independently of the ratio check
+  // below — that one reads its expectation out of the same settings object
+  // it is testing, so it can never fail on a weight edit (review catch).
+  assert.deepEqual(
+    settings.upgrades.passiveWeights,
+    { upgrade: 3, newActive: 2, passive: 1 },
+    'draft: the shipped category weights are 3 : 2 : 1'
+  );
 
   // The weights mean what they say, at the category level: 3 : 2 : 1.
   {
@@ -1363,6 +1382,70 @@ import { DecalType } from '../src/effects/GroundDecals.js';
     const hand = pool.draw(6, 6) ?? [];
     assert.equal(hand.length, 3, 'draft: a full build still deals three cards');
     assert.ok(hand.every((c) => c.kind !== 'new'), 'draft: …and none of them is a new skill');
+
+    // …and the two categories left RENORMALISE to 3 : 1 rather than the
+    // absent one's weight leaking to whichever category happens to be last
+    // (review catch: a constant divisor turned 75/25 into 50/50 and every
+    // assertion here stayed green, because none of them looked at the ratio).
+    const tally = { upgrade: 0, passive: 0 };
+    let dealt = 0;
+    for (let t = 0; t < 600; t++) {
+      const full = new Loadout();
+      for (let i = 0; full.hasEmpty() && i < seatable.length; i++) full.acquire(seatable[i]);
+      const p = new UpgradePool(createRng(t + 300), full, new Modifiers());
+      for (const c of p.draw(6, 6) ?? []) { if (c.kind in tally) tally[c.kind]++; dealt++; }
+    }
+    const w = settings.upgrades.passiveWeights;
+    const got = tally.upgrade / tally.passive;
+    const want = w.upgrade / w.passive;
+    assert.ok(
+      Math.abs(got - want) < 0.35,
+      `draft: with no seat to fill, upgrades and passives renormalise to ${want.toFixed(1)}:1 (got ${got.toFixed(2)}:1 over ${dealt} cards)`
+    );
+  }
+
+  // The other half of the contract: inside a chosen category the pick is
+  // UNIFORM. Returning a fixed member (the first, say) satisfies every other
+  // assertion in this block while making every hand deal the same new skill
+  // and the same passive forever (review catch).
+  {
+    const seatable = ELEMENTS.filter((e) => ABILITY_TYPES[e]);
+    const newElements = new Set();
+    const passiveIds = new Set();
+    const upgradeElements = new Set();
+    for (let t = 0; t < 300; t++) {
+      const loadout = new Loadout();
+      for (let s = 0; s < 3; s++) loadout.acquire(seatable[(t * 5 + s * 4) % seatable.length]);
+      const pool = new UpgradePool(createRng(t + 900), loadout, new Modifiers());
+      for (const c of pool.draw(6, 6) ?? []) {
+        if (c.kind === 'new') newElements.add(c.element);
+        if (c.kind === 'passive') passiveIds.add(c.passive);
+        if (c.kind === 'upgrade') upgradeElements.add(c.element);
+      }
+    }
+    assert.ok(newElements.size > 5, `draft: the new-skill bucket is sampled across its members (saw ${newElements.size})`);
+    assert.ok(passiveIds.size > 3, `draft: the passive bucket is sampled across its members (saw ${passiveIds.size})`);
+    assert.ok(upgradeElements.size > 3, `draft: the upgrade bucket is sampled across its members (saw ${upgradeElements.size})`);
+  }
+
+  // An unknown card kind must be refused outright, not handed a default
+  // weight — a new kind joining the pool in silence is the very failure this
+  // task removes (review catch; T2 adds one, and this is what makes it
+  // declare itself).
+  {
+    const loadout = new Loadout();
+    loadout.acquire('ice');
+    const pool = new UpgradePool(createRng(4), loadout, new Modifiers());
+    const original = pool.draw.bind(pool);
+    assert.throws(
+      () => {
+        const spy = new UpgradePool(createRng(4), loadout, new Modifiers());
+        spy._takeByCategory([{ weight: 1, card: { kind: 'mutation', element: 'ice' } }]);
+      },
+      /no category weight/,
+      'draft: a card kind with no declared weight throws instead of borrowing one'
+    );
+    assert.ok(original, 'fixture: the pool still works normally');
   }
 
   // Zero regression on the two guaranteed-card paths.

@@ -132,8 +132,20 @@ export class UpgradePool {
    */
   _takeByCategory(candidates) {
     const w = settings.upgrades.passiveWeights;
-    const weightOf = (kind) =>
-      kind === 'upgrade' ? w.upgrade : kind === 'new' ? w.newActive : w.passive;
+    // Explicit table, and a throw for anything not in it (review catch). A
+    // catch-all `: w.passive` would hand a brand-new card kind the passive
+    // weight in silence — which is the exact failure this task exists to
+    // kill, in a new shape: something joins the pool and the draft's shape
+    // changes with nobody editing a number. A kind belongs here or it does
+    // not draw.
+    const WEIGHTS = { upgrade: w.upgrade, new: w.newActive, passive: w.passive };
+    const weightOf = (kind) => {
+      const weight = WEIGHTS[kind];
+      if (weight === undefined) {
+        throw new Error(`UpgradePool: card kind '${kind}' has no category weight — add one to settings.upgrades.passiveWeights`);
+      }
+      return weight;
+    };
 
     // Which categories are actually present, and their total weight. Built
     // per draw (three times a hand, off a level-up — not a hot path).
