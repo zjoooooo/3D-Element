@@ -2869,7 +2869,11 @@ export const settings = {
 export const CastShape = Object.freeze({
   LINE: 'line',
   ZONE: 'zone',
-  SELF: 'self'
+  SELF: 'self',
+  // M10 T3: a wedge in front of the caster. Aimed like a line (the cursor
+  // sets the bearing) but previewed as the shape it actually judges — the
+  // milestone that built the cone left it drawing a line and said so.
+  CONE: 'cone'
 });
 
 /**
@@ -2951,7 +2955,7 @@ export const ELEMENT_META = {
   thornroad: { label: 'Thorn Road', accent: '#5fd98f', hint: 'Thorn Road' },
   tidalsurge: { label: 'Tidal Surge', accent: '#6fb8e8', hint: 'Tidal Surge' },
   hailstorm: { label: 'Hailstorm', accent: '#8ee8ff', hint: 'Hailstorm', cast: CastShape.ZONE },
-  flamebreath: { label: 'Flame Breath', accent: '#ff8a3c', hint: 'Flame Breath' },
+  flamebreath: { label: 'Flame Breath', accent: '#ff8a3c', hint: 'Flame Breath', cast: CastShape.CONE },
   mortarrain: { label: 'Falling Fire', accent: '#ffa23c', hint: 'Falling Fire', cast: CastShape.ZONE },
   sandfield: { label: 'Sandstorm Field', accent: '#c9a06a', hint: 'Sandstorm Field', cast: CastShape.ZONE },
   stonepillar: { label: 'Pillar of Heaven', accent: '#b8875a', hint: 'Pillar of Heaven', cast: CastShape.ZONE }

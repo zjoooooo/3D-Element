@@ -1,5 +1,6 @@
 import { Group, Raycaster, Plane, Vector2, Vector3, MathUtils } from 'three';
 import { settings, ELEMENTS, CastShape, castShapeOf } from '../config/settings.js';
+import { bpScale } from '../run/breakpoints.js';
 import { EventEmitter } from '../utils/EventEmitter.js';
 import { AimIndicator } from '../effects/AimIndicator.js';
 import { ZoneIndicator } from '../effects/ZoneIndicator.js';
@@ -7,14 +8,17 @@ import { ZoneIndicator } from '../effects/ZoneIndicator.js';
 const GROUND_PLANE = new Plane(new Vector3(0, 1, 0), 0);
 
 /**
- * Targeting, in the two shapes players already know from MOBAs.
+ * Targeting, in the shapes players already know from MOBAs.
  *
  * A **line cast** arms an arrow that swings about the caster and fires along
  * its length; a **far cast** arms a circle that follows the cursor and drops
- * where it is clicked. Which one an ability uses is declared in
- * `ELEMENT_META[...].cast`, and the controller swaps indicators on selection —
- * everything else about arming, clamping, validating and firing is shared,
- * because from the targeting side the only difference is what gets drawn.
+ * where it is clicked; a **cone cast** (M10 T3) arms a wedge pinned to the
+ * caster's own feet, opening along the aim. Which one an ability uses is
+ * declared in `ELEMENT_META[...].cast`, and the controller swaps indicators on
+ * selection — everything else about arming, clamping, validating and firing is
+ * shared, because from the targeting side the only difference is what gets
+ * drawn. The cone borrows the zone's disc mesh rather than owning a third one:
+ * a wedge is a disc with an angular mask (`ZoneIndicator`'s `uHalfAngle`).
  *
  * The controller owns the aim state and both indicators; it decides nothing
  * about what the cast does. It emits one event, `cast`, with an origin, a unit
@@ -48,6 +52,14 @@ export class AimController extends EventEmitter {
      * has selected.
      */
     this.element = ELEMENTS[0];
+
+    /**
+     * The run's `loadout.levelOf`, injected by App exactly like CombatSystem's
+     * own (M6 T12). Null in the sandbox and before a run starts — every read
+     * goes through `bpLevel` below, which falls back to Lv1, so the indicator
+     * never depends on a run being live.
+     */
+    this.levelOf = null;
 
     this.armed = false;
     /** 0..1 sweep-out of the indicator. Driven by real time, never scaled. */
@@ -88,6 +100,34 @@ export class AimController extends EventEmitter {
   /** Whether the ability in the slot is aimed with the arrow or the circle. */
   get shape() {
     return castShapeOf(this.element);
+  }
+
+  /** Breakpoint tier of the ability being aimed. 1 with no run wired. */
+  get bpLevel() {
+    return this.levelOf ? this.levelOf(this.element) : 1;
+  }
+
+  /**
+   * The wedge being previewed, in the numbers the hit test will use.
+   *
+   * WYSIWYG is only true if the preview and the judge read the *same* row
+   * through the *same* breakpoint call — so these read `settings.combat[...]`
+   * and scale it exactly as CombatSystem's `coneTick` case does, rather than
+   * keeping a second copy of the geometry anywhere. `scripts/check-game.mjs`
+   * pins that identity at Lv1/3/5.
+   *
+   * Two scalar getters rather than one `{halfAngle, range}` — `update()` is a
+   * per-frame path and an object literal is an allocation like any other
+   * (CombatSystem's `_dot`/`_take` split for the same reason).
+   */
+  get coneHalfAngle() {
+    const row = settings.combat[this.element];
+    return (row?.halfAngle ?? 0.5) * bpScale(this.element, 'halfAngle', this.bpLevel);
+  }
+
+  get coneRange() {
+    const row = settings.combat[this.element];
+    return (row?.range ?? this.config.range) * bpScale(this.element, 'range', this.bpLevel);
   }
 
   /** Footprint of a far cast, metres. Zero for a line cast. */
@@ -211,8 +251,12 @@ export class AimController extends EventEmitter {
   update(dt) {
     this._resolve();
 
-    const zoned = this.shape === CastShape.ZONE;
-    const revealTime = Math.max(0.01, zoned ? settings.zone.reveal : settings.aim.reveal);
+    const shape = this.shape;
+    const zoned = shape === CastShape.ZONE;
+    const coned = shape === CastShape.CONE;
+    // Both of those are drawn by the disc; only the line uses the arrow.
+    const disced = zoned || coned;
+    const revealTime = Math.max(0.01, disced ? settings.zone.reveal : settings.aim.reveal);
     const target = this.armed ? 1 : 0;
     const step = dt / revealTime;
     this.reveal = MathUtils.clamp(
@@ -224,11 +268,27 @@ export class AimController extends EventEmitter {
     const visible = this.reveal > 0.001;
     // Only ever one of the two is on screen, and swapping the slot mid-reveal
     // hides the other outright rather than leaving it fading in place.
-    this.indicator.setVisible(visible && !zoned);
-    this.zone.setVisible(visible && zoned);
+    this.indicator.setVisible(visible && !disced);
+    this.zone.setVisible(visible && disced);
 
     if (!visible) return;
-    if (zoned) {
+    if (coned) {
+      // Apex at the caster's feet, not at the cursor: the breath comes out of
+      // the mouth (CombatSystem's `coneTick` anchors the wedge on
+      // `ability.origin` for the same reason), so the disc sits at distance 0
+      // and its radius IS the cone's reach.
+      const range = this.coneRange;
+      this.zone.update(
+        this.origin,
+        this.yaw,
+        0,
+        range,
+        range,
+        this.reveal,
+        this.valid,
+        this.coneHalfAngle
+      );
+    } else if (zoned) {
       this.zone.update(
         this.origin,
         this.yaw,

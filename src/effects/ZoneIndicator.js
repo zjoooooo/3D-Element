@@ -42,6 +42,10 @@ const ZONE_FRAGMENT = /* glsl */ `
   uniform float uTime;
   uniform float uQuadSize;     // metres the quad covers, edge to edge
   uniform float uRadius;       // footprint radius, metres (already snapped)
+  // M10 T3: 0 keeps the full ring this shader has always drawn; a positive
+  // value turns it into a WEDGE of that half-angle, opening along +y — the
+  // quad is already yawed to the cast, so +y is downrange by construction.
+  uniform float uHalfAngle;
   uniform float uBoundary;     // thickness of the band
   uniform float uBias;         // how much of that thickness sits outside uRadius
   uniform float uBoundaryGlow;
@@ -95,14 +99,43 @@ const ZONE_FRAGMENT = /* glsl */ `
     float aa = fwidth(d) + uSoftness;
     if (d > outer + aa * 3.0) discard;
 
+    /* ---- wedge mask (M10 T3) ---- */
+    // A cone is previewed as the shape it judges: everything inside the
+    // half-angle, all the way out to the range. Zero half-angle leaves every
+    // pixel below untouched, so a zone cast draws exactly as before.
+    float wedge = 1.0;
+    float flank = 0.0;
+    // What the interior wash is measured against: the band's inner lip for a
+    // ring (the wash lives *inside* the boundary), the outer rim for a wedge
+    // (the whole sector is the danger, and the band is part of it).
+    float fillEdge = inner;
+    if (uHalfAngle > 0.0) {
+      float off = abs(atan(p.x, p.y));   // 0 = straight downrange
+      // atan() wraps directly BEHIND the caster, where fwidth() spikes to ~TAU
+      // for one pixel — unclamped, that one seam pixel would widen the
+      // smoothstep past pi and light up behind the wedge. Clamped, never.
+      float offAA = min(0.2, fwidth(off)) + 0.01;
+      wedge = smoothstep(uHalfAngle + offAA, uHalfAngle - offAA, off);
+      if (wedge <= 0.001) discard;
+      fillEdge = outer;
+
+      // The two flanks are boundaries as much as the arc is: without them the
+      // sector just fades out sideways and the player cannot tell where the
+      // wedge stops. Drawn at a constant width in METRES — an angular width
+      // would taper to nothing at the apex and smear at the rim.
+      float lineW = (uLiner + 0.02) / max(0.35, d);
+      flank = 1.0 - smoothstep(lineW, lineW + offAA * 2.0, abs(off - uHalfAngle));
+      flank *= smoothstep(outer + aa, outer - aa, d);
+    }
+
     /* ---- the band that *is* the footprint ---- */
     float band = smoothstep(outer + aa, outer - aa, d) * smoothstep(inner - aa, inner + aa, d);
     // A hard liner on the inside lip: the band alone reads soft at a distance,
     // and the inside lip is the line the player is actually measuring against.
     float liner = 1.0 - smoothstep(uLiner, uLiner + aa, abs(d - inner));
 
-    float interior = smoothstep(inner + aa, inner - aa, d);
-    float radial = clamp(d / inner, 0.0, 1.0);
+    float interior = smoothstep(fillEdge + aa, fillEdge - aa, d);
+    float radial = clamp(d / fillEdge, 0.0, 1.0);
 
     /* ---- the wash inside it ---- */
     // Weighted to the rim: a flat disc reads as a decal lying on the floor, a
@@ -154,10 +187,10 @@ const ZONE_FRAGMENT = /* glsl */ `
     /* ---- assemble ---- */
     float breathe = 1.0 + uPulse * sin(uTime * uPulseSpeed * TAU);
     float fill = interior * wash * uFill * breathe;
-    float lines = (liner * 1.3 + tick + core + coreRing + arms + sweep) * breathe;
+    float lines = (liner * 1.3 + tick + core + coreRing + arms + sweep + flank * 1.3) * breathe;
     float edge = band * uBoundaryGlow * breathe;
 
-    float alpha = clamp(fill + lines + edge, 0.0, 1.0) * uOpacity * uReveal;
+    float alpha = clamp(fill + lines + edge, 0.0, 1.0) * uOpacity * uReveal * wedge;
     if (alpha < 0.004) discard;
 
     // The band is drawn halfway between the two colours rather than in the core
@@ -288,6 +321,7 @@ export class ZoneIndicator {
       uniforms: sharedUniforms({
         uQuadSize: { value: 12 },
         uRadius: { value: 4.4 },
+        uHalfAngle: { value: 0 },
         uBoundary: { value: 0.34 },
         uBias: { value: 0.35 },
         uBoundaryGlow: { value: 2.4 },
@@ -387,7 +421,9 @@ export class ZoneIndicator {
    * @param {number} reveal         0..1 snap-out
    * @param {boolean} valid         false tints the circle to `colorInvalid`
    */
-  update(origin, yaw, distance, radius, range, reveal, valid) {
+  /** @param {number} [halfAngle] M10 T3: >0 previews a wedge of that
+   * half-angle centred on the caster instead of a ring on the target. */
+  update(origin, yaw, distance, radius, range, reveal, valid, halfAngle = 0) {
     const z = settings.zone;
     const opacity = z.opacity * settings.global.opacity;
     const invalid = valid ? 0 : 1;
@@ -433,6 +469,7 @@ export class ZoneIndicator {
     u.uCrosshairLength.value = z.crosshairLength;
     u.uPulse.value = z.pulse;
     u.uPulseSpeed.value = z.pulseSpeed;
+    u.uHalfAngle.value = halfAngle;
     u.uReveal.value = t;
     u.uInvalid.value = invalid;
     u.uOpacity.value = opacity;
@@ -468,7 +505,10 @@ export class ZoneIndicator {
     r.uColorEdge.value.copy(getColor(z.colorEdge));
     r.uColorInvalid.value.copy(getColor(z.colorInvalid));
 
-    this.reach.visible = z.reach > 0.001;
+    // A wedge is anchored at the caster and its own arc IS the reach line, so
+    // the reach ring would only draw a second circle at the same radius and
+    // promise a cast in directions the cone cannot reach (M10 T3).
+    this.reach.visible = z.reach > 0.001 && halfAngle <= 0;
   }
 
   setVisible(visible) {

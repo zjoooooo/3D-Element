@@ -8,9 +8,10 @@
  *   npm run check:game
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { createRng } from '../src/run/rng.js';
-import { settings, ELEMENTS, ELEMENT_META, permanentAuraElements } from '../src/config/settings.js';
+import { settings, ELEMENTS, ELEMENT_META, permanentAuraElements, CastShape, castShapeOf } from '../src/config/settings.js';
 import { TideSchedule, WUXING, WUXING_LABEL, BEATS, FEEDS } from '../src/run/TideSchedule.js';
 import { Modifiers, PASSIVES } from '../src/run/Modifiers.js';
 import { Loadout } from '../src/run/Loadout.js';
@@ -58,6 +59,12 @@ import { GameAudio } from '../src/run/GameAudio.js';
 import { applyPerfPreset } from '../src/run/perfPreset.js';
 import { ScreenFlash } from '../src/effects/ScreenFlash.js';
 import { DecalType } from '../src/effects/GroundDecals.js';
+// M10 T3: the cone preview is checked against the REAL controller, not a
+// hand-copied formula — a mirrored assertion cannot catch the two drifting
+// apart, which is exactly the failure M9 T3 shipped. It pulls three.js in and
+// builds two ShaderMaterials, which is harmless off-renderer (no GL context is
+// ever touched) and is the only render-adjacent import in this file.
+import { AimController } from '../src/input/AimController.js';
 
 /* ---- rng: same seed, same stream ---- */
 {
@@ -2112,6 +2119,135 @@ import { DecalType } from '../src/effects/GroundDecals.js';
   }
 
   console.log('ok  M10 T2: the wave is complete — every castable skill has turning points');
+}
+
+
+/* ---- M10 T3: a cone is previewed as a cone ---- */
+{
+  // M8 T5 shipped the wedge and wrote down that it was still previewed as a
+  // line. The preview reads the SAME row the hit test does, scaled by the
+  // SAME breakpoint call, so the two cannot drift — that identity is the
+  // whole assertion here, not the drawing.
+  assert.equal(CastShape.CONE, 'cone', 'shape: the cone is a declared cast shape');
+  assert.equal(castShapeOf('flamebreath'), CastShape.CONE, 'shape: 烈焰喷吐 is aimed as a cone');
+
+  // Zero regression for the other three shapes.
+  assert.equal(castShapeOf('ice'), CastShape.LINE, 'shape: a line skill is still a line');
+  assert.equal(castShapeOf('snare'), CastShape.ZONE, 'shape: a zone skill is still a zone');
+  assert.equal(castShapeOf('quake'), CastShape.SELF, 'shape: a self skill is still self');
+  for (const el of ELEMENTS) {
+    if (!ABILITY_TYPES[el]) continue;
+    const isCone = settings.combat[el]?.kind === 'coneTick';
+    assert.equal(
+      castShapeOf(el) === CastShape.CONE,
+      isCone,
+      `shape: ${el} is aimed as a cone exactly when it is judged as one`
+    );
+  }
+
+  // Same source, same scaling: what the controller *hands the indicator* and
+  // what damageCone receives at that level are the same two numbers. Both
+  // sides are the shipped code — no formula is retyped here.
+  const drawnAt = (element, level) => {
+    const aim = new AimController(null);
+    aim.setElement(element);
+    aim.levelOf = () => level;
+    aim.arm();
+    const drawn = [];
+    aim.zone.update = (...args) => drawn.push(args);
+    let arrow = null;
+    aim.indicator.setVisible = (v) => { arrow = v; };
+    aim.update(1); // one real second: the reveal saturates in a single call
+    aim.dispose();
+    return { drawn, arrow };
+  };
+  const judgedAt = (element, level) => {
+    const seen = [];
+    const combat = new CombatSystem(
+      { damage: () => 0, damageOnce: () => 0, damageRing: () => 0, slow: () => {},
+        damageCone: (p, dx, dz, half, range) => (seen.push({ half, range }), 1) },
+      null,
+      () => level
+    );
+    combat.tick(1 / 60, [{
+      element, phase: 'impact', impactTime: 0.2, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+      length: 5.5, u: 1, autocast: false, quenched: false, fusionMult: 1
+    }]);
+    return seen[0];
+  };
+
+  const previews = [];
+  for (const level of [1, 3, 5]) {
+    const { drawn, arrow } = drawnAt('flamebreath', level);
+    assert.equal(arrow, false, `cone Lv${level}: the line arrow is hidden for a cone cast`);
+    assert.equal(drawn.length, 1, `cone Lv${level}: the disc indicator is the one that draws it`);
+    // update(origin, yaw, distance, radius, range, reveal, valid, halfAngle)
+    const [, , distance, radius, , , , halfAngle] = drawn[0];
+    assert.equal(distance, 0, `cone Lv${level}: the wedge is pinned to the caster, not the cursor`);
+    const want = judgedAt('flamebreath', level);
+    assert.ok(Math.abs(halfAngle - want.half) < 1e-9, `cone Lv${level}: the drawn half-angle is the judged one (${halfAngle} vs ${want.half})`);
+    assert.ok(Math.abs(radius - want.range) < 1e-9, `cone Lv${level}: the drawn reach is the judged one (${radius} vs ${want.range})`);
+    previews.push({ halfAngle, radius });
+  }
+  // …and the Lv3 tier really moves it, so the checks above are not comparing
+  // two constants that happen to agree.
+  assert.ok(previews[1].halfAngle > previews[0].halfAngle, 'cone: Lv3 really widens what is previewed');
+
+  // The reach must come off the COMBAT row (the one damageCone measures), not
+  // the ability row (the one the arrow measures). Both happen to carry 5.5, so
+  // the checks above cannot tell the two read sites apart — only perturbing
+  // one of them can. Put back immediately; nothing else here may see it move.
+  {
+    const combatRow = settings.combat.flamebreath;
+    const before = combatRow.range;
+    try {
+      combatRow.range = before + 3;
+      const { drawn } = drawnAt('flamebreath', 1);
+      assert.ok(
+        Math.abs(drawn[0][3] - (before + 3)) < 1e-9,
+        `cone: the drawn reach follows the judged row, not settings.flamebreath.range (${drawn[0][3]})`
+      );
+    } finally {
+      combatRow.range = before;
+    }
+    assert.equal(settings.combat.flamebreath.range, before, 'cone: the probe restored the row it moved');
+  }
+
+  // Zero regression for the circle: a zone cast still draws its own footprint
+  // at the cursor with no wedge at all.
+  {
+    const { drawn, arrow } = drawnAt('snare', 1);
+    assert.equal(arrow, false, 'zone: the line arrow is still hidden for a zone cast');
+    assert.equal(drawn.length, 1, 'zone: the disc indicator still draws a zone cast');
+    const [, , , radius, , , , halfAngle] = drawn[0];
+    // Omitted or explicit, it has to resolve to "no wedge" — the argument is
+    // optional so the zone call site stayed untouched.
+    assert.equal(halfAngle ?? 0, 0, 'zone: a zone cast asks for no half-angle, so the ring is unchanged');
+    assert.equal(radius, settings.snare.zoneRadius, 'zone: a zone cast still draws its own footprint radius');
+  }
+  // …and a line cast still arms the arrow and never touches the disc.
+  {
+    const { drawn, arrow } = drawnAt('ice', 1);
+    assert.equal(arrow, true, 'line: a line cast still arms the arrow');
+    assert.equal(drawn.length, 0, 'line: a line cast never draws the disc');
+  }
+
+  // The checks above hand the controller its own `levelOf` — which is exactly
+  // how the first cut of this task shipped GREEN with the App never injecting
+  // one, so a Lv3 breath burned 35% wider than the wedge it drew. A fixture
+  // that supplies the dependency production forgot is blind by construction
+  // (M9's mirror lesson, in another dress). No renderer here can build an App,
+  // so what is pinned instead is the WIRING: one definition of `levelOf`, and
+  // the indicator reading that same one. The behaviour itself is a browser
+  // check (`preview widens at Lv3`), which is what caught it.
+  {
+    const appSrc = readFileSync(new URL('../src/core/App.js', import.meta.url), 'utf8');
+    assert.match(appSrc, /this\._levelOf = levelOf;/, 'wiring: App keeps one definition of levelOf for all its consumers');
+    assert.match(appSrc, /this\.aim\.levelOf = this\._levelOf/, 'wiring: the aim indicator is given that same levelOf');
+  }
+
+  console.log('ok  M10 T3: the cone is aimed the way it is judged');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

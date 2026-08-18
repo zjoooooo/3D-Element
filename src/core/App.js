@@ -233,6 +233,13 @@ export class App {
       targets: this.targets
     });
 
+    /**
+     * `loadout.levelOf`, or null outside a run. Declared here so the sandbox
+     * has an honest value rather than an absent property — the run block below
+     * fills it in, and the aim indicator picks it up further down.
+     */
+    this._levelOf = null;
+
     /* ---- run mode (only lives while the page opened on #run) ---- */
     if (this.runMode) {
       // The sandbox panels (editor, help card) tuck themselves against the
@@ -312,6 +319,13 @@ export class App {
       const levelOf = (element) => this.loadout.levelOf(element);
       this.combat = new CombatSystem(this.targets, this.modifiers, levelOf);
       this.abilities.ctx.levelOf = levelOf;
+      // M10 T3: the aim indicator is a third consumer — a cone's preview reads
+      // the same breakpoint tier the hit test does, or the wedge stops
+      // matching the flame at Lv3. Stashed rather than injected here because
+      // `this.aim` is built further down the constructor; the one place that
+      // injects it is right after that, and this is the only definition of the
+      // function all three share.
+      this._levelOf = levelOf;
       // FireballAbility books its self-resolved hits straight into the run's
       // damage ledger (D-M3-8) — same wiring shape as ctx.mods above.
       this.abilities.ctx.stats = this.combat;
@@ -437,6 +451,9 @@ export class App {
     /* ---- input & targeting ---- */
     this.input = new InputManager(canvas);
     this.aim = new AimController(this.camera);
+    // Null in the sandbox (no loadout exists there), which is exactly the
+    // fallback AimController#bpLevel documents — Lv1 numbers.
+    this.aim.levelOf = this._levelOf;
     this.scene.add(this.aim.object3D);
 
     /* ---- post ---- */
