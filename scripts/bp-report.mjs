@@ -116,9 +116,23 @@ await page.evaluate(() => {
   window.__bpMeasure = (element, level) => {
     const es = app.enemySystem;
 
-    // Level the skill to exactly `level` — a fresh Loadout entry starts at 1.
-    if (!app.loadout.has(element)) app.loadout.acquire(element);
-    while (app.loadout.levelOf(element) < level) app.loadout.upgrade(element);
+    // A clean slate per skill. There are only six seats, so the seventh
+    // `acquire()` fails silently — and then `while (levelOf < level)
+    // upgrade()` spins on a skill that was never seated. The first cut of
+    // this script sat at 100% CPU on skill seven for forty minutes for
+    // exactly that reason. Clearing is safer than trying to free one seat.
+    app.loadout.seats.fill(null);
+    app.loadout._levels = Object.create(null);
+    // acquire() returns the SEAT INDEX, and seat 0 is a perfectly good seat —
+    // `if (!acquire(...))` reads a success into seat zero as a failure.
+    if (app.loadout.acquire(element) === -1) throw new Error(`bp-report: acquire(${element}) failed`);
+    for (let guard = 0; app.loadout.levelOf(element) < level; guard++) {
+      // Loud, not silent: a level that cannot be reached is a broken report,
+      // not a row to quietly fill with Lv1 numbers.
+      if (guard > 20 || !app.loadout.upgrade(element)) {
+        throw new Error(`bp-report: ${element} stuck at Lv${app.loadout.levelOf(element)}, wanted Lv${level}`);
+      }
+    }
 
     // Put the caster back at the origin so every skill measures from the same
     // spot, and give it the resources to fire.
@@ -269,13 +283,30 @@ md += `
   伤害跟着涨是副作用,涨的是覆盖。
 - **控制档**(\`slowFactor\` / \`slowTime\` / \`stunTime\`):看 **控制** 列;伤害不动是正常的。
   注意 \`slowFactor\` 是 \`bpReplace\`(整值替换)不是倍率。
-- **击退档**(\`knockback\` / \`kbMult\`):看 **推开**。
+- **计数档**(\`count\` / \`hops\`):\`bpAdd\`(加法)不是倍率。**注意**:\`count\` 在剑雨/剑域/日轮
+  这三技上加的是**掉落/环绕的刀刃个数**,而伤害走 CombatSystem 的 burst / aura 分支、
+  只读 \`damage\`/\`dps\`/\`radius\`——所以这三档加的是视觉密度,不是判定。见下方「已知盲区」④。
 - **开关档**(\`castTwice\` / \`extraWave\`):看 伤害 与 命中 是否整段跳。
-- **计数档**(\`count\` / \`hops\`):同上,且 \`count\`/\`hops\` 是 \`bpAdd\`(加法)不是倍率。
 
-一档若**三列都没动**,它要么没读点(空头质变,M10 撞到过三个),要么这个靶场看不见它
-(比如只对玩家生效的 \`healPlayer\` / \`amount\` / \`duration\` / \`reflectShare\`)。后者在
-「盾/治疗」几技上是预期的——那几行的空白不是缺陷,是这张表的量程不够。
+## 已知盲区(这张表**看不见**什么)
+
+这些空白与零是**量程问题,不是缺陷**——不要照着它们去改数值。
+
+1. **光环与护盾整技测不到**(剑域 / 冰晶甲 / 燃阵 / 日轮 全零)。光环是「装备即常驻」,
+   靠 \`_syncAuras()\` 落座而不是施放,\`_quickCastToward\` 对它是空操作;护盾与治疗
+   (\`amount\` / \`duration\` / \`healPlayer\` / \`reflectShare\`)只作用在玩家身上,靶场里没有玩家血量。
+2. **「推开」这一列基本饱和**:假人不冻结,3 秒里的寻敌与互斥位移远大于技能的击退,
+   所以几乎每行都读到 ~9.6m。**击退档不要看这一列**——要单独量。
+3. **靶场的环间距会吃掉小幅范围变化**:靶人只在 1.5/3/4.5/6/8/10/13/16 m 这八圈上。
+   一个 2.2m 的爆炸放大到 3.08m,如果两圈之间没有人,命中数一动不动——
+   陨石、落石、生命绽放、火弹的 \`radius\` 档出现 0% 多半是这个原因,不是读点死了。
+4. **\`count\` 档确实只加视觉**(剑雨 Lv3 / 剑域 Lv3 / 日轮 Lv3)。\`ZoneBurstSkill\` 与
+   \`OrbitAuraSkill\` 读 \`bpAdd('count')\` 决定画几把刀,而伤害在 CombatSystem 的
+   burst / aura 分支里、和刀刃数无关。**这一条是真的空头质变,不是量程问题。**
+5. **落点型技能(zone cast)落在光标处**,而光标固定在 (12, 0)——那一带靶人稀疏,
+   所以流火雨/石柱这类会读到 1~3 个命中,负的 Δ 是纯噪声。
+
+一档若三列都没动,先对照上面五条排除量程,再怀疑读点。
 `;
 
 writeFileSync(OUT, md);

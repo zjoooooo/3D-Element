@@ -11,7 +11,7 @@
 
 **Architecture:** 提速全部走既有层——`settings.upgrades.passiveWeights`(抽卡权重)、`settings.run.xpBase/xpGrowth`(经验曲线)、`UpgradePool.draw` + `UpgradeUi`(每级两选)。Boss 复用 `EnemySystem` 的判定/寻敌/伤害通道(它就是一具 hp 极高的躯体),但**不复用** `EnemyRenderer` 的实例化胶囊——一只放大二十倍的胶囊是敷衍。躯体程序化自建,和场景里其他程序化资产同宗。
 
-**Tech Stack:** 既有;零新依赖。**Boss 不引入外部模型**——spec §12 写的是「Boss(Meshy+Mixamo)」,但 CLAUDE.md 的「除角色 FBX 外全程序化」是更硬的约束,本里程碑按程序化做,**此处与 spec 冲突,已在下方明账里标注待用户复核**。
+**Tech Stack:** 既有;零新依赖。**Boss 不引入外部模型**——spec §12 写的是「Boss(Meshy+Mixamo)」,但 CLAUDE.md 的「除角色 FBX 外全程序化」是更硬的约束。用户已确认:本里程碑走程序化,外部模型以后再加。**这是机制级变更,T6 收官时要回流改 spec §12**(CLAUDE.md 的权威文档规则)。躯体因此必须写成可替换的:`BossSystem` 只暴露状态,`BossRenderer` 单向读它,反向零依赖。
 
 ## Global Constraints
 
@@ -153,7 +153,11 @@
 
 ## 明账(动工前就要记的,避免事后当成"发现")
 
-1. **Boss 用程序化躯体,不引外部模型**——与 spec §12「Boss(Meshy+Mixamo)」冲突,按 CLAUDE.md 的「全程序化」硬约束裁的。**待用户复核**。
-2. **「每级两选」是机制级新裁**(spec 没有这一条),取舍理由见上。**待用户复核**。
+1. **Boss 用程序化躯体,不引外部模型**——与 spec §12「Boss(Meshy+Mixamo)」冲突,按 CLAUDE.md 的「全程序化」硬约束裁的。
+   **✅ 用户 2026-08-18 已复核确认:本里程碑用程序化,外部模型留作以后再加。**
+   → 因此 `BossRenderer` 的躯体要按「以后能被替换」来写:躯体几何与战斗逻辑之间只经 `BossSystem` 的状态读值,不许 `BossSystem` 反过来依赖任何几何细节。
+2. **「每级两选」是机制级新裁**(spec 没有这一条),取舍理由见上。
+   **✅ 用户 2026-08-18 已复核确认:采用每级两选。**
+   → 满级门槛保持 `skillLevelMax = 5`,三十技的 Lv3/Lv5 两档质变全部保留。
 3. **难度四锚会换一组数**——T2 定下后 CLAUDE.md 的命令表要跟着改,老锚从此作废。
 4. **`sim-run.mjs` 读不到技能表与抽卡池**这件事本里程碑不修——它只是难度模型,不是平衡验证。照旧如实记录。
