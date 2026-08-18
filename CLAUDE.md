@@ -53,7 +53,7 @@ scripts/sdd/review-package <BASE> <HEAD>      # 生成评审 diff 包 → .super
 
 ## 约定
 
-- 提交:自然句 subject(不用 feat: 前缀)+ 尾注 `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`。
+- 提交:自然句 subject(不用 feat: 前缀)+ 尾注 `Co-Authored-By: Claude <noreply@anthropic.com>`。**尾注不带模型标识**(用户 2026-08-18 指示);M10 及之前的历史提交仍带旧字样,未回改。
 - **只提交,推送前问用户**(远端 `3d-element` = github.com/zjoooooo/3D-Element)。
 - 文案双语:所有玩家可见字符串走 `src/ui/strings.js` zh+en。
 - 角色资产不覆盖:`public/models/` 里 `Standing Idle.fbx / diffuse2.png(已转 .jpg)/ Fast Run-2.fbx / Standing 1H Magic Attack 02.fbx / Stand To Roll.fbx` 是用户手工管线产物,只增不改。

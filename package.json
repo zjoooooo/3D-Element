@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "check": "node scripts/check-clips.mjs",
     "check:game": "node scripts/check-game.mjs",
-    "sim": "node scripts/sim-run.mjs"
+    "sim": "node scripts/sim-run.mjs",
+    "report:bp": "node scripts/bp-report.mjs"
   },
   "dependencies": {
     "lil-gui": "^0.21.0",
