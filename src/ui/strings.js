@@ -55,6 +55,7 @@ export const STRINGS = {
     // M11 T1 (每级两选): which of this level-up's picks you are on.
     'run.pickOf': '第 {n}/{m} 张',
     'run.boss': '潮汐之主',
+    'run.altar': '祭坛引导',
     'bp.cyclonecut.lv3': '环带扩张',
     'bp.cyclonecut.lv5': '牵引更紧',
     'bp.piercelance.lv3': '枪身加宽',
@@ -183,6 +184,7 @@ export const STRINGS = {
     'verdict.topSkills': 'Top damage: ',
     'run.pickOf': 'Pick {n} of {m}',
     'run.boss': 'Tide Sovereign',
+    'run.altar': 'Altar rite',
     'bp.cyclonecut.lv3': 'Wider ring',
     'bp.cyclonecut.lv5': 'Tighter pull',
     'bp.piercelance.lv3': 'Broader lance',

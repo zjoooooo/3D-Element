@@ -1325,3 +1325,35 @@ body {
   box-shadow: 0 0 14px rgba(255, 96, 64, 0.7);
   transition: width 120ms linear;
 }
+
+/* 五行祭坛引导条 (M12 T2) — under the boss bar's slot, only mid-ritual. */
+.run-hud__altar {
+  position: absolute;
+  top: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(260px, 36vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+}
+.run-hud__altar[hidden] { display: none; }
+.run-hud__altar > span { font-size: 11px; letter-spacing: 0.3em; opacity: 0.75; }
+.run-hud__altar > i {
+  display: block;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(180, 220, 255, 0.3);
+  overflow: hidden;
+}
+.run-hud__altar > i::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: calc(var(--ratio, 0) * 100%);
+  background: linear-gradient(90deg, rgba(120, 200, 255, 0.9), rgba(220, 245, 255, 0.95));
+  box-shadow: 0 0 10px rgba(140, 210, 255, 0.6);
+}

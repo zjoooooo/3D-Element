@@ -28,7 +28,7 @@ const BREATH_SPEED = 2.4; // rad/s the next tide's stele breathes at
  * of stele/rune `i`. Ground's ritual-circle shader places its rune discs
  * with this identical formula so they sit directly under their steles.
  */
-function bearingOf(i) {
+export function bearingOf(i) {
   return (i / WUXING_COUNT) * TAU;
 }
 

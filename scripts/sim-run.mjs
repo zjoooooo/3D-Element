@@ -78,6 +78,13 @@ const P = {
     E.boss.fight.quake.damage / E.boss.fight.quake.every,
   /** …and its summons are bodies, which the crowd term already knows how to price. */
   bossSummonPerSec: E.boss.fight.summon.count / E.boss.fight.summon.every,
+  /**
+   * 五行祭坛 (M12 T2): once per tide the lit stele offers one extra draft
+   * card to whoever walks out and channels it. A FUNCTION, not a snapshot, so
+   * the suite can perturb `tides.length` and watch this follow (M11's mirror
+   * rule — a load-time constant cannot be told from a coincidence).
+   */
+  altarEvery: () => settings.tides.length,
 
   /* ---- model-only: no settings field means this, and none ever will ----
    *
@@ -129,6 +136,14 @@ function simulate(seed, bot) {
     // Spawns (jittered ±20%), capped.
     const rate = (P.spawnPerMin(m) / 60) * (0.8 + 0.4 * rand());
     pop = Math.min(P.popCap, pop + rate);
+
+    // 五行祭坛: one extra pick per tide for whoever makes the trip. Whether
+    // the bot makes it rides `kite` — walking out to a ring stele under fire
+    // is the same mobility skill kiting is — and the pick is worth half a
+    // level (a level grants two picks since M11 T1).
+    if (t > 0 && t % P.altarEvery() === 0 && rand() < kite) {
+      dps *= Math.sqrt(bot.gain);
+    }
 
     // 首领战: it turns up once, soaks damage that would otherwise thin the
     // horde, and leans on the player the whole time it is up. This is the

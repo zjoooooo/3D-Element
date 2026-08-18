@@ -54,7 +54,8 @@ import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
 import { STRINGS, t, wuxingWord, wuxingPhrase } from '../src/ui/strings.js';
-import { steleGlowAt, DIM_GLOW } from '../src/run/Arena.js';
+import { steleGlowAt, DIM_GLOW, bearingOf } from '../src/run/Arena.js';
+import { AltarSystem } from '../src/run/AltarSystem.js';
 import { mixTint } from '../src/run/TideAtmosphere.js';
 import { getColor } from '../src/utils/color.js';
 import { GameAudio } from '../src/run/GameAudio.js';
@@ -3152,6 +3153,146 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   console.log('ok  M12 T1: the boss fortune lands on a full field');
+}
+
+/* ---- M12 T2: the steles were already glowing, now they mean it ---- */
+{
+  const A = settings.run.altar;
+  assert.ok(A && A.claimRadius > 0 && A.channelTime > 0, 'altar: has a real claim radius and channel time');
+
+  // The altar IS the stele. Its positions are not written a second time —
+  // AltarSystem imports Arena's own bearing formula, and this check stands
+  // the player on ARENA's spot and expects the altar to notice. Two copies
+  // of the formula would drift exactly like every mirror this project has
+  // shot (M11's rule); one copy cannot.
+  const steleXZ = (i) => {
+    const b = bearingOf(i);
+    return { x: Math.sin(b) * settings.run.arenaRadius, z: Math.cos(b) * settings.run.arenaRadius };
+  };
+
+  const mk = () => {
+    const tides = new TideSchedule(createRng(91));
+    const altar = new AltarSystem(tides);
+    return { tides, altar };
+  };
+
+  // 1. Channel time is a DURATION (M8's channel rule): the same 1.6 seconds
+  //    claims at a 1/60 tick and at a 1/6 tick — never "N ticks".
+  for (const step of [1 / 60, 1 / 6]) {
+    const { tides, altar } = mk();
+    const el = tides.tideAt(10).element;
+    const at = steleXZ(el);
+    let claimed = null;
+    altar.onClaim = (e) => { claimed = e; };
+    let t = 10;
+    let took = 0;
+    while (claimed === null && took < 10) {
+      altar.tick(step, tides.tideAt(t), at);
+      t += step; took += step;
+    }
+    assert.ok(claimed !== null, `altar: standing at the lit stele claims (step ${step.toFixed(3)})`);
+    assert.equal(claimed, el, 'altar: the claim carries the tide element');
+    assert.ok(
+      Math.abs(took - A.channelTime) <= step + 1e-9,
+      `altar: the channel is ${A.channelTime}s whatever the tick (took ${took.toFixed(3)} at step ${step.toFixed(3)})`
+    );
+  }
+
+  // 2. The other four steles are cold: standing there does nothing, all tide long.
+  {
+    const { tides, altar } = mk();
+    const el = tides.tideAt(10).element;
+    let claimed = 0;
+    altar.onClaim = () => claimed++;
+    for (let i = 0; i < 5; i++) {
+      if (i === el) continue;
+      const at = steleXZ(i);
+      for (let k = 0; k < 300; k++) altar.tick(1 / 60, tides.tideAt(10 + k / 60), at);
+    }
+    assert.equal(claimed, 0, 'altar: a cold stele never grants anything');
+  }
+
+  // 3. Walking out resets the channel — half-progress does not bank.
+  {
+    const { tides, altar } = mk();
+    const el = tides.tideAt(10).element;
+    const at = steleXZ(el);
+    let claimed = 0;
+    altar.onClaim = () => claimed++;
+    const half = Math.floor((A.channelTime / 2) * 60);
+    for (let k = 0; k < half; k++) altar.tick(1 / 60, tides.tideAt(10), at);
+    altar.tick(1 / 60, tides.tideAt(10), { x: 0, z: 0 }); // stepped out
+    for (let k = 0; k < half + 2; k++) altar.tick(1 / 60, tides.tideAt(10), at);
+    assert.equal(claimed, 0, 'altar: stepping out resets the channel — half plus half is not a claim');
+  }
+
+  // 4. Once per tide; the NEXT tide re-arms at the NEW element's stele.
+  {
+    const { tides, altar } = mk();
+    const len = settings.tides.length;
+    const claims = [];
+    altar.onClaim = (e) => claims.push(e);
+    const first = tides.tideAt(10).element;
+    for (let k = 0; k < 600; k++) altar.tick(1 / 60, tides.tideAt(10 + k / 60), steleXZ(first));
+    assert.equal(claims.length, 1, 'altar: one claim per tide, however long you loiter');
+    const second = tides.tideAt(len + 10).element;
+    assert.notEqual(second, first, 'fixture: consecutive tides differ');
+    for (let k = 0; k < 600; k++) altar.tick(1 / 60, tides.tideAt(len + 10 + k / 60), steleXZ(second));
+    assert.equal(claims.length, 2, 'altar: the next tide re-arms it at the new stele');
+    assert.deepEqual(claims, [first, second], 'altar: each claim carried its own tide');
+    altar.reset();
+    for (let k = 0; k < 600; k++) altar.tick(1 / 60, tides.tideAt(len + 10 + k / 60), steleXZ(second));
+    assert.equal(claims.length, 3, 'altar: a reset (new run) forgets the old claims');
+  }
+
+  // 5. The REAL RunManager drives it and the claim lands on the SHARD-HAND
+  //    path — the machinery the reward reuses (M10/M11: hand-ticked fixtures
+  //    cannot see missing wiring).
+  {
+    const enemies = new EnemySystem(createRng(92));
+    const tides = new TideSchedule(createRng(93));
+    const altar = new AltarSystem(tides);
+    const run = new RunManager({
+      enemies,
+      pickups: new PickupSystem(createRng(94)),
+      player: new PlayerState(),
+      rng: createRng(95),
+      tides,
+      altar,
+      boss: new BossSystem(enemies, tides),
+      projectiles: new EnemyProjectiles(),
+      combat: { tick: () => 0, release: () => -1, resetStats: () => {}, book: () => {} },
+      targets: { register: () => {} },
+      abilities: { active: [] }
+    });
+    const hands = [];
+    run.onShardHand = (el) => hands.push(el);
+    run.start();
+    const el = run.tide().element;
+    const at = steleXZ(el);
+    const alive = run.s.player;
+    for (let k = 0; k < 60 * 4; k++) { alive.hp = alive.maxHp; run.tick(1 / 60, at); }
+    assert.equal(hands.length, 1, 'altar: a real run, a real claim, and it opens the directional hand');
+    assert.equal(hands[0], el, 'altar: …of the tide element');
+    run.start();
+    assert.equal(altar.progress01, 0, 'altar: a restart clears the channel');
+  }
+
+  // 6. The growth model sees it (M11's mirror rule): the cadence reads the
+  //    tide length LIVE, so perturbing the source moves the model.
+  {
+    const before = SIM.altarEvery();
+    const saved = settings.tides.length;
+    try {
+      settings.tides.length = saved + 60;
+      assert.notEqual(SIM.altarEvery(), before, 'sim: the altar cadence follows the tide length — a read, not a coincidence');
+    } finally {
+      settings.tides.length = saved;
+    }
+    assert.equal(SIM.altarEvery(), before, 'sim: the probe put the tide length back');
+  }
+
+  console.log('ok  M12 T2: the steles were already glowing, now they mean it');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

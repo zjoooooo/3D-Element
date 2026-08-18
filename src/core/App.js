@@ -36,6 +36,7 @@ import { VerdictPanel } from '../run/VerdictPanel.js';
 import { Ultimate } from '../run/Ultimate.js';
 import { RunManager, tickHitstop, addHitstop } from '../run/RunManager.js';
 import { BossSystem } from '../run/BossSystem.js';
+import { AltarSystem } from '../run/AltarSystem.js';
 import { BossRenderer } from '../run/BossRenderer.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
@@ -363,6 +364,8 @@ export class App {
       // encounter — when it turns up, and how hurt it is. Built after the
       // tide schedule because its entrance is counted in tides.
       this.bossSystem = new BossSystem(this.enemySystem, this.tideSchedule);
+      // 五行祭坛 (M12 T2): the encounter layer over the arena's five steles.
+      this.altarSystem = new AltarSystem(this.tideSchedule);
       this.enemyProjectiles = new EnemyProjectiles();
       this.scene.add(this.enemyProjectiles.points);
       // 禁咒 (spec §4.9): one full-field ultimate per wuxing, charged by kills
@@ -381,6 +384,7 @@ export class App {
         abilities: this.abilities,
         tides: this.tideSchedule,
         boss: this.bossSystem,
+        altar: this.altarSystem,
         projectiles: this.enemyProjectiles,
         ultimate: this.ultimate,
         rng
@@ -2090,7 +2094,8 @@ export class App {
           this._resonanceText(),
           this.ultimate,
           this._seatCooldowns(),
-          this.bossSystem
+          this.bossSystem,
+          this.altarSystem
         );
       }
     }

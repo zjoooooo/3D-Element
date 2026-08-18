@@ -68,7 +68,11 @@ export class RunHud {
       // boss's LIVE hp over the hp it spawned with — BossSystem#hp01 — never a
       // number this class keeps its own copy of.
       '<div class="run-hud__boss" data-boss hidden>' +
-      '<span data-k="bossName"></span><i data-boss-fill></i></div>';
+      '<span data-k="bossName"></span><i data-boss-fill></i></div>' +
+      // 五行祭坛 (M12 T2): a thin channel bar, visible only mid-ritual —
+      // standing still for 1.5 s under fire needs the game to say it noticed.
+      '<div class="run-hud__altar" data-altar hidden>' +
+      '<span data-k="altarName"></span><i data-altar-fill></i></div>';
     parent.appendChild(this.root);
 
     this._fields = Object.fromEntries(
@@ -82,6 +86,8 @@ export class RunHud {
     this._xpFill = this.root.querySelector('[data-xp-fill]');
     this._boss = this.root.querySelector('[data-boss]');
     this._bossFill = this.root.querySelector('[data-boss-fill]');
+    this._altar = this.root.querySelector('[data-altar]');
+    this._altarFill = this.root.querySelector('[data-altar-fill]');
 
     /** One entry per seat, index-matched — never rebuilt, only mutated. */
     this._slots = [...this.root.querySelectorAll('.hud-slot')].map((slotRoot) => ({
@@ -157,7 +163,7 @@ export class RunHud {
    * preallocated 6-entry `{active, remaining, total, lowMana}` array, or
    * omitted to leave the skill bar's cooldown/mana visuals as they were.
    */
-  update(player, run, pickups, tideInfo, resonanceText, ultimate, cooldowns, boss = null) {
+  update(player, run, pickups, tideInfo, resonanceText, ultimate, cooldowns, boss = null, altar = null) {
     const s = Math.floor(run.elapsed);
     this._set('time', `${String((s / 60) | 0).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`);
     this._set('kills', `${t('run.kills')} ${run.kills}`);
@@ -173,6 +179,16 @@ export class RunHud {
     if (bossUp) {
       this._bossFill.style.setProperty('--ratio', boss.hp01);
       this._set('bossName', t('run.boss'));
+    }
+
+    // 五行祭坛 channel (M12 T2): shown only while a ritual is in progress —
+    // `progress01` is 0 when idle and 0 again once claimed, so visibility and
+    // fill are the same read.
+    const channeling = (altar?.progress01 ?? 0) > 0;
+    this._altar.hidden = !channeling;
+    if (channeling) {
+      this._altarFill.style.setProperty('--ratio', altar.progress01);
+      this._set('altarName', t('run.altar'));
     }
 
     const dodgeRatio = Math.max(

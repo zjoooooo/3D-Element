@@ -223,7 +223,18 @@ export const settings = {
      * past T1's "four skills maxed by minute ten" — the player is finished
      * assembling right when there is finally something to point it all at.
      */
-    boss: { afterTides: 3, spawnDistance: 14 }, // metres from the player enemies appear at (outside view)
+    boss: { afterTides: 3, spawnDistance: 14 },
+    /**
+     * 五行祭坛 (M12 T2). The five arena steles ARE the altars — the current
+     * tide's stele (the one `steleGlowAt` already lights) grants a directional
+     * hand of its element to whoever stands within `claimRadius` of it for
+     * `channelTime` seconds, once per tide. The trip is the cost: the steles
+     * sit on the 40 m arena ring, spawns land inside 26 m, and the walk is
+     * ~9.5 s each way at walkSpeed — a real decision every 180 s tide, not a
+     * free pickup. `channelTime` is a DURATION in seconds (M8's channel
+     * rule), never a per-tick accrual.
+     */
+    altar: { claimRadius: 3, channelTime: 1.5 }, // metres from the player enemies appear at (outside view)
     arenaRadius: 40, // playable field; matches character.roamRadius in run mode
     // M11 T1 (升级提速): 22/1.13 put a baseline run at level 20 by minute ten
     // — nineteen level-ups, a median of two maxed skills, and not one run in

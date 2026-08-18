@@ -150,6 +150,13 @@ export class RunManager {
     this.active = true;
     this.elapsed = 0;
     this.s.boss?.reset(); // one boss per run
+    if (this.s.altar) {
+      this.s.altar.reset();
+      // The blessing IS a shard hand (残章定向手): the claim rides the exact
+      // path the elite shard already walks, so the freeze gate, the dead-run
+      // guard and the empty-offer heal in App's handler all apply unchanged.
+      this.s.altar.onClaim = (element) => this.onShardHand?.(element);
+    }
     this.kills = 0;
     this.telegraphs.length = 0;
     this._spawnDebt = 0;
@@ -193,6 +200,8 @@ export class RunManager {
     // of its own, so a paused run, an endless run and a restart all need no
     // second opinion about what time it is.
     this.s.boss?.tick(step, this.elapsed, playerPos);
+    // 五行祭坛 (M12 T2): same clock, same tide read the HUD uses.
+    this.s.altar?.tick(step, this.tide(), playerPos);
 
     // Accrue spawn debt from the budget curve, jittered ±20%.
     const perSecond = (settings.run.spawnBase + settings.run.spawnQuad * minute * minute) / 60;
