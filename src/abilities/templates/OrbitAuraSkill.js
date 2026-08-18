@@ -9,7 +9,7 @@ import { LAYER } from '../../core/Layers.js';
 import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
-import { bpScale, bpAdd } from '../../run/breakpoints.js';
+import { bpScale, bpAdd, bpCount } from '../../run/breakpoints.js';
 
 const TAU = Math.PI * 2;
 const MAX_ORBITERS = 8;
@@ -141,8 +141,13 @@ export class OrbitAuraSkill extends Ability {
     // swordrain/sunwheel's own instance counts.
     const count = Math.min(
       MAX_ORBITERS,
-      Math.max(1, Math.round(c.bladeCount + bpAdd(this.element, 'count', this.bpLevel)))
+      // M11 账清: same number CombatSystem's aura case scales its dps by.
+      bpCount(this.element, this.bpLevel)
     );
+    // Published so the count the ring DRAWS can be checked against the count
+    // the hit test PAYS for. Without it the two can drift silently, which is
+    // the shape M10 T3 shipped once already.
+    this.drawnCount = count;
     const height = 0.95;
 
     for (let i = 0; i < count; i++) {
@@ -224,7 +229,10 @@ export class OrbitAuraSkill extends Ability {
     const g = settings.global;
     const radius = this._radius();
     // M6 T12 (日轮 Lv3 球数+1): additive, shares the `count` key.
-    const count = Math.max(1, Math.round(c.orbCount + bpAdd(this.element, 'count', this.bpLevel)));
+    // M11 账清: same number CombatSystem's aura case scales its dps by.
+    const count = bpCount(this.element, this.bpLevel);
+    this.drawnCount = count; // see _updateBlades' note
+
     // M6 T12 (日轮 Lv5 公转速×1.3): `orbitSpeed` used to be a bare 0.6
     // hard-coded below — pulled into settings.sunwheel (mirroring
     // bladeorbit's own field of the same name) so it has something to scale.

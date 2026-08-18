@@ -626,6 +626,29 @@ export const settings = {
       weak: { amount: 0.3, duration: 4 }, // 熄灭：接触/弹道 −30%
       slowAmp: { mult: 2, duration: 4, cap: 0.9 } // 淤塞：所受减速翻倍; cap: total slow ceiling
     },
+    /**
+     * 剑数/刃数/球数 (M11 账清) — the one place that says which settings field
+     * a `count`-tiered skill counts, and how many its renderer can actually
+     * draw.
+     *
+     * Both sides read it: the ability class asks how many blades to spawn, and
+     * CombatSystem asks how much harder that many blades hit. Before this
+     * existed only the first question had an answer, so 万剑诀/剑域/日轮's Lv3
+     * bought blades that dealt nothing — `npm run report:bp` measured 剑雨增势
+     * at +0% damage with the blade count visibly up. A tier the damage cannot
+     * see is a hollow tier, and this is what stops the two drifting again.
+     *
+     * `max` is the logical ceiling and must stay ≤ the template's own
+     * InstancedMesh capacity (ZoneBurstSkill's MAX_BLADES, OrbitAuraSkill's
+     * MAX_ORBITERS) — pinned in check-game.mjs, because a ceiling above the
+     * buffer would promise damage for blades the mesh cannot hold.
+     */
+    countBasis: {
+      swordrain: { field: 'swordCount', max: 24 },
+      bladeorbit: { field: 'bladeCount', max: 8 },
+      sunwheel: { field: 'orbCount', max: 8 }
+    },
+
     // Threat readability (spec §5.7 亮度层级): enemy bolts + spawn telegraphs
     // multiply their base colour by this so red threats outshine friendly VFX
     // in a busy fight. Read by EnemyProjectiles.js and EnemyRenderer.js

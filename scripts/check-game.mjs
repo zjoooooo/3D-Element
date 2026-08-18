@@ -43,11 +43,12 @@ import { FUSION_CLASSES, ABILITY_TYPES } from '../src/abilities/AbilityManager.j
 import { LineSweepSkill } from '../src/abilities/templates/LineSweepSkill.js';
 import { ZoneBurstSkill } from '../src/abilities/templates/ZoneBurstSkill.js';
 import { TimedAuraSkill } from '../src/abilities/templates/TimedAuraSkill.js';
+import { OrbitAuraSkill } from '../src/abilities/templates/OrbitAuraSkill.js';
 import { PierceLanceSkill } from '../src/abilities/PierceLanceSkill.js';
 import { StormFieldSkill } from '../src/abilities/StormFieldSkill.js';
 import { FireBreathSkill } from '../src/abilities/FireBreathSkill.js';
 import { MortarRainSkill } from '../src/abilities/MortarRainSkill.js';
-import { bpScale, bpAdd, bpReplace, bpFlag } from '../src/run/breakpoints.js';
+import { bpScale, bpAdd, bpReplace, bpFlag, bpCount, bpCountMult } from '../src/run/breakpoints.js';
 import { RunManager, tickHitstop, addHitstop } from '../src/run/RunManager.js';
 import { Ultimate } from '../src/run/Ultimate.js';
 import { sequenceRefund } from '../src/run/sequence.js';
@@ -2260,6 +2261,154 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   console.log('ok  M10 T3: the cone is aimed the way it is judged');
+}
+
+/* ---- M11 T0: a `count` tier has to reach the damage, not just the mesh ---- */
+{
+  // `npm run report:bp` finding: 万剑诀 / 剑域 / 日轮's Lv3 `count` bought
+  // blades and nothing else. ZoneBurstSkill and OrbitAuraSkill read
+  // bpAdd('count') to decide how many to draw; the burst and aura damage
+  // never looked at it. Denser rain, identical hit — the same hollow-tier
+  // shape M10 found three of, caught this time by measuring instead of by
+  // reading the table.
+
+  const BASIS = [['swordrain', 'swordCount'], ['bladeorbit', 'bladeCount'], ['sunwheel', 'orbCount']];
+
+  // 1. One function answers both questions, so the drawing and the judging
+  //    cannot drift: the multiplier IS the drawn count over the base.
+  for (const [el, field] of BASIS) {
+    const base = settings[el][field];
+    assert.equal(bpCount(el, 1), base, `${el}: Lv1 draws exactly its own base count`);
+    assert.ok(bpCount(el, 3) > base, `${el}: Lv3 draws more than Lv1`);
+    assert.equal(bpCountMult(el, 1), 1, `${el}: Lv1 multiplies damage by exactly 1`);
+    assert.ok(
+      Math.abs(bpCountMult(el, 3) - bpCount(el, 3) / base) < 1e-9,
+      `${el}: the damage multiplier is the drawn count over the base, not a second number`
+    );
+  }
+
+  // 2. Nothing else moves. A skill with no count tier keeps identity, and a
+  //    skill that isn't count-based at all reports zero rather than NaN.
+  assert.equal(bpCountMult('ice', 5), 1, 'count: a skill with no count tier is untouched');
+  assert.equal(bpCountMult('lifebloom', 5), 1, 'count: a ZoneBurst skill with no count basis is untouched');
+  assert.equal(bpCount('lifebloom', 5), 0, 'count: a skill with no count basis draws no blades (0, never NaN)');
+
+  // 3. The ceiling is shared. A tier that asks for more than the renderer can
+  //    draw must not multiply damage by blades nobody ever sees.
+  {
+    const saved = settings.swordrain.breakpoints;
+    try {
+      settings.swordrain.breakpoints = { lv3: { count: 500 }, lv5: saved.lv5 };
+      const drawn = bpCount('swordrain', 3);
+      assert.equal(drawn, settings.combat.countBasis.swordrain.max, 'count: an absurd tier clamps to what can be drawn');
+      assert.ok(
+        Math.abs(bpCountMult('swordrain', 3) - drawn / settings.swordrain.swordCount) < 1e-9,
+        'count: the multiplier clamps with it — never more damage than blades'
+      );
+    } finally {
+      settings.swordrain.breakpoints = saved;
+    }
+    assert.deepEqual(settings.swordrain.breakpoints, saved, 'count: the probe put the table back');
+  }
+  for (const [el] of BASIS) {
+    const spec = settings.combat.countBasis[el];
+    assert.ok(spec && spec.max > 0, `${el}: has a count basis with a real ceiling`);
+  }
+
+  // 4. And the part that was actually broken: CombatSystem applies it.
+  //    A burst's damage and an aura's dps both scale by the drawn ratio.
+  const burstAt = (element, level) => {
+    let total = 0;
+    const combat = new CombatSystem(
+      // The burst case delivers through `damage`, not `damageOnce` — spying on
+      // the wrong one reads a real detonation as zero damage.
+      { damageOnce: () => 0, damageRing: () => 0, slow: () => {}, knockback: () => {},
+        damage: (p, r, amount) => (total += amount, 1) },
+      null,
+      () => level
+    );
+    combat.tick(1 / 60, [{
+      element, phase: 'impact', impactTime: 0.2, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+      length: 4, u: 1, autocast: false, quenched: false, fusionMult: 1, castId: 1
+    }]);
+    return total;
+  };
+  const auraAt = (element, level) => {
+    let total = 0;
+    const combat = new CombatSystem(
+      { damage: () => 0, damageOnce: () => 0, slow: () => {},
+        damageRing: (p, inner, r, amount) => (total += amount, 1) },
+      null,
+      () => level
+    );
+    combat.tick(1 / 60, [{
+      element, phase: 'travel', impactTime: 9, fadeTime: 0,
+      position: { x: 0, z: 0 }, origin: { x: 0, z: 0 }, direction: { x: 1, z: 0 },
+      length: 1, u: 1, autocast: false, quenched: false, fusionMult: 1
+    }]);
+    return total;
+  };
+  {
+    const want = bpCountMult('swordrain', 3);
+    const got = burstAt('swordrain', 3) / burstAt('swordrain', 1);
+    assert.ok(want > 1.2, 'swordrain: the Lv3 tier is worth measuring in the first place');
+    assert.ok(Math.abs(got - want) < 1e-6, `swordrain Lv3: the burst hits ${want.toFixed(3)}x harder, measured ${got.toFixed(3)}x`);
+  }
+  for (const el of ['bladeorbit', 'sunwheel']) {
+    const want = bpCountMult(el, 3);
+    const got = auraAt(el, 3) / auraAt(el, 1);
+    assert.ok(want > 1.2, `${el}: the Lv3 tier is worth measuring in the first place`);
+    assert.ok(Math.abs(got - want) < 1e-6, `${el} Lv3: the aura grinds ${want.toFixed(3)}x harder, measured ${got.toFixed(3)}x`);
+  }
+
+  // 5. And the half a hardcoded count would break: what the CLASS DRAWS has to
+  //    be the same number. Sabotaging step 4 alone leaves a ring that pays for
+  //    seven blades while drawing five — WYSIWYG's exact failure mode, and the
+  //    one M10 T3 shipped once already. Driven through the real classes.
+  {
+    // A VFX ctx that says yes to everything: these two classes touch a
+    // different set of particle uniforms than the fusion classes above, and
+    // the point here is the COUNT, not which uniform names exist.
+    const anyUniforms = () => new Proxy({}, {
+      get: (t, k) => (t[k] ??= { value: 0 }),
+      has: () => true
+    });
+    const vfxCtx = (level) => ({
+      levelOf: () => level,
+      lights: { acquire: () => null, release: () => {}, set: () => {} },
+      particles: { get: () => ({ uniforms: anyUniforms(), setGradient() {}, emit() {} }) },
+      // A permanent aura pins itself to the caster every frame (M6 T4).
+      character: { position: { x: 0, y: 0, z: 0 }, root: { position: { x: 0, y: 0, z: 0 } } },
+      // Present in every real ctx (App builds them), absent here — stubbed
+      // rather than null-guarded, because that is a rendering question and
+      // this block is about a number.
+      bursts: { spawn() {} },
+      decals: { spawn() {} },
+      fissures: { spawn() {} },
+      shake: { add() {}, kick() {} },
+      flash: { fire() {} }
+    });
+    for (const el of ['bladeorbit', 'sunwheel']) {
+      for (const level of [1, 3]) {
+        const aura = new OrbitAuraSkill(vfxCtx(level), el);
+        aura.autocast = false; aura.fusionMult = 1; aura.quenched = false;
+        aura.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 1);
+        aura.update(1 / 60);
+        assert.equal(aura.drawnCount, bpCount(el, level), `${el} Lv${level}: the ring draws exactly what the hit test pays for`);
+        aura.destroy();
+      }
+    }
+    for (const level of [1, 3]) {
+      const rain = new ZoneBurstSkill(vfxCtx(level), 'swordrain');
+      rain.autocast = false; rain.fusionMult = 1; rain.quenched = false;
+      rain.spawn({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 4);
+      assert.equal(rain._bladeWanted, bpCount('swordrain', level), `swordrain Lv${level}: the rain drops exactly what the hit test pays for`);
+      rain.destroy();
+    }
+  }
+
+  console.log('ok  M11 T0: a count tier reaches the damage, not just the mesh');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

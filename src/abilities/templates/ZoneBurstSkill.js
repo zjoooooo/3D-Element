@@ -10,7 +10,7 @@ import { frame } from '../../core/FrameUniforms.js';
 import { settings } from '../../config/settings.js';
 import { getColor } from '../../utils/color.js';
 import { saturate, lerp, Easing } from '../../utils/math.js';
-import { bpScale, bpAdd } from '../../run/breakpoints.js';
+import { bpScale, bpAdd, bpCount } from '../../run/breakpoints.js';
 
 const MAX_BLADES = 24;
 const TAU = Math.PI * 2;
@@ -195,10 +195,12 @@ export class ZoneBurstSkill extends Ability {
       // drops, resolved once at spawn (spec: template classes read shape
       // params at spawn) — fixes a pre-existing gap where every cast dropped
       // all MAX_BLADES regardless of `swordCount`, which made this field dead.
-      this._bladeWanted = Math.min(
-        MAX_BLADES,
-        Math.max(1, Math.round(settings[this.element].swordCount + bpAdd(this.element, 'count', this.bpLevel)))
-      );
+      // M11 账清: the count now comes from `bpCount`, which CombatSystem's
+      // burst case reads too — the blades the player counts and the damage
+      // they take are the same number. Skills on this template with no count
+      // basis (lifebloom/boulder/…) get 0 and draw none, which is what the
+      // old `undefined + 0 → NaN` was accidentally doing.
+      this._bladeWanted = Math.min(MAX_BLADES, bpCount(this.element, this.bpLevel));
       for (const record of this.bladeRecords) {
         record.angle = Math.random() * TAU;
         record.radial = Math.sqrt(Math.random()); // even fill, not centre-piled

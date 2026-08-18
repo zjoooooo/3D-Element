@@ -103,3 +103,40 @@ export function bpFlag(element, key, level) {
   if (level >= 3 && bp.lv3?.[key]) return true;
   return false;
 }
+
+/**
+ * How many instances a `count`-tiered skill actually draws at `level`
+ * (剑数/刃数/球数), clamped to what its renderer can hold.
+ *
+ * 0 for anything that isn't count-based — including the other skills riding
+ * ZoneBurstSkill, which have no blade visual at all. Deliberately 0 rather
+ * than NaN: `for (i = 0; i < NaN; i++)` and `for (i = 0; i < 0; i++)` do the
+ * same nothing, but only one of them survives being read by a second caller.
+ */
+export function bpCount(element, level) {
+  const spec = settings.combat.countBasis?.[element];
+  if (!spec) return 0;
+  const base = settings[element]?.[spec.field];
+  if (!base) return 0;
+  return Math.max(1, Math.min(spec.max, Math.round(base + bpAdd(element, 'count', level))));
+}
+
+/**
+ * What that count is worth to the hit test: the drawn count over the base.
+ *
+ * This is the whole point of the pair — the multiplier is DERIVED from the
+ * number of blades the player is watching, never written down a second time.
+ * Fourteen swords becoming eighteen is ×1.286 on the burst, and if a future
+ * tier asks for more blades than the mesh can draw, the damage clamps with
+ * the drawing rather than paying out for swords nobody sees.
+ *
+ * Exactly 1 for every skill with no count basis, which is every skill but
+ * three — identity, like the four verbs above.
+ */
+export function bpCountMult(element, level) {
+  const spec = settings.combat.countBasis?.[element];
+  if (!spec) return 1;
+  const base = settings[element]?.[spec.field];
+  if (!base) return 1;
+  return bpCount(element, level) / base;
+}

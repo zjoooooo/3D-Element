@@ -1,6 +1,6 @@
 // src/run/CombatSystem.js
 import { settings } from '../config/settings.js';
-import { bpScale, bpAdd, bpReplace, bpFlag } from './breakpoints.js';
+import { bpScale, bpAdd, bpReplace, bpFlag, bpCountMult } from './breakpoints.js';
 import { isFusionId, fusionParents, pairKeyOf } from './fusions.js';
 
 /**
@@ -294,7 +294,14 @@ export class CombatSystem {
               // wave's own multiplier, so a wave table keeps its shape.
               const amt =
                 c.damage * this._amp(ability) * wave.damageMult *
-                bpScale(ability.element, 'damage', level);
+                bpScale(ability.element, 'damage', level) *
+                // M11 账清: 万剑诀's Lv3 buys four more swords, and this is
+                // where they land. `bpCountMult` is the drawn count over the
+                // base — the same number ZoneBurstSkill uses to decide how
+                // many to draw — so a denser rain hits harder by exactly as
+                // much as it looks like it should. Identity (1) for every
+                // skill without a count basis, which is all but three.
+                bpCountMult(ability.element, level);
               this._book(ability.element, amt, this.targets.damage(ability.position, waveRadius, amt, wux, wuxB));
               // M6 T12: slowFactor REPLACEs, same rule as the sweep case above.
               const slowFactor = bpReplace(ability.element, 'slowFactor', level) ?? c.slowFactor;
@@ -478,7 +485,15 @@ export class CombatSystem {
           const radius = c.radius * bpScale(ability.element, 'radius', level);
           const band = (c.band ?? 0) * bpScale(ability.element, 'band', level);
           const inner = Math.max(0, radius - band);
-          const amt = c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level) * step;
+          // M11 账清: 剑域/日轮's Lv3 buys orbiters, and this is what they are
+          // worth. `bpCountMult` is the drawn count over the base — the same
+          // number OrbitAuraSkill uses to decide how many to draw — so a ring
+          // of seven blades grinds exactly 7/5 as hard as one of five.
+          // Identity (1) for every aura without a count basis (燃阵, 沙暴, the
+          // fusion auras), so nothing else moves.
+          const amt =
+            c.dps * this._amp(ability) * bpScale(ability.element, 'dps', level) *
+            bpCountMult(ability.element, level) * step;
           // `kbMult` (M7 T4, 研磨不推): a row may scale the baseline per-hit
           // shove — 0 for 锋岩星阵, whose 60Hz solid-disc stream would
           // otherwise juggle enemies out of its own footprint (the row's own
