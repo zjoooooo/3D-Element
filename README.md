@@ -363,6 +363,21 @@ line cast you only care about the far end of. That is why zone targeting needed 
 `Ability`, `AbilityManager` or `App`: `SnareAbility` reads its centre as `pointAt(1)` and works
 outward from there.
 
+### Levelling up twice
+
+A level-up deals a hand, you take a card, and then it deals another. `settings.upgrades.picksPerLevel`
+is two, and the second hand is drawn **after** the first card is applied, so the Lv3 upgrade can
+appear behind the Lv2 one you just took. Waiving ends the whole level rather than one card of it, and
+a reroll replaces the hand without spending a pick.
+
+It exists because of a measurement. The target was four maxed skills by minute ten; a run is nineteen
+level-ups deep at that point and four maxed skills costs forty-two, because the hand only offers
+upgrades for what is already seated and every pick competes with new skills, passives, fusions and
+mutations. Tripling xp income moves the median from two to three and no further — the extra levels
+just scatter. A second pick is what moves it, the upgrade card's weight (3 → 6) is what makes it
+reliable rather than lucky, and the xp curve (22/1.13 → 18/1.10) is what delivers the twenty-five
+level-ups the other two are measured against.
+
 ### The far-cast circle
 
 `ZoneIndicator` is the arrow's opposite number, and it is built out of the same two ideas: metres,
@@ -383,6 +398,37 @@ screenful of discarded fragments for one thin line.
 The circle **snaps out past its radius and settles back** when the cast is armed, and the trap does
 the same thing when it lands. A circle that grows linearly reads as a UI element; one that
 overshoots reads as something the caster did.
+
+### The boss is a fourth behaviour
+
+`潮汐之主` arrives three tides into a run, and it is not a new kind of thing.
+Every hit test in the game reads `settings.enemies[BEHAVIORS[behavior]]` — its collision radius, its
+mass, its hp multiplier — so adding one row to that table hands the boss the entire judging layer at
+once: all thirty skills, the wuxing matchup, marks, the three overcoming debuffs, reactions. There is
+no branch anywhere that says "unless it is the boss". A boss with its own body and its own hit test
+is how you ship one that six skills quietly cannot touch, and the suite proves the point by casting
+every castable skill at it and requiring damage from each.
+
+Two numbers make it a boss rather than a large rat. `mass` answers knockback, because the shove is
+`impulse / mass` — at 200 a launch becomes a nudge without a single special case. `slowResist`
+answers control at 60%: resisted, never immune, because a boss you cannot slow at all deletes water's
+whole identity from the fight.
+
+`BossSystem` owns the encounter and nothing else — the entrance, the three acts, what is being wound
+up, and a 0..1 number for the health bar. It follows the body by **id**, never by index, because
+`EnemySystem` compacts its arrays by swapping the last body into the hole: an index captured at spawn
+points at some other enemy the moment anything dies, which is exactly how a boss bar starts reporting
+a rat's hp.
+
+Three acts at 66% and 33%, one move unlocked per act, and every move states its unit at the channel
+because this project has got that wrong four times: 碾压冲锋's shove is an **impulse** (one charge,
+one launch), 震地's stun is a **duration** in seconds, 召唤 is a **count** per call. The telegraph ring
+is drawn at the radius the move will actually judge — what you dodge is what would have hit you.
+
+`BossRenderer` is procedural and deliberately replaceable: a faceted core that breathes faster as the
+fight goes on, a ring of shards that thins act by act, and the telegraph. It reads `BossSystem` and
+`BossSystem` never reads it, so swapping the geometry for an imported model touches nothing about
+the fight.
 
 ### The wedge is that same circle, masked
 

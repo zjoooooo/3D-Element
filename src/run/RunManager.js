@@ -89,6 +89,31 @@ export class RunManager {
     this.onKillAt = [];
     if (this.s.abilities.ctx) this.s.abilities.ctx.killHook = this.onKillAt;
 
+    // 首领奖励 (M11 T5): hung off BossSystem's own defeat edge rather than
+    // `enemies.onDeath`, because that hook fires for every body and would need
+    // to ask "was that the boss?" on each of the thousands of kills a run
+    // makes. The edge fires exactly once per run, which is also what stops it
+    // paying twice.
+    if (this.s.boss) {
+      this.s.boss.onDefeat = () => {
+        const r = settings.enemies.boss.reward;
+        // On the corpse, scattered — the player has to walk back into where
+        // the fight was, which is the whole reason it is gems and not a number.
+        for (let k = 0; k < r.gems; k++) {
+          const a = (k / r.gems) * Math.PI * 2;
+          const rad = r.scatter * (0.4 + 0.6 * this.s.rng());
+          this.s.pickups.dropAt(
+            this.s.boss.lastX + Math.cos(a) * rad,
+            this.s.boss.lastZ + Math.sin(a) * rad,
+            this.elapsed / 60,
+            0,
+            r.gemValue
+          );
+        }
+        this.pendingLevels += r.levels;
+      };
+    }
+
     this.s.enemies.onDeath = (x, z, element, elite) => {
       this.kills++;
       if (elite) {

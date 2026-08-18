@@ -49,6 +49,9 @@ export class BossSystem {
     this._maxHp = 0;
     /** One boss per run: a spawned-and-since-killed boss must not come back. */
     this._spawned = false;
+    /** Last known position, so the reward can drop where the fight happened. */
+    this.lastX = 0;
+    this.lastZ = 0;
     /** 0/1/2. Only ever climbs: healing it must not re-open an act. */
     this._phase = 0;
     /** Seconds until each move is off cooldown, index-matched to MOVES. */
@@ -110,6 +113,11 @@ export class BossSystem {
 
     const i = this.index;
     if (i === -1) return;
+
+    // Where it was standing, kept fresh so the payout can land on the corpse
+    // — by the time `onDefeat` fires the body is already off the field.
+    this.lastX = this.enemies.x[i];
+    this.lastZ = this.enemies.z[i];
 
     /* ---- acts ---- */
     // Climbs only. A heal (or a shield, or a mistake) must not rewind the

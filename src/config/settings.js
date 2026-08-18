@@ -490,7 +490,9 @@ export const settings = {
      * at all deletes水's whole identity from the fight.
      */
     boss: {
-      speed: 1.15, radius: 2.2, contactDamage: 26, hpMult: 900, mass: 200, slowResist: 0.6,
+      // hpMult 260 (not the 900 first cut) is a ~25-second fight at minute
+      // nine's damage, measured — see the fight block's own note.
+      speed: 1.15, radius: 2.2, contactDamage: 26, hpMult: 260, mass: 200, slowResist: 0.6,
       /**
        * 三幕 (M11 T4). Three acts, one move unlocked per act.
        *
@@ -507,10 +509,25 @@ export const settings = {
        * `telegraph` is the warning, and it is the real footprint: the ring the
        * player sees is the circle that will be judged (WYSIWYG, spec §3).
        */
+      /**
+       * 首领奖励 (M11 T5). A long fight that ends in a shrug is worse than no
+       * fight. Paid in the two currencies the run already understands: a
+       * shower of gems on the corpse (so it feels like loot, and so the player
+       * has to walk into where the fight was), and levels banked outright —
+       * `levels` is the guaranteed half of T1's "four maxed by minute ten",
+       * turning a 91% chance into something the run hands you for winning.
+       */
+      reward: { gems: 14, gemValue: 40, levels: 2, scatter: 3.2 },
       fight: {
         phaseAt: [0.66, 0.33],
-        charge: { every: 7, telegraph: 1.1, damage: 34, radius: 3.2, knockback: 26, range: 13 },
-        quake: { every: 9, telegraph: 1.4, damage: 26, radius: 6.5, stunTime: 0.9 },
+        // Damage numbers are what M11 T6's re-anchor settled on, and the first
+        // cut was badly wrong: 34/26 with 900× hp turned the baseline band from
+        // "dies at 14 min, wins 77%" into "dies at 9.7 min, wins 0%" — a wall
+        // where the milestone wanted a peak. The fight was simply too long for
+        // its own damage: a hundred seconds of telegraphed hits outlasts a
+        // hundred-hp player however well they dodge. Shorter and lighter.
+        charge: { every: 7, telegraph: 1.1, damage: 14, radius: 3.2, knockback: 26, range: 13 },
+        quake: { every: 9, telegraph: 1.4, damage: 11, radius: 6.5, stunTime: 0.9 },
         summon: { every: 11, telegraph: 1.0, count: 6, ringRadius: 7 }
       }
     },

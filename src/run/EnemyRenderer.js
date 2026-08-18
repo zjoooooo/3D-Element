@@ -3,6 +3,7 @@ import {
   InstancedMesh, MeshStandardMaterial, Object3D, RingGeometry, MeshBasicMaterial
 } from 'three';
 import { settings } from '../config/settings.js';
+import { BOSS_BEHAVIOR } from './EnemySystem.js';
 import { LAYER } from '../core/Layers.js';
 import { patchOnBeforeCompile } from '../utils/shaderPatch.js';
 
@@ -126,7 +127,12 @@ export class EnemyRenderer {
       const z = enemies.prevZ[i] + (enemies.z[i] - enemies.prevZ[i]) * alpha;
       // Hit reaction: flash whitens the tint and pops the scale (spec §5.5).
       const pop = 1 + enemies.flash[i] * 0.15;
-      const scale = pop * (enemies.elite[i] ? settings.enemies.elites.scale : 1);
+      // 首领 (M11 T5) has a body of its own (BossRenderer), so its instance
+      // here collapses to nothing rather than drawing a second, capsule-sized
+      // copy of it standing inside the real one.
+      const scale = enemies.behavior[i] === BOSS_BEHAVIOR
+        ? 0
+        : pop * (enemies.elite[i] ? settings.enemies.elites.scale : 1);
       this._proxy.position.set(x, 0, z);
       this._proxy.scale.set(scale, scale, scale);
       this._proxy.updateMatrix();

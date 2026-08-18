@@ -56,6 +56,29 @@ const P = {
   gemElite: E.elites.gemValue,
   xpNeed: (level) => R.xpBase * Math.pow(R.xpGrowth, level),
 
+  // 首领战 (M11 T6). The model was blind to it — the boss landed and `npm run
+  // sim` printed four identical anchors, which is the same way the xp curve
+  // lied one task ago. Its hp and its arrival read settings; what it does to
+  // the run is the model's own: while it stands, the player's damage goes into
+  // it instead of into the horde, and the horde keeps arriving.
+  bossAt: settings.tides.length * R.boss.afterTides,
+  bossHp: (m) => E.hpBase * (1 + E.hpPerMinute * m) * E.boss.hpMult,
+  /**
+   * What the boss does to you, per second, averaged over its cooldowns.
+   *
+   * NOT its contact damage. The first cut of this modelled the boss as a
+   * constant `contactDamage` dps and every difficulty band died the instant it
+   * landed, at any hp from 100× to 900× — the tell that the hp was irrelevant
+   * and the pressure term was doing all the killing. A boss walking at 1.15
+   * m/s is something you step away from; what actually reaches the player is
+   * its MOVES, on their own cadences, and both of them telegraph (so kiting
+   * mitigates them like everything else here).
+   */
+  bossMoveDps: E.boss.fight.charge.damage / E.boss.fight.charge.every +
+    E.boss.fight.quake.damage / E.boss.fight.quake.every,
+  /** …and its summons are bodies, which the crowd term already knows how to price. */
+  bossSummonPerSec: E.boss.fight.summon.count / E.boss.fight.summon.every,
+
   /* ---- model-only: no settings field means this, and none ever will ----
    *
    * These are aggregates and calibrations, not mirrors. `contactDpsAtCap` is
@@ -73,6 +96,14 @@ const P = {
   contactDpsAtCap: 33, // 被围致死 ~4s (锚1), scaled by (pop/cap)^crowdExponent
   crowdExponent: 1.4,
   baseDps: 42,
+  /** Share of the player's damage that goes into the boss while it is up. Not
+   *  a settings value — how much a player commits to a boss is behaviour. */
+  /** Share of the player's output that also lands on the boss while it is up —
+   *  overlap, not diversion (see the kill-rate note in `simulate`). */
+  bossOverlap: 0.6,
+  /** How much of a telegraphed move still lands, on top of the general kite
+   *  term. Model-only: this is player behaviour, not a settings value. */
+  bossTelegraphed: 0.35,
   gemSwarm: (m) => 1 + 0.12 * m,
   tideGold: 150 // gold-gem rain at each tide end (5 tides)
 };
@@ -85,6 +116,8 @@ const P = {
 function simulate(seed, bot) {
   const rand = mulberry32(seed);
   let pop = 0, hp = P.playerHp, xp = 0, level = 0, kills = 0;
+  /** null until it turns up, then its remaining hp; 0 once beaten. */
+  let bossHp = null;
   let dps = P.baseDps * (0.9 + 0.2 * rand());
   // A given player's kiting varies game to game — bad days happen.
   const kite = Math.min(0.9, Math.max(0.1, bot.kite + (rand() - 0.5) * 0.16));
@@ -97,8 +130,26 @@ function simulate(seed, bot) {
     const rate = (P.spawnPerMin(m) / 60) * (0.8 + 0.4 * rand());
     pop = Math.min(P.popCap, pop + rate);
 
+    // 首领战: it turns up once, soaks damage that would otherwise thin the
+    // horde, and leans on the player the whole time it is up. This is the
+    // pressure T2 deferred — the run had lost its crossover entirely and the
+    // boss is what was supposed to give it back.
+    if (bossHp === null && t >= P.bossAt) bossHp = P.bossHp(m);
+    const fightingBoss = bossHp !== null && bossHp > 0;
+    // Its summons join the horde like anything else — the crowd term prices
+    // them without a second rule.
+    if (fightingBoss) pop = Math.min(P.popCap, pop + P.bossSummonPerSec);
+
     // Kills: DPS spread over the weighted average enemy HP of this minute.
     const avgHp = P.swarmHp(m) * (P.mix.swarm * 1 + P.mix.ranged * 2 + P.mix.tank * 6);
+    // Damage is SHARED here, not split. The first cut of this subtracted the
+    // boss's share from the horde's kill rate, and every band below 高手 died
+    // the minute it landed at any boss hp from 70x to 900x. That is a
+    // single-target game's model: in this one almost every skill is an area,
+    // so a sweep through the boss cuts the swarm standing around it in the
+    // same tick. The boss soaks what happens to overlap it; the field keeps
+    // clearing at the rate it already was.
+    if (fightingBoss) bossHp -= dps * P.bossOverlap;
     const killRate = Math.min(pop, dps / avgHp);
     pop -= killRate;
     kills += killRate;
@@ -115,6 +166,13 @@ function simulate(seed, bot) {
 
     // Incoming damage: crowding plus periodic ranged volleys, mitigated by kiting.
     let incoming = P.contactDpsAtCap * Math.pow(pop / P.popCap, P.crowdExponent) * (1 - kite);
+    // Telegraphed moves are more avoidable than being surrounded, and the model
+    // has one avoidance number for everything. `bossTelegraphed` is the extra
+    // discount a drawn warning circle earns — without it the fight took 70% of
+    // a 100 hp player's bar and every band below 高手 died the minute it
+    // landed, at any boss hp from 70× to 900×, which is the tell that the term
+    // was doing all the work.
+    if (fightingBoss) incoming += P.bossMoveDps * (1 - kite) * P.bossTelegraphed;
     if (t > 60 && t % P.volleyEvery === 0)
       incoming += P.volleyDamage * (1 + 0.12 * m) * (1 - kite) * (0.5 + rand());
     hp -= incoming;

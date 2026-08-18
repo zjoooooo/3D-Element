@@ -36,6 +36,7 @@ import { VerdictPanel } from '../run/VerdictPanel.js';
 import { Ultimate } from '../run/Ultimate.js';
 import { RunManager, tickHitstop, addHitstop } from '../run/RunManager.js';
 import { BossSystem } from '../run/BossSystem.js';
+import { BossRenderer } from '../run/BossRenderer.js';
 import { RunHud } from '../run/RunHud.js';
 import { DamageNumbers } from '../run/DamageNumbers.js';
 import { ThreatArrows } from '../run/ThreatArrows.js';
@@ -256,6 +257,9 @@ export class App {
       this.gameClock = new GameClock(settings.run.tickRate);
       this.enemySystem = new EnemySystem(rng);
       this.enemyRenderer = new EnemyRenderer(this.scene);
+      // 首领的躯体 (M11 T5). Reads BossSystem; BossSystem never reads it — the
+      // seam that lets an imported model replace the procedural body later.
+      this.bossRenderer = new BossRenderer(this.scene);
       // Death shatter (M5 Task 9): five-wuxing tetrahedra off `onDeath`'s own
       // element index, doubled for an elite — see the onDeath wrapper below.
       this.deathShards = new DeathShards(this.scene);
@@ -2037,6 +2041,7 @@ export class App {
       }
       this.enemyRenderer.syncTelegraphs(this.run.telegraphs);
       this.enemyRenderer.render(this.enemySystem, this._runAlpha);
+      this.bossRenderer.render(this.bossSystem, this.enemySystem, dt, this._runAlpha);
       // Shared scratch read (TideSchedule.tideAt): one call, passed to both —
       // a second call this same frame would still be safe (nothing rolls a
       // spawn between here and the render tail), but there is no reason to.
@@ -2160,6 +2165,7 @@ export class App {
       this.threatArrows.dispose();
       for (const tab of this._panelTabs) tab.remove();
       this.enemyRenderer.dispose();
+      this.bossRenderer.dispose();
       this.deathShards.dispose();
       this.arena.dispose();
       this.camera.remove(this.orbBottles.object3D);

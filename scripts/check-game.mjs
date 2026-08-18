@@ -2627,6 +2627,37 @@ import { AimController } from '../src/input/AimController.js';
     }
   }
 
+  // …and the boss is in the model at all. It was not, at first: the boss
+  // landed in T3-T5 and `npm run sim` printed four unchanged anchors, exactly
+  // the way the xp curve had lied one task earlier. A difficulty model that
+  // cannot see the fight cannot be re-anchored around it.
+  {
+    assert.equal(
+      SIM.bossAt,
+      settings.tides.length * settings.run.boss.afterTides,
+      'sim: the boss arrives in the model when it arrives in the game'
+    );
+    const savedHp = E.boss.hpMult;
+    const savedDmg = E.boss.fight.charge.damage;
+    try {
+      const hpBefore = SIM.bossHp(9);
+      E.boss.hpMult = savedHp * 2;
+      assert.notEqual(SIM.bossHp(9), hpBefore, 'sim: the boss is as tough in the model as in the game');
+      const dpsBefore = SIM.bossMoveDps;
+      E.boss.fight.charge.damage = savedDmg * 3;
+      // bossMoveDps is resolved once at module load, so this cannot move — and
+      // that is the point of pinning the FORMULA rather than a number here.
+      assert.ok(
+        Math.abs(dpsBefore - (savedDmg / E.boss.fight.charge.every + E.boss.fight.quake.damage / E.boss.fight.quake.every)) < 1e-9,
+        'sim: its pressure is its own move table, not a number typed twice'
+      );
+    } finally {
+      E.boss.hpMult = savedHp;
+      E.boss.fight.charge.damage = savedDmg;
+    }
+    assert.equal(settings.enemies.boss.hpMult, savedHp, 'sim: the probe put the boss back');
+  }
+
   // The model-only constants are model-only ON PURPOSE — aggregates the
   // settings layer cannot express, and one calibration that must NOT be
   // rewired to the BASE_DPS anchor because the two mean different things.
@@ -3006,6 +3037,63 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   console.log('ok  M11 T4: a fight with three acts');
+}
+
+/* ---- M11 T5: the fight has to pay ---- */
+{
+  // A boss that drops nothing is a long fight with a shrug at the end. The
+  // reward has to land in the systems that already carry rewards, not be a
+  // particle burst that looks like one — so this drives the real death path
+  // and looks in the real pickup system.
+  const REWARD = settings.enemies.boss.reward;
+  assert.ok(REWARD, 'boss: the kill has a declared reward');
+  assert.ok(REWARD.gems > 0 && REWARD.gemValue > 0, 'boss: it drops real xp, in real gems');
+  assert.ok(REWARD.levels >= 1, 'boss: …and hands the player at least one level outright');
+
+  {
+    const rng = createRng(71);
+    const enemies = new EnemySystem(rng);
+    const pickups = new PickupSystem(createRng(72));
+    const bossSystem = new BossSystem(enemies, new TideSchedule(rng));
+    const run = new RunManager({
+      enemies, pickups, player: new PlayerState(), rng: createRng(73),
+      tides: new TideSchedule(createRng(74)),
+      boss: bossSystem,
+      projectiles: new EnemyProjectiles(),
+      combat: { tick: () => 0, release: () => -1, resetStats: () => {}, book: () => {} },
+      targets: { register: () => {} },
+      abilities: { active: [] }
+    });
+    run.start();
+    bossSystem.tick(1, bossSystem.dueAt, { x: 0, z: 0 });
+    assert.ok(bossSystem.active, 'fixture: the boss is up');
+
+    const gemsBefore = pickups.count;
+    const levelsBefore = run.pendingLevels;
+    const i = bossSystem.index;
+    // Kill it the way the game does — through damage, so onDeath fires.
+    enemies.damage({ x: enemies.x[i], z: enemies.z[i] }, 1, 1e9);
+    assert.equal(bossSystem.active, false, 'fixture: it died');
+    // The system notices on its next tick, which is where the payout hangs.
+    bossSystem.tick(1 / 60, bossSystem.dueAt + 1, { x: 0, z: 0 });
+
+    assert.ok(
+      pickups.count - gemsBefore >= REWARD.gems,
+      `boss: its death drops the gems the table promises (${pickups.count - gemsBefore})`
+    );
+    assert.ok(
+      run.pendingLevels - levelsBefore >= REWARD.levels,
+      `boss: …and banks the levels too (${run.pendingLevels - levelsBefore})`
+    );
+    // Not a win, not a loss: the run carries on exactly as before.
+    assert.equal(run.tick(1 / 60, { x: 0, z: 0 }), 'playing', 'boss: killing it does not end the run');
+    // And it pays once. A second tick must not deal a second fortune.
+    const after = pickups.count;
+    bossSystem.tick(1 / 60, bossSystem.dueAt + 2, { x: 0, z: 0 });
+    assert.equal(pickups.count, after, 'boss: it pays exactly once');
+  }
+
+  console.log('ok  M11 T5: the fight has to pay');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
