@@ -51,7 +51,24 @@ export class PickupSystem {
   }
 
   dropAt(x, z, minute, kind = 0, value = null) {
-    if (this.count >= CAP) return; // oldest-gem eviction is M3 polish if ever needed
+    if (this.count >= CAP) {
+      // M12 T1: a full field used to discard EVERYTHING, and by minute nine
+      // the field is full — fourteen boss gems dropped into it and zero
+      // landed. A drop that states its own value now evicts the cheapest gem
+      // on the field instead; the common minute-gem keeps the old
+      // drop-on-full, because an O(n) sweep for the commonest drop in the
+      // game is a per-frame cost nobody sees, while one for the rarest is
+      // the whole point.
+      if (value === null) return;
+      let cheapest = 0;
+      for (let k = 1; k < this.count; k++) if (this.value[k] < this.value[cheapest]) cheapest = k;
+      if (this.value[cheapest] >= value) return; // the field is already worth more
+      this.x[cheapest] = x;
+      this.z[cheapest] = z;
+      this.kind[cheapest] = kind;
+      this.value[cheapest] = value;
+      return;
+    }
     const i = this.count++;
     this.x[i] = x;
     this.z[i] = z;

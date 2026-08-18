@@ -3096,6 +3096,64 @@ import { AimController } from '../src/input/AimController.js';
   console.log('ok  M11 T5: the fight has to pay');
 }
 
+/* ---- M12 T1: the boss's fortune must not vanish into a full field ---- */
+{
+  // `dropAt` discards on a full field, and its own comment calls eviction
+  // "M3 polish if ever needed". Needed: at minute nine the field IS full, and
+  // a headless probe dropped fourteen boss gems into a full field and landed
+  // ZERO. The most valuable drop in the game was riding the rule written for
+  // the commonest one.
+  const fill = (p, n, minute = 5) => { for (let k = 0; k < n; k++) p.dropAt(k * 0.1, 0, minute); };
+  const total = (p) => { let t = 0; for (let k = 0; k < p.count; k++) t += p.value[k]; return t; };
+
+  // 1. A valued drop evicts the cheapest gem instead of vanishing.
+  {
+    const p = new PickupSystem(createRng(81));
+    fill(p, 4096); // overfill: count pins at CAP whatever CAP is
+    const cap = p.count;
+    const before = total(p);
+    const cheapest = Math.min(...Array.from({ length: p.count }, (_, k) => p.value[k]));
+    for (let k = 0; k < 14; k++) p.dropAt(0, 0, 9, 0, 40);
+    assert.equal(p.count, cap, 'pickups: eviction keeps the field exactly at cap — no holes, no growth');
+    let boss = 0;
+    for (let k = 0; k < p.count; k++) if (p.value[k] === 40) boss++;
+    assert.equal(boss, 14, 'pickups: all fourteen boss gems landed on a full field');
+    assert.ok(total(p) > before, 'pickups: eviction trades up — the field is worth more than before');
+    assert.ok(
+      total(p) >= before + 14 * (40 - cheapest) - 1e-6,
+      'pickups: what left was the cheapest, not whatever sat at the end'
+    );
+  }
+
+  // 2. The common path is untouched: a plain gem still discards when full —
+  //    and the probe gem is dropped at a LATER minute than the field, so it
+  //    is genuinely worth more than the cheapest thing standing. The first
+  //    cut dropped it at the same minute, where the trade-up guard refuses
+  //    equal value anyway, and a sabotage that gave commons eviction passed
+  //    (caught by sabotage S3): equal-value fixtures cannot tell "commons
+  //    never evict" from "commons refuse an even trade".
+  {
+    const p = new PickupSystem(createRng(82));
+    fill(p, 4096, 5);
+    const cap = p.count;
+    const before = total(p);
+    p.dropAt(0, 0, 12); // minute 12: worth more than every minute-5 gem standing
+    assert.equal(p.count, cap, 'pickups: a common gem on a full field still just does not fit');
+    assert.ok(Math.abs(total(p) - before) < 1e-6, 'pickups: …and nothing was evicted for it, even though it was worth more');
+  }
+
+  // 3. …and below cap, both kinds land plainly.
+  {
+    const p = new PickupSystem(createRng(83));
+    fill(p, 10);
+    p.dropAt(0, 0, 5);
+    p.dropAt(0, 0, 9, 0, 40);
+    assert.equal(p.count, 12, 'pickups: below cap nothing changed at all');
+  }
+
+  console.log('ok  M12 T1: the boss fortune lands on a full field');
+}
+
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
 {
   const count = { a: 0, b: 0 };
