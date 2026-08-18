@@ -2113,9 +2113,21 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   // The wave is finished: nothing castable is left without turning points.
-  for (const element of ELEMENTS) {
-    if (!ABILITY_TYPES[element]) continue;
-    assert.ok(settings[element].breakpoints, `breakpoints: ${element} still has none — the roster is meant to be complete now`);
+  // The count is pinned alongside the loop on purpose — `if (!ABILITY_TYPES
+  // [element]) continue` passes vacuously if the registry ever empties, so a
+  // coverage guard with no floor under it can go quietly hollow (M10 T4).
+  {
+    const castable = ELEMENTS.filter((el) => ABILITY_TYPES[el]);
+    assert.equal(castable.length, 30, `roster: 30 castable skills expected, found ${castable.length}`);
+    const without = castable.filter((el) => !settings[el]?.breakpoints);
+    assert.deepEqual(without, [], `breakpoints: castable skills with no turning points — ${without.join(', ')}`);
+    // Both tiers, both real: an empty `{}` or a table with one tier is not
+    // coverage. Every table names lv3 and lv5 and puts at least one key in each.
+    const thin = castable.filter((el) => {
+      const bp = settings[el].breakpoints;
+      return !bp.lv3 || !bp.lv5 || !Object.keys(bp.lv3).length || !Object.keys(bp.lv5).length;
+    });
+    assert.deepEqual(thin, [], `breakpoints: tables missing a real lv3/lv5 tier — ${thin.join(', ')}`);
   }
 
   console.log('ok  M10 T2: the wave is complete — every castable skill has turning points');

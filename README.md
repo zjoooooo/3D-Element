@@ -384,6 +384,29 @@ The circle **snaps out past its radius and settles back** when the cast is armed
 the same thing when it lands. A circle that grows linearly reads as a UI element; one that
 overshoots reads as something the caster did.
 
+### The wedge is that same circle, masked
+
+A cone skill (`烈焰喷吐`, the only one so far) is aimed with the **same disc**, not a third
+indicator: a wedge is a circle with an angular mask. `ZoneIndicator`'s fragment shader takes a
+`uHalfAngle` — zero draws the ring it always drew, byte for byte, and anything positive keeps only
+the fragments whose bearing off the downrange axis is inside that half-angle. The quad already
+carries the caster's yaw, so "downrange" is `+y` in shader space by construction and no extra
+uniform is needed to say which way the wedge points.
+
+Three things change under the mask. The interior wash is measured against the **outer** rim
+instead of the band's inner lip, because the whole sector is the danger and not just a rim band.
+The two straight **flanks** are drawn as boundaries in their own right, at a constant width in
+metres — an angular width would taper to nothing at the apex and smear at the arc. And the reach
+ring is suppressed: a wedge is anchored at the caster, so its own arc already *is* the reach line,
+and a full circle at the same radius would promise directions the cone cannot hit.
+
+The numbers come from one place. `AimController` reads the half-angle and the range off
+`settings.combat[element]` and scales them through the same `bpScale` call `CombatSystem`'s
+`coneTick` case uses, so a Lv3 breakpoint that widens the wedge by 1.35× widens the drawing and
+the burning in the same frame. That identity is pinned in `scripts/check-game.mjs` at Lv1/3/5 by
+driving the real controller and the real combat tick and comparing what each one produced — not by
+retyping the formula on both sides.
+
 ### The arrow is one SDF
 
 `AimIndicator` is a single ground quad. Its fragment shader remaps UV into **metres measured from
