@@ -8,6 +8,10 @@ const MOVES = ['charge', 'quake', 'summon'];
 const _p = { x: 0, z: 0 };
 const _at = (x, z) => { _p.x = x; _p.z = z; return _p; };
 
+/** The boss's own position for the tick — separate from `_p`, which the move
+ *  calls overwrite mid-use. */
+const _here = { x: 0, z: 0 };
+
 /**
  * 首领战 (M11 T3) — the encounter, not the body.
  *
@@ -136,7 +140,13 @@ export class BossSystem {
     // One move unlocked per act: charge from the start, quake at the second,
     // summon at the third. Cooldowns run for every unlocked move at once, so
     // the last act is genuinely busier rather than merely different.
-    const here = { x: this.enemies.x[i], z: this.enemies.z[i] };
+    // Reused scratch (复核 F1): this runs every tick the boss stands, and a
+    // fresh literal here was this file violating the zero-alloc rule its own
+    // milestone re-affirmed. `_at`'s scratch is taken by the move calls below,
+    // so the position gets its own.
+    _here.x = this.enemies.x[i];
+    _here.z = this.enemies.z[i];
+    const here = _here;
     const unlocked = this._phase + 1;
     for (let m = 0; m < unlocked; m++) {
       this._cd[m] -= step;

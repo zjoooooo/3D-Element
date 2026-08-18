@@ -130,6 +130,18 @@ export class AimController extends EventEmitter {
     return (row?.range ?? this.config.range) * bpScale(this.element, 'range', this.bpLevel);
   }
 
+  /**
+   * The ability's reach with its breakpoint tier folded in (复核 F2, closing
+   * M6 T12's T-later note). 弑神一闪 Lv3 dashes 30% further than its base
+   * range, and the arrow clamped at the base for five milestones because the
+   * controller had no level access — M10 T3's `levelOf` injection is what
+   * finally made this one line possible. Identity for every skill without a
+   * `range` tier, so nothing else moves.
+   */
+  get rangeScaled() {
+    return this.config.range * bpScale(this.element, 'range', this.bpLevel);
+  }
+
   /** Footprint of a far cast, metres. Zero for a line cast. */
   get zoneRadius() {
     return Math.max(0.05, this.config.zoneRadius ?? 1);
@@ -208,7 +220,7 @@ export class AimController extends EventEmitter {
     // whatever you were actually aiming at.
     const kind = settings.combat[this.element]?.kind;
     if (this.shape !== CastShape.ZONE && kind !== 'burst') {
-      this.distance = Math.max(0.4, this.config.range);
+      this.distance = Math.max(0.4, this.rangeScaled);
     }
     if (!this.valid && this.shape === CastShape.ZONE) return false;
     this.emit('cast', this.origin, this.direction, this.distance);
@@ -234,14 +246,14 @@ export class AimController extends EventEmitter {
           this.yaw = Math.atan2(this.direction.x, this.direction.z);
           this.valid = raw >= c.minRange;
           this.rawDistance = raw;
-          this.distance = MathUtils.clamp(raw, Math.max(0.2, c.minRange), Math.max(0.4, c.range));
+          this.distance = MathUtils.clamp(raw, Math.max(0.2, c.minRange), Math.max(0.4, this.rangeScaled));
           return;
         }
       }
     }
 
     this.valid = false;
-    this.distance = MathUtils.clamp(this.distance, Math.max(0.2, c.minRange), Math.max(0.4, c.range));
+    this.distance = MathUtils.clamp(this.distance, Math.max(0.2, c.minRange), Math.max(0.4, this.rangeScaled));
   }
 
   /**

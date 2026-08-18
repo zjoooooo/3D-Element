@@ -3355,6 +3355,36 @@ import { AimController } from '../src/input/AimController.js';
   console.log('ok  M12 T3: each body arrives knowing one thing');
 }
 
+/* ---- 复核 F2: the aim preview reaches as far as the dash does ---- */
+{
+  // M6 T12's own T-later note, open ever since: 弑神一闪 Lv3 dashes
+  // `scaledDashRange` metres but the arrow still clamps at the unscaled base —
+  // the preview understates the reach by 30%. It stayed open because the
+  // controller had no loadout access; M10 T3 injected `levelOf`, so the fix
+  // is now one getter. Same WYSIWYG identity the cone assertions pin: the
+  // preview reads the SAME row through the SAME bpScale call the dash does.
+  const aim = new AimController(null);
+  aim.setElement('dashstrike');
+  aim.levelOf = () => 3;
+  aim._hasPointer = false;
+  aim.distance = 999; // force the no-pointer clamp to bite
+  aim._resolve();
+  assert.ok(
+    Math.abs(aim.distance - scaledDashRange(3)) < 1e-9,
+    `aim: the dash preview clamps at the scaled range (${aim.distance} vs ${scaledDashRange(3)})`
+  );
+  assert.ok(scaledDashRange(3) > settings.dashstrike.range + 1e-9, 'fixture: Lv3 really reaches further than base');
+  aim.levelOf = () => 1;
+  aim.distance = 999;
+  aim._resolve();
+  assert.ok(
+    Math.abs(aim.distance - settings.dashstrike.range) < 1e-9,
+    'aim: Lv1 still clamps at the base range — identity below the tier'
+  );
+  aim.dispose();
+  console.log('ok  复核 F2: the aim preview reaches as far as the dash does');
+}
+
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */
 {
   const count = { a: 0, b: 0 };
