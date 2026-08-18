@@ -22,7 +22,7 @@ v1.0 已发布(tag v1.0)。**M7 融合专属化已完成**(T1-T7)。**M8 第二�
 npm run dev          # Vite 开发服(浏览器验证用;#run 进游戏,#run=quick 跳过标题)
 npm run check:game   # 游戏逻辑无头断言套件(改逻辑必须绿)
 npm run check        # 角色/动画剪辑装载套件
-npm run sim          # Monte-Carlo 难度模拟(带:新手0%/基线死亡中位~14min/熟练100%/等级中位~29;越带停下报数,不要自行调参)
+npm run sim          # Monte-Carlo 难度模拟(带:新手0%/基线死亡中位~14min/熟练100%/等级中位~37;越带停下报数,不要自行调参)
 npm run build        # 发布构建
 ```
 

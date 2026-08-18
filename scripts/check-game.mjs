@@ -58,6 +58,7 @@ import { mixTint } from '../src/run/TideAtmosphere.js';
 import { getColor } from '../src/utils/color.js';
 import { GameAudio } from '../src/run/GameAudio.js';
 import { applyPerfPreset } from '../src/run/perfPreset.js';
+import { P as SIM } from './sim-run.mjs';
 import { ScreenFlash } from '../src/effects/ScreenFlash.js';
 import { DecalType } from '../src/effects/GroundDecals.js';
 // M10 T3: the cone preview is checked against the REAL controller, not a
@@ -2549,6 +2550,94 @@ import { AimController } from '../src/input/AimController.js';
   }
 
   console.log('ok  M11 T1: four skills maxed by minute ten');
+}
+
+/* ---- M11 T2: the difficulty model describes THIS game ---- */
+{
+  // `sim-run.mjs` kept its own copy of every number in the spec, with a note
+  // saying it should read settings once the implementation landed. It had —
+  // years of milestones ago — and the copy quietly went stale. M11 T1 changed
+  // the xp curve and `npm run sim` printed four identical anchors, because it
+  // was still dividing by `22 * 1.13^level`: a difficulty model describing a
+  // game that no longer existed, and nothing could see it from outside.
+  //
+  // Everything with a settings source now reads it, and this is what stops it
+  // drifting back. Not a source grep — the model's own functions, evaluated.
+  const R = settings.run;
+  const E = settings.enemies;
+
+  for (const level of [0, 1, 5, 17, 36]) {
+    assert.ok(
+      Math.abs(SIM.xpNeed(level) - R.xpBase * Math.pow(R.xpGrowth, level)) < 1e-9,
+      `sim: the level curve is the game's at Lv${level} (${SIM.xpNeed(level).toFixed(2)})`
+    );
+  }
+  for (const minute of [0, 4, 9, 15]) {
+    assert.ok(
+      Math.abs(SIM.spawnPerMin(minute) - (R.spawnBase + R.spawnQuad * minute * minute)) < 1e-9,
+      `sim: the spawn curve is the game's at minute ${minute}`
+    );
+    assert.ok(
+      Math.abs(SIM.swarmHp(minute) - E.hpBase * (1 + E.hpPerMinute * minute)) < 1e-9,
+      `sim: enemy hp is the game's at minute ${minute}`
+    );
+  }
+  assert.equal(SIM.duration, R.duration, 'sim: the run is the same length as the game');
+  assert.equal(SIM.popCap, R.enemyCap, 'sim: the horde caps where the game caps');
+  assert.equal(SIM.playerHp, R.playerHp, 'sim: the player has the hp the game gives');
+  assert.equal(SIM.gemElite, E.elites.gemValue, 'sim: an elite is worth what the game says');
+  assert.deepEqual(
+    SIM.hpMult,
+    { swarm: E.swarm.hpMult, ranged: E.ranged.hpMult, tank: E.tank.hpMult },
+    'sim: the three behaviours weigh what the game weighs them'
+  );
+  assert.ok(
+    Math.abs(SIM.mix.swarm + SIM.mix.ranged + SIM.mix.tank - 1) < 1e-9 &&
+      Math.abs(SIM.mix.ranged - E.mix.rangedShare) < 1e-9 &&
+      Math.abs(SIM.mix.tank - E.mix.tankShare) < 1e-9,
+    'sim: the behaviour mix is the game\'s, and still sums to one'
+  );
+
+  // Everything above compares the model against the numbers it should be
+  // reading — which cannot tell "reads settings" from "happens to hold the
+  // same constant", and two of those checks were blind for exactly that
+  // reason (spawnBase is 20 and so was the old literal). Only moving the
+  // source can tell them apart. Same probe M10 T3 needed for the cone's reach.
+  {
+    const moves = [
+      ['run.spawnBase', () => R.spawnBase, (v) => { R.spawnBase = v; }, () => SIM.spawnPerMin(3)],
+      ['run.spawnQuad', () => R.spawnQuad, (v) => { R.spawnQuad = v; }, () => SIM.spawnPerMin(3)],
+      ['enemies.hpBase', () => E.hpBase, (v) => { E.hpBase = v; }, () => SIM.swarmHp(4)],
+      ['enemies.hpPerMinute', () => E.hpPerMinute, (v) => { E.hpPerMinute = v; }, () => SIM.swarmHp(4)],
+      ['run.xpBase', () => R.xpBase, (v) => { R.xpBase = v; }, () => SIM.xpNeed(6)],
+      ['run.xpGrowth', () => R.xpGrowth, (v) => { R.xpGrowth = v; }, () => SIM.xpNeed(6)]
+    ];
+    for (const [name, get, set, read] of moves) {
+      const before = get();
+      const was = read();
+      try {
+        set(before * 1.5 + 1);
+        assert.notEqual(read(), was, `sim: moving ${name} moves the model — otherwise it is a coincidence, not a read`);
+      } finally {
+        set(before);
+      }
+      assert.equal(get(), before, `sim: the ${name} probe put it back`);
+      assert.equal(read(), was, `sim: …and the model came back with it`);
+    }
+  }
+
+  // The model-only constants are model-only ON PURPOSE — aggregates the
+  // settings layer cannot express, and one calibration that must NOT be
+  // rewired to the BASE_DPS anchor because the two mean different things.
+  // Pinned so "it looks like a mirror, make it read settings" is a decision
+  // rather than an accident.
+  assert.equal(SIM.baseDps, 42, 'sim: baseDps stays a calibration, not the BASE_DPS anchor (which reads 50)');
+  assert.ok(
+    Math.abs(settings.combat.ice.damage / settings.ice.cooldown - 50) < 1e-9,
+    'sim: …and the anchor it must not be confused with is still 50'
+  );
+
+  console.log('ok  M11 T2: the difficulty model describes this game, not the last one');
 }
 
 /* ---- fixed timestep: n ticks regardless of frame slicing ---- */

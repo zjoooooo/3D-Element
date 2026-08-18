@@ -9,9 +9,22 @@
  *
  *   npm run sim
  *
- * The numbers here mirror docs/superpowers/specs/2026-08-14-wuxing-roguelike-design.md;
- * when implementation lands they should be read from settings instead.
+ * M11 T2: this file used to keep its own copy of every number in the spec, with
+ * a note saying it should read settings once the implementation landed. It had,
+ * long ago, and the copy had started to lie — M11 T1 changed the xp curve and
+ * `npm run sim` reported four identical anchors, because it was still dividing
+ * by `22 * 1.13^level`. It was describing a game that no longer existed.
+ *
+ * Everything below that HAS a settings source now reads it. What remains is
+ * marked, and is genuinely model-only: aggregates the settings layer does not
+ * express (one "volley" standing in for every ranged enemy's own cadence), and
+ * constants calibrated against playtest rather than derived from anything.
+ * Those cannot track settings, and pretending otherwise is how the last copy
+ * rotted — so they are labelled instead.
  */
+import { pathToFileURL } from 'node:url';
+
+import { settings } from '../src/config/settings.js';
 
 /** Deterministic RNG (spec: seedable gameplay randomness). */
 function mulberry32(seed) {
@@ -24,28 +37,44 @@ function mulberry32(seed) {
   };
 }
 
+const R = settings.run;
+const E = settings.enemies;
+
 const P = {
-  duration: 900, // seconds
-  // --- spawning ---
-  spawnPerMin: (m) => 20 + 2.2 * m * m, // gentle start, fierce final tide
-  popCap: 300,
-  mix: { swarm: 0.7, ranged: 0.2, tank: 0.1 }, // spec §5 behaviour mix
-  hpMult: { swarm: 1, ranged: 2, tank: 6 }, // × swarm HP
+  /* ---- read straight off settings: change the game, the model follows ---- */
+  duration: R.duration,
+  spawnPerMin: (m) => R.spawnBase + R.spawnQuad * m * m,
+  popCap: R.enemyCap,
+  mix: {
+    swarm: 1 - E.mix.rangedShare - E.mix.tankShare,
+    ranged: E.mix.rangedShare,
+    tank: E.mix.tankShare
+  },
+  hpMult: { swarm: E.swarm.hpMult, ranged: E.ranged.hpMult, tank: E.tank.hpMult },
+  swarmHp: (m) => E.hpBase * (1 + E.hpPerMinute * m),
+  playerHp: R.playerHp,
+  gemElite: E.elites.gemValue,
+  xpNeed: (level) => R.xpBase * Math.pow(R.xpGrowth, level),
+
+  /* ---- model-only: no settings field means this, and none ever will ----
+   *
+   * These are aggregates and calibrations, not mirrors. `contactDpsAtCap` is
+   * what a capped horde does per second in total, which the per-enemy
+   * `contactDamage` fields cannot state; `volleyEvery`/`volleyDamage` collapse
+   * every ranged enemy's own `fireEvery` into one periodic bite; `baseDps` is
+   * the whole player's damage at level zero, calibrated against playtest — it
+   * is NOT `combat.ice.damage / ice.cooldown` (that anchor reads 50) and must
+   * not be quietly rewired to it, because the two mean different things and
+   * swapping them would silently re-balance every number in this file.
+   */
   elitesPerTide: 2,
-  // --- enemy stats (spec 锚3) ---
-  swarmHp: (m) => 20 * (1 + 0.16 * m),
-  volleyEvery: 60, // ranged volley chip damage, seconds
+  volleyEvery: 60,
   volleyDamage: 8,
   contactDpsAtCap: 33, // 被围致死 ~4s (锚1), scaled by (pop/cap)^crowdExponent
   crowdExponent: 1.4,
-  // --- player (spec 锚2/锚4) ---
-  playerHp: 100,
-  baseDps: 42, // 冰枪当量: 20dmg/1.2s × ~2.5 targets
-  // --- XP economy ---
-  gemSwarm: (m) => 1 + 0.12 * m, // gem value scales with the minute it drops
-  gemElite: 15,
-  tideGold: 150, // gold-gem rain at each tide end (5 tides)
-  xpNeed: (level) => 22 * Math.pow(1.13, level),
+  baseDps: 42,
+  gemSwarm: (m) => 1 + 0.12 * m,
+  tideGold: 150 // gold-gem rain at each tide end (5 tides)
 };
 
 /**
@@ -112,8 +141,19 @@ function runBatch(name, bot, runs = 200) {
   return { winRate: wins / runs, medianLevel: med(levels) };
 }
 
-console.log('=== 五行肉鸽 难度模拟 (200 局/档) ===\n');
-runBatch('新手 (乱选+站桩)', { gain: 1.08, kite: 0.3 });
-runBatch('基线 (普通操作)', { gain: 1.12, kite: 0.55 });
-runBatch('熟练 (好build+走位)', { gain: 1.15, kite: 0.72 });
-runBatch('高手 (完美)', { gain: 1.18, kite: 0.85 });
+/**
+ * Exported so `check-game.mjs` can assert that the model's economy really is
+ * the game's — the copy that rotted was invisible precisely because nothing
+ * could see it from outside. Running the batches is gated on being the entry
+ * point, so importing this costs nothing.
+ */
+export { P, simulate, runBatch };
+
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) {
+  console.log('=== 五行肉鸽 难度模拟 (200 局/档) ===\n');
+  runBatch('新手 (乱选+站桩)', { gain: 1.08, kite: 0.3 });
+  runBatch('基线 (普通操作)', { gain: 1.12, kite: 0.55 });
+  runBatch('熟练 (好build+走位)', { gain: 1.15, kite: 0.72 });
+  runBatch('高手 (完美)', { gain: 1.18, kite: 0.85 });
+}
