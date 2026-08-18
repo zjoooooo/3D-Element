@@ -79,8 +79,12 @@ await page.goto(`${BASE}/#run=quick`, { waitUntil: 'load', timeout: 120000 });
 await page.waitForFunction(() => window.app?.runMode && window.app.run?.active, null, { timeout: 60000 });
 
 /* Install the measurement harness in the page once, then call it per skill. */
-await page.evaluate(() => {
+await page.evaluate(async () => {
   const app = window.app;
+  const settingsModule = await import('/src/config/settings.js');
+  window.__bpSettings = settingsModule.settings;
+  // A FUNCTION, derived off the combat table — not a hand-kept list.
+  window.__bpPermanent = new Set(settingsModule.permanentAuraElements());
   app.time.tick = () => 1 / 60;
 
   // Ninety casts x 180 frames x a hundred bodies is sixteen thousand frames of
@@ -99,9 +103,14 @@ await page.evaluate(() => {
 
   const pump = (k) => {
     for (let i = 0; i < k; i++) {
+      // Pinned every frame, not once: ninety-six bodies on the caster's face
+      // kill it mid-measurement, the run stops, and everything after reads a
+      // stopped clock (the M11 count-fix verification hit exactly this — an
+      // aura that "dealt 0" because its owner had been dead for two seconds).
+      app.playerState.hp = app.playerState.maxHp;
       app.frame();
-      // The level-up hand freezes the world (M9 T3's lesson: everything after
-      // it measures a stopped clock), and casting hands out xp.
+      // The level-up hand freezes the world (M9 T3's lesson), and casting
+      // hands out xp.
       if (app.upgradeUi?.isOpen) app.upgradeUi.close?.();
     }
   };
@@ -123,6 +132,9 @@ await page.evaluate(() => {
     // exactly that reason. Clearing is safer than trying to free one seat.
     app.loadout.seats.fill(null);
     app.loadout._levels = Object.create(null);
+    // A previous aura row's ring must retire before the next skill measures —
+    // seats are empty now, so this sync is the retirement.
+    app._syncAuras?.();
     // acquire() returns the SEAT INDEX, and seat 0 is a perfectly good seat —
     // `if (!acquire(...))` reads a success into seat zero as a failure.
     if (app.loadout.acquire(element) === -1) throw new Error(`bp-report: acquire(${element}) failed`);
@@ -154,10 +166,24 @@ await page.evaluate(() => {
       }
     }
 
-    // Cast straight down +x. Everything is radially symmetric around the ring,
-    // so the bearing only matters for the directional shapes — and for those,
-    // +x is as good as any other.
-    app._quickCastToward(element, 12, 0, false);
+    // M12 T4: an aura is 装备即常驻 — it exists because it is SEATED, and a
+    // cast is a no-op for it. Seat-and-sync is the whole measurement; for
+    // everything else, cast straight down +x (radially symmetric ring, so
+    // the bearing only matters for directional shapes). Shields ride the
+    // cast path too: what the ring can see of them is their damage side
+    // (石肤's reflect, 冰甲's shatter), which needs bodies actually hitting
+    // the player — the ring's own seeking provides that, and the hp pin
+    // above keeps the owner alive through it.
+    // Only the PERMANENT rings (装备即常驻) measure by seating — 沙暴/环刃斩
+    // ride the aura combat kind but are timed CASTS, and the first cut of
+    // this branch swallowed 沙暴's cast whole: it went from 945 damage to a
+    // flat 0, which is the report un-measuring a skill it used to see.
+    if (window.__bpPermanent.has(element)) {
+      app._syncAuras?.();
+      pump(30); // let the ring stand up before the clock starts
+    } else {
+      app._quickCastToward(element, 12, 0, false);
+    }
 
     let maxSlow = 0;
     let maxSlowT = 0;
@@ -292,17 +318,17 @@ md += `
 
 这些空白与零是**量程问题,不是缺陷**——不要照着它们去改数值。
 
-1. **光环与护盾整技测不到**(剑域 / 冰晶甲 / 燃阵 / 日轮 全零)。光环是「装备即常驻」,
-   靠 \`_syncAuras()\` 落座而不是施放,\`_quickCastToward\` 对它是空操作;护盾与治疗
-   (\`amount\` / \`duration\` / \`healPlayer\` / \`reflectShare\`)只作用在玩家身上,靶场里没有玩家血量。
+1. **光环自 M12 T4 起测得到**(落座 + \`_syncAuras\` + 钉血 pump,而不是施放)。护盾行
+   看到的只是它的**伤害面**(石肤反噬、冰甲碎裂)——需要靶人真的打到玩家,数值随接触节奏
+   波动;纯护盾量(\`amount\` / \`duration\` / \`healPlayer\`)仍在量程外,那些行的空白照旧
+   不是缺陷。
 2. **「推开」这一列基本饱和**:假人不冻结,3 秒里的寻敌与互斥位移远大于技能的击退,
    所以几乎每行都读到 ~9.6m。**击退档不要看这一列**——要单独量。
 3. **靶场的环间距会吃掉小幅范围变化**:靶人只在 1.5/3/4.5/6/8/10/13/16 m 这八圈上。
    一个 2.2m 的爆炸放大到 3.08m,如果两圈之间没有人,命中数一动不动——
    陨石、落石、生命绽放、火弹的 \`radius\` 档出现 0% 多半是这个原因,不是读点死了。
-4. **\`count\` 档确实只加视觉**(剑雨 Lv3 / 剑域 Lv3 / 日轮 Lv3)。\`ZoneBurstSkill\` 与
-   \`OrbitAuraSkill\` 读 \`bpAdd('count')\` 决定画几把刀,而伤害在 CombatSystem 的
-   burst / aura 分支里、和刀刃数无关。**这一条是真的空头质变,不是量程问题。**
+4. ~~\`count\` 档只加视觉~~ —— M11 T0 已修:\`bpCountMult\` 从画出来的数量派生伤害倍率,
+   剑雨/剑域/日轮 的行现在直接量得到它(剑雨增势实测 +29%)。
 5. **落点型技能(zone cast)落在光标处**,而光标固定在 (12, 0)——那一带靶人稀疏,
    所以流火雨/石柱这类会读到 1~3 个命中,负的 Δ 是纯噪声。
 

@@ -399,6 +399,25 @@ The circle **snaps out past its radius and settles back** when the cast is armed
 the same thing when it lands. A circle that grows linearly reads as a UI element; one that
 overshoots reads as something the caster did.
 
+### The altar is the stele you already saw
+
+The five steles on the arena ring have glowed with the tides since the arena existed — pure
+scenery. Now the lit one is an altar: stand within three metres for a second and a half and it
+deals a directional hand of its element, once per tide. The trip is the cost — the steles sit on
+the 40 m ring, spawns land inside 26, and the walk is nine seconds each way out of a 180-second
+tide.
+
+Almost none of it is new machinery, which is the point. The position is `Arena`'s own bearing
+formula imported rather than retyped (the suite stands the player on Arena's spot and expects the
+altar to notice — one copy cannot drift); the reward rides the elite shard's `onShardHand` path,
+so the freeze gate, dead-run guard and empty-offer heal all come along with zero new App code; the
+channel is a duration in seconds that resets when you step out. A thin HUD bar appears only
+mid-ritual.
+
+Each character also opens the run knowing one thing (本命): the sorcerer — the roll character —
+starts with a level of 疾行, the classic with 活力. It rides `bumpPassive`, so a natal level and a
+drafted one are the same thing to every read site, caps included.
+
 ### The boss is a fourth behaviour
 
 `潮汐之主` arrives three tides into a run, and it is not a new kind of thing.
